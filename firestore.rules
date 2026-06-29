@@ -1,0 +1,130 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isLeagueMember(leagueId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid));
+    }
+
+    function leagueMemberRole(leagueId) {
+      return get(/databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isLeagueAdmin(leagueId) {
+      return isLeagueMember(leagueId) &&
+        leagueMemberRole(leagueId) in ['owner', 'admin'];
+    }
+
+    function isLeagueOwner(leagueId) {
+      return isLeagueMember(leagueId) && leagueMemberRole(leagueId) == 'owner';
+    }
+
+    function isSeasonMember(seasonId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/seasons/$(seasonId)/members/$(request.auth.uid));
+    }
+
+    function seasonLeagueId(seasonId) {
+      return get(/databases/$(database)/documents/seasons/$(seasonId)).data.leagueId;
+    }
+
+    function isSeasonAdmin(seasonId) {
+      return isLeagueAdmin(seasonLeagueId(seasonId));
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if request.auth.uid == uid;
+      allow write: if request.auth.uid == uid
+        && !('pinHash' in request.resource.data);
+    }
+
+    // ── Leagues ───────────────────────────────────────────────────────────────
+    match /leagues/{leagueId} {
+      allow read: if isLeagueMember(leagueId);
+      allow create: if isSignedIn();
+      allow update: if isLeagueAdmin(leagueId);
+      allow delete: if isLeagueOwner(leagueId);
+
+      match /members/{uid} {
+        allow read: if isLeagueMember(leagueId);
+        // Role changes (promote/demote) are owner-only
+        allow write: if isLeagueOwner(leagueId);
+        // Members can join via invite (Cloud Function writes via Admin SDK)
+      }
+    }
+
+    // ── Seasons ───────────────────────────────────────────────────────────────
+    match /seasons/{seasonId} {
+      allow read: if isSeasonMember(seasonId) || isLeagueMember(seasonLeagueId(seasonId));
+      allow create: if isSignedIn() &&
+        isLeagueAdmin(request.resource.data.leagueId);
+      // teamTotals / teamEpisodeTotals are written only by Cloud Functions (Admin SDK)
+      allow update: if isSeasonAdmin(seasonId);
+      allow delete: if false; // seasons are never deleted in MVP
+
+      match /members/{uid} {
+        allow read: if isSeasonMember(seasonId);
+        // Team name update — own record only
+        allow update: if request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamName']);
+        // Joining / position assignment handled by Cloud Function
+        allow write: if isSeasonAdmin(seasonId);
+      }
+
+      match /contestants/{contestantId} {
+        allow read: if isSeasonMember(seasonId);
+        allow write: if isSeasonAdmin(seasonId);
+      }
+
+      match /scoringRules/{ruleId} {
+        allow read: if isSeasonMember(seasonId);
+        allow write: if isSeasonAdmin(seasonId);
+      }
+
+      match /episodeScores/{episodeNumber} {
+        allow read: if isSeasonMember(seasonId);
+        allow write: if isSeasonAdmin(seasonId);
+
+        match /contestantScores/{contestantId} {
+          allow read: if isSeasonMember(seasonId);
+          allow write: if isSeasonAdmin(seasonId);
+        }
+      }
+
+      match /seasonAwards/{ruleId} {
+        allow read: if isSeasonMember(seasonId);
+        allow write: if isSeasonAdmin(seasonId);
+      }
+
+      match /draft/{draftId} {
+        allow read: if isSeasonMember(seasonId);
+        // Draft state transitions are admin-only
+        allow write: if isSeasonAdmin(seasonId);
+
+        match /picks/{pickId} {
+          allow read: if isSeasonMember(seasonId);
+          allow create: if isSeasonMember(seasonId) && (
+            // Own turn
+            request.auth.uid == get(/databases/$(database)/documents/seasons/$(seasonId)/draft/$(draftId)).data.currentPickerUid
+            // Or admin proxy pick
+            || isSeasonAdmin(seasonId)
+          );
+          allow update, delete: if false; // picks are append-only
+        }
+      }
+    }
+
+    // ── Audit Logs ────────────────────────────────────────────────────────────
+    match /auditLogs/{logId} {
+      allow read: if false;
+      allow write: if false; // written only via Admin SDK in Cloud Functions
+    }
+  }
+}
