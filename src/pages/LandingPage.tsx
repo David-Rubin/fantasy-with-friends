@@ -32,7 +32,9 @@ export function LandingPage() {
             <Button className="px-6">Get started</Button>
           </Link>
           <Link to="/login">
-            <Button variant="secondary" className="px-6">{t('auth.logIn')}</Button>
+            <Button variant="secondary" className="px-6">
+              {t('auth.logIn')}
+            </Button>
           </Link>
         </div>
       </main>

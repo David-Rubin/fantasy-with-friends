@@ -28,7 +28,7 @@ const resendPinFn = httpsCallable<{ email: string }, void>(functions, 'resendPin
 export async function signUp(
   displayName: string,
   email: string,
-  inviteCode?: string,
+  inviteCode?: string
 ): Promise<{ devPin?: string }> {
   if (IS_EMULATOR) {
     // Dev-only: create user directly, skip Cloud Function + email

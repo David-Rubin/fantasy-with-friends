@@ -1,17 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import {
-  doc,
-  getDoc,
-  onSnapshot,
-  collection,
-  updateDoc,
-  getDocs,
-  query,
-  orderBy,
-  setDoc,
-  addDoc,
-} from 'firebase/firestore'
+import { doc, getDoc, onSnapshot, collection, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
@@ -24,18 +13,15 @@ import type {
   SeasonMemberDoc,
   ScoringRuleDoc,
   EpisodeScoreDoc,
-  SeasonAwardDoc,
   MemberRole,
-  AccentColor,
   Contestant,
   ScoringRule,
 } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
-import { Input, Textarea } from '../components/Input'
+import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
-import { AccentColorPicker } from '../components/AccentColorPicker'
 
 type Tab = 'leaderboard' | 'roster' | 'freeAgents' | 'episodes' | 'awards'
 
@@ -55,8 +41,6 @@ export function SeasonDetailPage() {
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
-  const [awards, setAwards] = useState<SeasonAwardDoc[]>([])
-
   // Setup form state
   const [contestantForm, setContestantForm] = useState({ name: '', photoUrl: '', bio: '' })
   const [addingContestant, setAddingContestant] = useState(false)
@@ -83,7 +67,7 @@ export function SeasonDetailPage() {
     if (!seasonId) return
     const unsub = onSnapshot(doc(db, 'seasons', seasonId), (snap) => {
       if (snap.exists()) {
-        const data = { id: snap.id, ...snap.data() as SeasonDoc }
+        const data = { id: snap.id, ...(snap.data() as SeasonDoc) }
         setSeason(data)
         setDraftSettings({
           pickOrderMethod: data.pickOrderMethod,
@@ -102,7 +86,7 @@ export function SeasonDetailPage() {
         snap.docs.map(async (d) => {
           const userSnap = await getDoc(doc(db, 'users', d.id))
           const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-          return { uid: d.id, displayName, ...d.data() as SeasonMemberDoc }
+          return { uid: d.id, displayName, ...(d.data() as SeasonMemberDoc) }
         })
       )
       setMembers(list)
@@ -119,7 +103,7 @@ export function SeasonDetailPage() {
   useEffect(() => {
     if (!seasonId) return
     const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...d.data() as ContestantDoc })))
+      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
     })
     return unsub
   }, [seasonId])
@@ -127,7 +111,7 @@ export function SeasonDetailPage() {
   useEffect(() => {
     if (!seasonId) return
     const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'scoringRules'), (snap) => {
-      setRules(snap.docs.map((d) => ({ id: d.id, ...d.data() as ScoringRuleDoc })))
+      setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
     })
     return unsub
   }, [seasonId])
@@ -136,16 +120,10 @@ export function SeasonDetailPage() {
     if (!seasonId) return
     const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'episodeScores'), (snap) => {
       const statuses: Record<string, boolean> = {}
-      snap.docs.forEach((d) => { statuses[d.id] = (d.data() as EpisodeScoreDoc).locked })
+      snap.docs.forEach((d) => {
+        statuses[d.id] = (d.data() as EpisodeScoreDoc).locked
+      })
       setEpisodeStatuses(statuses)
-    })
-    return unsub
-  }, [seasonId])
-
-  useEffect(() => {
-    if (!seasonId) return
-    const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'seasonAwards'), (snap) => {
-      setAwards(snap.docs.map((d) => d.data() as SeasonAwardDoc))
     })
     return unsub
   }, [seasonId])
@@ -181,9 +159,10 @@ export function SeasonDetailPage() {
         name: ruleForm.name.trim(),
         points: parseFloat(ruleForm.points),
         scope: ruleForm.type === 'bonus_challenge' ? ruleForm.scope : null,
-        episodeNumbers: ruleForm.scope === 'specific_episodes'
-          ? ruleForm.episodeNumbers.split(',').map(Number).filter(Boolean)
-          : null,
+        episodeNumbers:
+          ruleForm.scope === 'specific_episodes'
+            ? ruleForm.episodeNumbers.split(',').map(Number).filter(Boolean)
+            : null,
       } satisfies ScoringRuleDoc)
       setRuleForm({ type: 'binary', name: '', points: '', scope: null, episodeNumbers: '' })
     } finally {
@@ -222,7 +201,12 @@ export function SeasonDetailPage() {
       draftedByUid: memberUid,
       draftedRound: null,
     })
-    await logAuditEvent({ action: 'free_agent_assigned', seasonId, contestantId, targetUid: memberUid })
+    await logAuditEvent({
+      action: 'free_agent_assigned',
+      seasonId,
+      contestantId,
+      targetUid: memberUid,
+    })
     setAssignFreeAgentOpen(null)
   }
 
@@ -253,7 +237,9 @@ export function SeasonDetailPage() {
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <nav className="text-sm text-gray-400 mb-1">
-            <Link to={`/leagues/${leagueId}`} className="hover:text-gray-600">{t('nav.dashboard')}</Link>
+            <Link to={`/leagues/${leagueId}`} className="hover:text-gray-600">
+              {t('nav.dashboard')}
+            </Link>
             {' / '}
             <span className="text-gray-700">{season.showName}</span>
           </nav>
@@ -311,7 +297,8 @@ export function SeasonDetailPage() {
               <ul className="mb-3 flex flex-col gap-1">
                 {rules.map((r) => (
                   <li key={r.id} className="text-sm text-gray-700">
-                    {r.name} · {r.points > 0 ? '+' : ''}{r.points} pts · {r.type}
+                    {r.name} · {r.points > 0 ? '+' : ''}
+                    {r.points} pts · {r.type}
                     {r.scope && ` · ${r.scope}`}
                   </li>
                 ))}
@@ -320,7 +307,9 @@ export function SeasonDetailPage() {
             <form onSubmit={handleAddRule} className="flex flex-col sm:flex-row gap-2 flex-wrap">
               <select
                 value={ruleForm.type}
-                onChange={(e) => setRuleForm((f) => ({ ...f, type: e.target.value as ScoringRuleDoc['type'] }))}
+                onChange={(e) =>
+                  setRuleForm((f) => ({ ...f, type: e.target.value as ScoringRuleDoc['type'] }))
+                }
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 aria-label={t('rules.type.binary')}
               >
@@ -347,7 +336,9 @@ export function SeasonDetailPage() {
               {ruleForm.type === 'bonus_challenge' && (
                 <select
                   value={ruleForm.scope ?? ''}
-                  onChange={(e) => setRuleForm((f) => ({ ...f, scope: e.target.value as ScoringRuleDoc['scope'] }))}
+                  onChange={(e) =>
+                    setRuleForm((f) => ({ ...f, scope: e.target.value as ScoringRuleDoc['scope'] }))
+                  }
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   aria-label="Scope"
                 >
@@ -372,7 +363,12 @@ export function SeasonDetailPage() {
                 <span className="text-xs font-medium text-gray-600">{t('draft.pickOrder')}</span>
                 <select
                   value={draftSettings.pickOrderMethod}
-                  onChange={(e) => setDraftSettings((s) => ({ ...s, pickOrderMethod: e.target.value as SeasonDoc['pickOrderMethod'] }))}
+                  onChange={(e) =>
+                    setDraftSettings((s) => ({
+                      ...s,
+                      pickOrderMethod: e.target.value as SeasonDoc['pickOrderMethod'],
+                    }))
+                  }
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="randomized">{t('draft.pickOrder.randomized')}</option>
@@ -380,13 +376,17 @@ export function SeasonDetailPage() {
                 </select>
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-gray-600">{t('draft.timerDuration')}</span>
+                <span className="text-xs font-medium text-gray-600">
+                  {t('draft.timerDuration')}
+                </span>
                 <input
                   type="number"
                   min={15}
                   max={300}
                   value={draftSettings.timerSeconds}
-                  onChange={(e) => setDraftSettings((s) => ({ ...s, timerSeconds: parseInt(e.target.value, 10) }))}
+                  onChange={(e) =>
+                    setDraftSettings((s) => ({ ...s, timerSeconds: parseInt(e.target.value, 10) }))
+                  }
                   className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </label>
@@ -394,7 +394,12 @@ export function SeasonDetailPage() {
                 <span className="text-xs font-medium text-gray-600">{t('draft.timerExpiry')}</span>
                 <select
                   value={draftSettings.timerExpiry}
-                  onChange={(e) => setDraftSettings((s) => ({ ...s, timerExpiry: e.target.value as SeasonDoc['timerExpiry'] }))}
+                  onChange={(e) =>
+                    setDraftSettings((s) => ({
+                      ...s,
+                      timerExpiry: e.target.value as SeasonDoc['timerExpiry'],
+                    }))
+                  }
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="auto-pick">{t('draft.timerExpiry.autoPick')}</option>
@@ -444,7 +449,8 @@ export function SeasonDetailPage() {
                 aria-selected={tab === key}
                 onClick={() => {
                   setTab(key)
-                  if (key === 'leaderboard') trackEvent('leaderboard_viewed', { season_id: seasonId ?? '' })
+                  if (key === 'leaderboard')
+                    trackEvent('leaderboard_viewed', { season_id: seasonId ?? '' })
                 }}
                 className={[
                   'px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
@@ -467,13 +473,17 @@ export function SeasonDetailPage() {
                 [...members]
                   .sort((a, b) => (season.teamTotals[b.uid] ?? 0) - (season.teamTotals[a.uid] ?? 0))
                   .map((member, idx) => {
-                    const scoredEpisodes = Object.keys(season.teamEpisodeTotals[member.uid] ?? {}).map(Number).sort((a, b) => a - b)
+                    const scoredEpisodes = Object.keys(season.teamEpisodeTotals[member.uid] ?? {})
+                      .map(Number)
+                      .sort((a, b) => a - b)
                     const lastEp = scoredEpisodes[scoredEpisodes.length - 1]
                     const prevEp = scoredEpisodes[scoredEpisodes.length - 2]
                     const delta =
                       lastEp !== undefined
                         ? (season.teamEpisodeTotals[member.uid]?.[lastEp] ?? 0) -
-                          (prevEp !== undefined ? season.teamEpisodeTotals[member.uid]?.[prevEp] ?? 0 : 0)
+                          (prevEp !== undefined
+                            ? (season.teamEpisodeTotals[member.uid]?.[prevEp] ?? 0)
+                            : 0)
                         : null
 
                     const teamContestants = contestants.filter((c) => c.draftedByUid === member.uid)
@@ -516,7 +526,9 @@ export function SeasonDetailPage() {
                     <tr key={c.id} className={c.eliminatedEpisode !== null ? 'opacity-50' : ''}>
                       <td className="py-3 font-medium text-gray-900">{c.name}</td>
                       <td className="py-3 text-gray-500">
-                        {c.draftedByUid ? (memberUidMap[c.draftedByUid]?.displayName ?? '—') : t('contestant.freeAgent')}
+                        {c.draftedByUid
+                          ? (memberUidMap[c.draftedByUid]?.displayName ?? '—')
+                          : t('contestant.freeAgent')}
                       </td>
                       <td className="py-3">
                         {c.eliminatedEpisode !== null ? (
@@ -539,7 +551,10 @@ export function SeasonDetailPage() {
                 <p className="text-gray-400">No free agents.</p>
               ) : (
                 freeAgents.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4">
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4"
+                  >
                     <span className="font-medium text-gray-900">{c.name}</span>
                     {isAdmin && (
                       <Button variant="secondary" onClick={() => setAssignFreeAgentOpen(c.id)}>
@@ -559,11 +574,18 @@ export function SeasonDetailPage() {
                 const scored = episodeStatuses[String(n)] !== undefined
                 const locked = episodeStatuses[String(n)]
                 return (
-                  <div key={n} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4">
+                  <div
+                    key={n}
+                    className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4"
+                  >
                     <div>
                       <p className="font-medium text-gray-900">Episode {n}</p>
                       <p className="text-xs text-gray-400">
-                        {!scored ? t('scoring.notScored') : locked ? t('scoring.submitted') : 'Unlocked for editing'}
+                        {!scored
+                          ? t('scoring.notScored')
+                          : locked
+                            ? t('scoring.submitted')
+                            : 'Unlocked for editing'}
                       </p>
                     </div>
                     {isAdmin && (

@@ -1,5 +1,6 @@
 import type {
   ScoringRuleDoc,
+  ScoringRule,
   ContestantScoreEntry,
   ContestantScoreDoc,
   SeasonAwardDoc,
@@ -8,11 +9,11 @@ import type {
 // ── Per-rule evaluators ───────────────────────────────────────────────────────
 
 export function evaluateRule(
-  rule: ScoringRuleDoc,
+  rule: ScoringRule,
   entry: ContestantScoreEntry,
-  contestantId: string,
+  contestantId: string
 ): number {
-  const value = entry[rule.id ?? '']
+  const value = entry[rule.id]
   switch (rule.type) {
     case 'binary':
       return value === true ? rule.points : 0
@@ -30,7 +31,7 @@ export function evaluateRule(
 export function calcContestantEpisodePoints(
   rules: (ScoringRuleDoc & { id: string })[],
   entry: ContestantScoreEntry,
-  contestantId: string,
+  contestantId: string
 ): number {
   return rules.reduce((sum, rule) => sum + evaluateRule(rule, entry, contestantId), 0)
 }
@@ -41,7 +42,7 @@ export function calcContestantTotal(
     episodeNumber: number
     scores: Record<string, ContestantScoreDoc>
     locked: boolean
-  }>,
+  }>
 ): number {
   return episodeScoreDocs.reduce((sum, ep) => {
     const scoreDoc = ep.scores[contestantId]
@@ -59,11 +60,11 @@ export function calcTeamTotal(
     locked: boolean
   }>,
   seasonAwards: SeasonAwardDoc[],
-  awardRules: (ScoringRuleDoc & { id: string })[],
+  awardRules: (ScoringRuleDoc & { id: string })[]
 ): number {
   const episodePoints = memberContestantIds.reduce(
     (sum, cid) => sum + calcContestantTotal(cid, episodeScoreDocs),
-    0,
+    0
   )
 
   const awardPoints = seasonAwards
@@ -86,7 +87,7 @@ export function calcTeamEpisodeTotals(
     locked: boolean
   }>,
   seasonAwards: SeasonAwardDoc[],
-  awardRules: (ScoringRuleDoc & { id: string })[],
+  awardRules: (ScoringRuleDoc & { id: string })[]
 ): Record<string, number> {
   const sorted = [...episodeScoreDocs].sort((a, b) => a.episodeNumber - b.episodeNumber)
   const awardPoints = seasonAwards
@@ -109,8 +110,7 @@ export function calcTeamEpisodeTotals(
   // Season awards are added to the final episode total
   const lastEp = sorted[sorted.length - 1]
   if (lastEp && awardPoints > 0) {
-    result[String(lastEp.episodeNumber)] =
-      (result[String(lastEp.episodeNumber)] ?? 0) + awardPoints
+    result[String(lastEp.episodeNumber)] = (result[String(lastEp.episodeNumber)] ?? 0) + awardPoints
   }
 
   return result

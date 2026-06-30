@@ -63,8 +63,16 @@ describe('evaluateRule', () => {
 describe('calcContestantTotal', () => {
   it('sums totalPoints across episodes', () => {
     const eps = [
-      { episodeNumber: 1, scores: { c1: { scores: {}, totalPoints: 5 } as ContestantScoreDoc }, locked: true },
-      { episodeNumber: 2, scores: { c1: { scores: {}, totalPoints: 3 } as ContestantScoreDoc }, locked: true },
+      {
+        episodeNumber: 1,
+        scores: { c1: { scores: {}, totalPoints: 5 } as ContestantScoreDoc },
+        locked: true,
+      },
+      {
+        episodeNumber: 2,
+        scores: { c1: { scores: {}, totalPoints: 3 } as ContestantScoreDoc },
+        locked: true,
+      },
     ]
     expect(calcContestantTotal('c1', eps)).toBe(8)
   })
@@ -88,7 +96,15 @@ describe('calcTeamTotal', () => {
   const awards: SeasonAwardDoc[] = [
     { ruleId: 'award1', contestantId: 'c1', awardedAt: 0, awardedBy: 'admin' },
   ]
-  const awardRules = [{ ...binaryRule, id: 'award1', points: 10, type: 'bonus_challenge' as const, scope: 'season_level' as const }]
+  const awardRules = [
+    {
+      ...binaryRule,
+      id: 'award1',
+      points: 10,
+      type: 'bonus_challenge' as const,
+      scope: 'season_level' as const,
+    },
+  ]
 
   it('sums episode points for team members', () => {
     expect(calcTeamTotal(['c1', 'c2'], episodes, [], [])).toBe(8)
@@ -105,8 +121,16 @@ describe('calcTeamTotal', () => {
 
 describe('calcTeamEpisodeTotals', () => {
   const episodes = [
-    { episodeNumber: 1, scores: { c1: { scores: {}, totalPoints: 4 } as ContestantScoreDoc }, locked: true },
-    { episodeNumber: 2, scores: { c1: { scores: {}, totalPoints: 6 } as ContestantScoreDoc }, locked: true },
+    {
+      episodeNumber: 1,
+      scores: { c1: { scores: {}, totalPoints: 4 } as ContestantScoreDoc },
+      locked: true,
+    },
+    {
+      episodeNumber: 2,
+      scores: { c1: { scores: {}, totalPoints: 6 } as ContestantScoreDoc },
+      locked: true,
+    },
   ]
 
   it('returns running cumulative totals per episode', () => {
@@ -116,8 +140,16 @@ describe('calcTeamEpisodeTotals', () => {
   })
 
   it('adds award points to last episode total', () => {
-    const awards: SeasonAwardDoc[] = [{ ruleId: 'a1', contestantId: 'c1', awardedAt: 0, awardedBy: 'u' }]
-    const awardRule = { ...binaryRule, id: 'a1', points: 5, type: 'bonus_challenge' as const, scope: 'season_level' as const }
+    const awards: SeasonAwardDoc[] = [
+      { ruleId: 'a1', contestantId: 'c1', awardedAt: 0, awardedBy: 'u' },
+    ]
+    const awardRule = {
+      ...binaryRule,
+      id: 'a1',
+      points: 5,
+      type: 'bonus_challenge' as const,
+      scope: 'season_level' as const,
+    }
     const result = calcTeamEpisodeTotals(['c1'], episodes, awards, [awardRule])
     expect(result['2']).toBe(15)
   })

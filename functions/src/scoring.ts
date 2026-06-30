@@ -26,7 +26,7 @@ export interface SeasonAwardDoc {
 export function evaluateRule(
   rule: ScoringRule,
   entry: ContestantScoreEntry,
-  contestantId: string,
+  contestantId: string
 ): number {
   const value = entry[rule.id]
   switch (rule.type) {
@@ -48,7 +48,7 @@ export function calcTeamTotal(
     scores: Record<string, ContestantScoreDoc>
   }>,
   seasonAwards: SeasonAwardDoc[],
-  awardRules: ScoringRule[],
+  awardRules: ScoringRule[]
 ): number {
   const episodePoints = memberContestantIds.reduce((sum, cid) => {
     return sum + episodeScoreDocs.reduce((s2, ep) => s2 + (ep.scores[cid]?.totalPoints ?? 0), 0)
@@ -71,7 +71,7 @@ export function calcTeamEpisodeTotals(
     scores: Record<string, ContestantScoreDoc>
   }>,
   seasonAwards: SeasonAwardDoc[],
-  awardRules: ScoringRule[],
+  awardRules: ScoringRule[]
 ): Record<string, number> {
   const sorted = [...episodeScoreDocs].sort((a, b) => a.episodeNumber - b.episodeNumber)
   const awardPoints = seasonAwards
@@ -86,7 +86,7 @@ export function calcTeamEpisodeTotals(
   for (const ep of sorted) {
     const epPoints = memberContestantIds.reduce(
       (sum, cid) => sum + (ep.scores[cid]?.totalPoints ?? 0),
-      0,
+      0
     )
     running += epPoints
     result[String(ep.episodeNumber)] = running

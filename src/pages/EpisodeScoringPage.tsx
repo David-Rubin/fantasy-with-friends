@@ -1,14 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import {
-  doc,
-  onSnapshot,
-  collection,
-  updateDoc,
-  setDoc,
-  writeBatch,
-  getDoc,
-} from 'firebase/firestore'
+import { doc, onSnapshot, collection, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
@@ -43,7 +35,6 @@ export function EpisodeScoringPage() {
   const [contestants, setContestants] = useState<Contestant[]>([])
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [existingScore, setExistingScore] = useState<EpisodeScoreDoc | null>(null)
-  const [existingScores, setExistingScores] = useState<Record<string, ContestantScoreDoc>>({})
 
   // Form state: contestantId -> ruleId -> value
   const [scores, setScores] = useState<Record<string, ContestantScoreEntry>>({})
@@ -64,14 +55,14 @@ export function EpisodeScoringPage() {
   useEffect(() => {
     if (!seasonId) return
     return onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...d.data() as ContestantDoc })))
+      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
     })
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
     return onSnapshot(collection(db, 'seasons', seasonId, 'scoringRules'), (snap) => {
-      setRules(snap.docs.map((d) => ({ id: d.id, ...d.data() as ScoringRuleDoc })))
+      setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
     })
   }, [seasonId])
 
@@ -79,23 +70,24 @@ export function EpisodeScoringPage() {
     if (!seasonId || !episodeNumber) return
     const epDoc = doc(db, 'seasons', seasonId, 'episodeScores', episodeNumber)
     const unsubEp = onSnapshot(epDoc, (snap) => {
-      setExistingScore(snap.exists() ? snap.data() as EpisodeScoreDoc : null)
+      setExistingScore(snap.exists() ? (snap.data() as EpisodeScoreDoc) : null)
     })
 
     const unsubScores = onSnapshot(
       collection(db, 'seasons', seasonId, 'episodeScores', episodeNumber, 'contestantScores'),
       (snap) => {
         const map: Record<string, ContestantScoreDoc> = {}
-        snap.docs.forEach((d) => { map[d.id] = d.data() as ContestantScoreDoc })
-        setExistingScores(map)
-        // Pre-fill form
-        setScores(Object.fromEntries(
-          Object.entries(map).map(([cid, sc]) => [cid, sc.scores])
-        ))
+        snap.docs.forEach((d) => {
+          map[d.id] = d.data() as ContestantScoreDoc
+        })
+        setScores(Object.fromEntries(Object.entries(map).map(([cid, sc]) => [cid, sc.scores])))
       }
     )
 
-    return () => { unsubEp(); unsubScores() }
+    return () => {
+      unsubEp()
+      unsubScores()
+    }
   }, [seasonId, episodeNumber])
 
   // Active contestants for this episode (not eliminated before this episode)
@@ -143,7 +135,15 @@ export function EpisodeScoringPage() {
         const entry = scores[contestant.id] ?? {}
         const totalPoints = calcTotalForContestant(contestant.id)
         batch.set(
-          doc(db, 'seasons', seasonId, 'episodeScores', episodeNumber, 'contestantScores', contestant.id),
+          doc(
+            db,
+            'seasons',
+            seasonId,
+            'episodeScores',
+            episodeNumber,
+            'contestantScores',
+            contestant.id
+          ),
           { scores: entry, totalPoints } satisfies ContestantScoreDoc
         )
 
@@ -200,9 +200,17 @@ export function EpisodeScoringPage() {
             <tr className="border-b border-gray-200">
               <th className="py-3 pr-4 text-left font-medium text-gray-500">Contestant</th>
               {episodeRules.map((rule) => (
-                <th key={rule.id} className="py-3 px-3 text-center font-medium text-gray-500 max-w-[120px]">
-                  <span className="block truncate" title={rule.name}>{rule.name}</span>
-                  <span className="text-xs text-gray-400">({rule.points > 0 ? '+' : ''}{rule.points})</span>
+                <th
+                  key={rule.id}
+                  className="py-3 px-3 text-center font-medium text-gray-500 max-w-[120px]"
+                >
+                  <span className="block truncate" title={rule.name}>
+                    {rule.name}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    ({rule.points > 0 ? '+' : ''}
+                    {rule.points})
+                  </span>
                 </th>
               ))}
               <th className="py-3 pl-3 text-center font-medium text-gray-500">Pts</th>
@@ -239,7 +247,9 @@ export function EpisodeScoringPage() {
                           step={0.5}
                           value={typeof val === 'number' ? val : ''}
                           disabled={isLocked}
-                          onChange={(e) => setScore(contestant.id, rule.id, parseFloat(e.target.value) || 0)}
+                          onChange={(e) =>
+                            setScore(contestant.id, rule.id, parseFloat(e.target.value) || 0)
+                          }
                           className="w-16 rounded border border-gray-300 px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                           aria-label={`${rule.name} for ${contestant.name}`}
                         />
@@ -308,11 +318,14 @@ export function EpisodeScoringPage() {
         })}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setEliminationConfirm(null)}>{t('common.cancel')}</Button>
+            <Button variant="secondary" onClick={() => setEliminationConfirm(null)}>
+              {t('common.cancel')}
+            </Button>
             <Button
               variant="danger"
               onClick={() => {
-                if (eliminationConfirm) setEliminations((prev) => ({ ...prev, [eliminationConfirm]: true }))
+                if (eliminationConfirm)
+                  setEliminations((prev) => ({ ...prev, [eliminationConfirm]: true }))
                 setEliminationConfirm(null)
               }}
             >
@@ -331,15 +344,25 @@ export function EpisodeScoringPage() {
         title={t('scoring.submitConfirm', { n: epNum })}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setSubmitConfirm(false)}>{t('common.cancel')}</Button>
-            <Button loading={submitting} onClick={handleSubmit}>{t('common.confirm')}</Button>
+            <Button variant="secondary" onClick={() => setSubmitConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={submitting} onClick={handleSubmit}>
+              {t('common.confirm')}
+            </Button>
           </>
         }
       >
         <p className="text-gray-600">
           Scores will be submitted for {activeContestants.length} contestants.
           {Object.values(eliminations).some(Boolean) && (
-            <> <span className="text-red-600 font-medium">{Object.values(eliminations).filter(Boolean).length} contestant(s) will be marked as eliminated.</span></>
+            <>
+              {' '}
+              <span className="text-red-600 font-medium">
+                {Object.values(eliminations).filter(Boolean).length} contestant(s) will be marked as
+                eliminated.
+              </span>
+            </>
           )}
         </p>
       </Modal>
@@ -351,8 +374,12 @@ export function EpisodeScoringPage() {
         title={t('scoring.unlockConfirm', { n: epNum })}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setUnlockConfirm(false)}>{t('common.cancel')}</Button>
-            <Button variant="danger" onClick={handleUnlock}>{t('scoring.unlockEpisode')}</Button>
+            <Button variant="secondary" onClick={() => setUnlockConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" onClick={handleUnlock}>
+              {t('scoring.unlockEpisode')}
+            </Button>
           </>
         }
       >

@@ -21,7 +21,11 @@ interface AccentColorPickerProps {
   label?: string
 }
 
-export function AccentColorPicker({ value, onChange, label = 'Accent color' }: AccentColorPickerProps) {
+export function AccentColorPicker({
+  value,
+  onChange,
+  label = 'Accent color',
+}: AccentColorPickerProps) {
   return (
     <fieldset>
       <legend className="mb-2 text-sm font-medium text-gray-700">{label}</legend>
@@ -36,7 +40,9 @@ export function AccentColorPicker({ value, onChange, label = 'Accent color' }: A
             className={[
               'h-8 w-8 rounded-full transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
               color.bg,
-              value === color.value ? `ring-2 ring-offset-2 ${color.ring} scale-110` : 'hover:scale-105',
+              value === color.value
+                ? `ring-2 ring-offset-2 ${color.ring} scale-110`
+                : 'hover:scale-105',
             ].join(' ')}
           />
         ))}

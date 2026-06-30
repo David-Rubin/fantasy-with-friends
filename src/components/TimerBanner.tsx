@@ -35,11 +35,7 @@ export function TimerBanner({
   const isLow = secondsLeft <= 10
   const isCritical = secondsLeft <= 5
 
-  const barColor = isCritical
-    ? 'bg-red-500'
-    : isLow
-      ? 'bg-amber-500'
-      : 'bg-blue-500'
+  const barColor = isCritical ? 'bg-red-500' : isLow ? 'bg-amber-500' : 'bg-blue-500'
 
   const bannerBg = isCritical
     ? 'bg-red-50 border-red-200'
@@ -51,7 +47,9 @@ export function TimerBanner({
     <div className={`rounded-xl border px-4 py-3 ${bannerBg}`} role="status" aria-live="polite">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-semibold text-gray-800">
-          {isYourTurn ? t('draft.active.youArePicking') : t('draft.active.nowPicking', { name: pickerName })}
+          {isYourTurn
+            ? t('draft.active.youArePicking')
+            : t('draft.active.nowPicking', { name: pickerName })}
         </span>
         {timerExpiresAt && (
           <span

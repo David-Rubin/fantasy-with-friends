@@ -1,14 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import {
-  doc,
-  onSnapshot,
-  collection,
-  updateDoc,
-  addDoc,
-  setDoc,
-  getDoc,
-} from 'firebase/firestore'
+import { doc, onSnapshot, collection, updateDoc, addDoc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
@@ -23,7 +15,7 @@ import type {
   MemberRole,
   Contestant,
 } from '../lib/types'
-import { SnakeDraftStrategy, resolvePickOrder, advancePick } from '../lib/draft'
+import { resolvePickOrder, advancePick } from '../lib/draft'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
@@ -78,7 +70,7 @@ export function DraftRoomPage() {
   useEffect(() => {
     if (!seasonId) return
     return onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...d.data() as ContestantDoc })))
+      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
     })
   }, [seasonId])
 
@@ -96,8 +88,6 @@ export function DraftRoomPage() {
   const isAdmin = myRole === 'owner' || myRole === 'admin'
   const isMyTurn = draft?.status === 'active' && draft.currentPickerUid === user?.uid
 
-  const strategy = new SnakeDraftStrategy()
-  const draftedIds = new Set(contestants.filter((c) => c.draftedByUid).map((c) => c.id))
   const available = contestants.filter((c) => !c.draftedByUid && c.eliminatedEpisode === null)
   const drafted = contestants.filter((c) => c.draftedByUid)
 
@@ -143,6 +133,7 @@ export function DraftRoomPage() {
       actingAdminUid: onBehalfOf ? user.uid : null,
       round: draft.currentRound,
       pickNumber: draft.currentPickNumber,
+      // eslint-disable-next-line react-hooks/purity
       timestamp: Date.now(),
     })
 
@@ -166,7 +157,11 @@ export function DraftRoomPage() {
     const remainingCount = available.length - 1
     if (remainingCount === 0) {
       // Draft complete
-      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
+        status: 'complete',
+        currentPickerUid: null,
+        timerExpiresAt: null,
+      })
       await updateDoc(doc(db, 'seasons', seasonId), { state: 'active' })
       trackEvent('draft_completed', { season_id: seasonId, total_picks: contestants.length - 1 })
       return
@@ -181,20 +176,26 @@ export function DraftRoomPage() {
     })
 
     if (!next) {
-      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
+        status: 'complete',
+        currentPickerUid: null,
+        timerExpiresAt: null,
+      })
       await updateDoc(doc(db, 'seasons', seasonId), { state: 'active' })
       return
     }
 
-    const nextPickerIdx = next.currentRound % 2 === 0
-      ? draft.pickOrder.length - next.currentPickNumber
-      : next.currentPickNumber - 1
+    const nextPickerIdx =
+      next.round % 2 === 0
+        ? draft.pickOrder.length - next.pickNumber
+        : next.pickNumber - 1
     const nextPickerUid = draft.pickOrder[nextPickerIdx]
 
     await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
       currentRound: next.round,
       currentPickNumber: next.pickNumber,
       currentPickerUid: nextPickerUid,
+      // eslint-disable-next-line react-hooks/purity
       timerExpiresAt: Date.now() + (season?.timerSeconds ?? 60) * 1000,
     })
   }
@@ -227,7 +228,9 @@ export function DraftRoomPage() {
   return (
     <Layout>
       <div className="mb-4">
-        <h1 className="text-xl font-bold text-gray-900">{season.showName} — {t('dashboard.joinDraft')}</h1>
+        <h1 className="text-xl font-bold text-gray-900">
+          {season.showName} — {t('dashboard.joinDraft')}
+        </h1>
       </div>
 
       {/* Draft complete */}
@@ -236,7 +239,10 @@ export function DraftRoomPage() {
           <p className="text-lg font-semibold text-green-800">
             {t('draft.complete.banner', { teamName: myMember?.teamName ?? '' })}
           </p>
-          <Button className="mt-4" onClick={() => navigate(`/leagues/${leagueId}/seasons/${seasonId}`)}>
+          <Button
+            className="mt-4"
+            onClick={() => navigate(`/leagues/${leagueId}/seasons/${seasonId}`)}
+          >
             {t('draft.complete.viewSeason')}
           </Button>
         </div>
@@ -251,7 +257,9 @@ export function DraftRoomPage() {
               <div key={m.uid} className="flex items-center justify-between text-sm">
                 <span className="font-medium text-gray-800">{m.displayName}</span>
                 {m.pickPosition && (
-                  <span className="text-gray-400">{t('draft.lobby.yourPosition', { n: m.pickPosition })}</span>
+                  <span className="text-gray-400">
+                    {t('draft.lobby.yourPosition', { n: m.pickPosition })}
+                  </span>
                 )}
               </div>
             ))}
@@ -286,9 +294,11 @@ export function DraftRoomPage() {
                     key={c.id}
                     contestant={c}
                     canPick={isMyTurn}
-                    canPickFor={isAdmin && !isMyTurn && draft.currentPickerUid
-                      ? (members.find((m) => m.uid === draft.currentPickerUid)?.displayName)
-                      : undefined}
+                    canPickFor={
+                      isAdmin && !isMyTurn && draft.currentPickerUid
+                        ? members.find((m) => m.uid === draft.currentPickerUid)?.displayName
+                        : undefined
+                    }
                     onPick={() => handlePick(c.id)}
                     onPickFor={() => handlePick(c.id, draft.currentPickerUid ?? undefined)}
                   />
@@ -304,11 +314,7 @@ export function DraftRoomPage() {
                     {drafted.map((c) => {
                       const owner = members.find((m) => m.uid === c.draftedByUid)
                       return (
-                        <ContestantCard
-                          key={c.id}
-                          contestant={c}
-                          ownerName={owner?.displayName}
-                        />
+                        <ContestantCard key={c.id} contestant={c} ownerName={owner?.displayName} />
                       )
                     })}
                   </div>
@@ -351,7 +357,9 @@ export function DraftRoomPage() {
                             </button>
                           </div>
                         ) : (
-                          <p className="text-sm font-semibold text-gray-800 mb-2">{member.teamName}</p>
+                          <p className="text-sm font-semibold text-gray-800 mb-2">
+                            {member.teamName}
+                          </p>
                         )}
                         <p className="text-xs text-gray-400 mb-2">{member.displayName}</p>
                         {teamContestants.length === 0 ? (
@@ -359,7 +367,9 @@ export function DraftRoomPage() {
                         ) : (
                           <ul className="flex flex-col gap-1">
                             {teamContestants.map((c) => (
-                              <li key={c.id} className="text-xs text-gray-700">• {c.name}</li>
+                              <li key={c.id} className="text-xs text-gray-700">
+                                • {c.name}
+                              </li>
                             ))}
                           </ul>
                         )}

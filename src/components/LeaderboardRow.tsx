@@ -48,7 +48,9 @@ export function LeaderboardRow({
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <div className={`rounded-xl border-l-4 border border-gray-200 bg-white shadow-sm ${accentBorder[accentColor]}`}>
+    <div
+      className={`rounded-xl border-l-4 border border-gray-200 bg-white shadow-sm ${accentBorder[accentColor]}`}
+    >
       <button
         type="button"
         className="flex w-full items-center gap-4 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 rounded-xl"
@@ -63,7 +65,9 @@ export function LeaderboardRow({
         <div className="text-right flex-shrink-0">
           <p className="font-bold text-gray-900">{totalPoints} pts</p>
           {delta !== null && (
-            <p className={`text-xs ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+            <p
+              className={`text-xs ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}`}
+            >
               {delta > 0 ? `+${delta}` : delta === 0 ? '—' : delta} this ep
             </p>
           )}
@@ -90,18 +94,25 @@ export function LeaderboardRow({
                 <tr className="text-left text-gray-400">
                   <th className="pb-2 font-medium">Contestant</th>
                   {episodeNumbers.map((n) => (
-                    <th key={n} className="pb-2 px-2 font-medium text-center">Ep {n}</th>
+                    <th key={n} className="pb-2 px-2 font-medium text-center">
+                      Ep {n}
+                    </th>
                   ))}
                   <th className="pb-2 px-2 font-medium text-right">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {contestants.map(({ contestant, totalPoints: cTotal, episodePoints }) => (
-                  <tr key={contestant.id} className={contestant.eliminatedEpisode !== null ? 'opacity-40' : ''}>
+                  <tr
+                    key={contestant.id}
+                    className={contestant.eliminatedEpisode !== null ? 'opacity-40' : ''}
+                  >
                     <td className="py-1.5 pr-2 font-medium text-gray-700">
                       <span>{contestant.name}</span>
                       {contestant.eliminatedEpisode !== null && (
-                        <Badge variant="eliminated" aria-label={t('contestant.eliminated')}>{t('contestant.eliminated')}</Badge>
+                        <Badge variant="eliminated" aria-label={t('contestant.eliminated')}>
+                          {t('contestant.eliminated')}
+                        </Badge>
                       )}
                     </td>
                     {episodeNumbers.map((n) => (

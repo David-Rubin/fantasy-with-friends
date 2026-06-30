@@ -9,8 +9,18 @@ export type DraftStatus = 'lobby' | 'active' | 'complete'
 export type ScoringRuleType = 'binary' | 'numeric' | 'bonus_challenge'
 export type BonusChallengeScope = 'per_episode' | 'specific_episodes' | 'season_level'
 export type AccentColor =
-  | 'violet' | 'purple' | 'pink' | 'rose' | 'orange' | 'amber'
-  | 'emerald' | 'teal' | 'cyan' | 'blue' | 'indigo' | 'slate'
+  | 'violet'
+  | 'purple'
+  | 'pink'
+  | 'rose'
+  | 'orange'
+  | 'amber'
+  | 'emerald'
+  | 'teal'
+  | 'cyan'
+  | 'blue'
+  | 'indigo'
+  | 'slate'
 
 // ── Firestore document shapes ─────────────────────────────────────────────────
 
@@ -75,7 +85,7 @@ export interface ScoringRuleDoc {
   name: string
   points: number
   scope: BonusChallengeScope | null // only relevant for bonus_challenge type
-  episodeNumbers: number[] | null   // only when scope = specific_episodes
+  episodeNumbers: number[] | null // only when scope = specific_episodes
 }
 
 export interface EpisodeScoreDoc {
@@ -132,10 +142,24 @@ export interface AuditLogDoc {
 
 // ── Client-side enriched types (doc + id) ────────────────────────────────────
 
-export interface League extends LeagueDoc { id: string }
-export interface LeagueMember extends LeagueMemberDoc { uid: string }
-export interface Season extends SeasonDoc { id: string }
-export interface SeasonMember extends SeasonMemberDoc { uid: string }
-export interface Contestant extends ContestantDoc { id: string }
-export interface ScoringRule extends ScoringRuleDoc { id: string }
-export interface DraftPick extends DraftPickDoc { id: string }
+export interface League extends LeagueDoc {
+  id: string
+}
+export interface LeagueMember extends LeagueMemberDoc {
+  uid: string
+}
+export interface Season extends SeasonDoc {
+  id: string
+}
+export interface SeasonMember extends SeasonMemberDoc {
+  uid: string
+}
+export interface Contestant extends ContestantDoc {
+  id: string
+}
+export interface ScoringRule extends ScoringRuleDoc {
+  id: string
+}
+export interface DraftPick extends DraftPickDoc {
+  id: string
+}

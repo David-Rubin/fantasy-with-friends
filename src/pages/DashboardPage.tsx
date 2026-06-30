@@ -22,7 +22,7 @@ import { Modal } from '../components/Modal'
 import { Input, Textarea } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { Badge } from '../components/Badge'
-import type { LeagueDoc, LeagueMember, SeasonDoc } from '../lib/types'
+import type { LeagueDoc, LeagueMemberDoc, SeasonDoc } from '../lib/types'
 import type { AccentColor } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
@@ -31,12 +31,6 @@ interface LeagueWithSeason {
   id: string
   league: LeagueDoc
   latestSeason: (SeasonDoc & { id: string }) | null
-}
-
-function generateCode(len = 6) {
-  return Array.from(crypto.getRandomValues(new Uint8Array(len)))
-    .map((b) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32])
-    .join('')
 }
 
 export function DashboardPage() {
@@ -54,36 +48,40 @@ export function DashboardPage() {
     if (!user) return
 
     // Watch all member sub-collection docs where this user is a member
-    const unsubscribe = onSnapshot(
-      collectionGroup(db, 'members'),
-      async (snap) => {
-        const leagueIds = new Set<string>()
-        snap.docs.forEach((d) => {
-          // Only direct league/members/{uid} docs (not season members)
-          if (d.id === user.uid && d.ref.parent.parent?.parent?.path === undefined) {
-            const leagueId = d.ref.parent.parent?.id
-            if (leagueId) leagueIds.add(leagueId)
-          }
-        })
-
-        const results: LeagueWithSeason[] = []
-        for (const leagueId of leagueIds) {
-          const leagueSnap = await getDoc(doc(db, 'leagues', leagueId))
-          if (!leagueSnap.exists()) continue
-          const league = leagueSnap.data() as LeagueDoc
-
-          // Get latest season
-          const seasonsSnap = await getDocs(query(collection(db, 'seasons'), where('leagueId', '==', leagueId), orderBy('createdAt', 'desc'), limit(1)))
-          const latestSeason = seasonsSnap.empty
-            ? null
-            : { id: seasonsSnap.docs[0].id, ...seasonsSnap.docs[0].data() as SeasonDoc }
-
-          results.push({ id: leagueId, league, latestSeason })
+    const unsubscribe = onSnapshot(collectionGroup(db, 'members'), async (snap) => {
+      const leagueIds = new Set<string>()
+      snap.docs.forEach((d) => {
+        // Only direct league/members/{uid} docs (not season members)
+        if (d.id === user.uid && d.ref.parent.parent?.parent?.path === undefined) {
+          const leagueId = d.ref.parent.parent?.id
+          if (leagueId) leagueIds.add(leagueId)
         }
-        setLeagues(results)
-        setLoading(false)
-      },
-    )
+      })
+
+      const results: LeagueWithSeason[] = []
+      for (const leagueId of leagueIds) {
+        const leagueSnap = await getDoc(doc(db, 'leagues', leagueId))
+        if (!leagueSnap.exists()) continue
+        const league = leagueSnap.data() as LeagueDoc
+
+        // Get latest season
+        const seasonsSnap = await getDocs(
+          query(
+            collection(db, 'seasons'),
+            where('leagueId', '==', leagueId),
+            orderBy('createdAt', 'desc'),
+            limit(1)
+          )
+        )
+        const latestSeason = seasonsSnap.empty
+          ? null
+          : { id: seasonsSnap.docs[0].id, ...(seasonsSnap.docs[0].data() as SeasonDoc) }
+
+        results.push({ id: leagueId, league, latestSeason })
+      }
+      setLeagues(results)
+      setLoading(false)
+    })
 
     return unsubscribe
   }, [user])
@@ -104,7 +102,7 @@ export function DashboardPage() {
       await setDoc(doc(db, 'leagues', leagueRef.id, 'members', user.uid), {
         role: 'owner',
         joinedAt: Date.now(),
-      } satisfies LeagueMember)
+      } satisfies LeagueMemberDoc)
 
       trackEvent('league_created')
       setCreateOpen(false)
@@ -120,7 +118,11 @@ export function DashboardPage() {
 
   // Find the most recently updated active/draft season across all leagues
   const featuredSeason = leagues
-    .flatMap((l) => (l.latestSeason && ['active', 'draft'].includes(l.latestSeason.state) ? [{ ...l, season: l.latestSeason }] : []))
+    .flatMap((l) =>
+      l.latestSeason && ['active', 'draft'].includes(l.latestSeason.state)
+        ? [{ ...l, season: l.latestSeason }]
+        : []
+    )
     .sort((a, b) => (b.season.createdAt ?? 0) - (a.season.createdAt ?? 0))[0]
 
   return (
@@ -136,17 +138,23 @@ export function DashboardPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <Badge accent={featuredSeason.season.accentColor}>
-                {featuredSeason.season.state === 'draft' ? t('season.states.draft') : t('season.states.active')}
+                {featuredSeason.season.state === 'draft'
+                  ? t('season.states.draft')
+                  : t('season.states.active')}
               </Badge>
-              <h2 className="mt-2 text-xl font-semibold text-gray-900">{featuredSeason.season.showName}</h2>
+              <h2 className="mt-2 text-xl font-semibold text-gray-900">
+                {featuredSeason.season.showName}
+              </h2>
               <p className="text-sm text-gray-500">{featuredSeason.season.label}</p>
-              <p className="mt-1 text-sm text-gray-500">
-                {featuredSeason.league.name}
-              </p>
+              <p className="mt-1 text-sm text-gray-500">{featuredSeason.league.name}</p>
             </div>
-            <Link to={`/leagues/${featuredSeason.id}/seasons/${featuredSeason.latestSeason!.id}${featuredSeason.season.state === 'draft' ? '/draft' : ''}`}>
+            <Link
+              to={`/leagues/${featuredSeason.id}/seasons/${featuredSeason.latestSeason!.id}${featuredSeason.season.state === 'draft' ? '/draft' : ''}`}
+            >
               <Button>
-                {featuredSeason.season.state === 'draft' ? t('dashboard.joinDraft') : t('dashboard.viewSeason')}
+                {featuredSeason.season.state === 'draft'
+                  ? t('dashboard.joinDraft')
+                  : t('dashboard.viewSeason')}
               </Button>
             </Link>
           </div>
@@ -175,7 +183,9 @@ export function DashboardPage() {
               <div>
                 <p className="font-semibold text-gray-900">{league.name}</p>
                 {latestSeason && (
-                  <p className="text-sm text-gray-500">{latestSeason.showName} · {latestSeason.label}</p>
+                  <p className="text-sm text-gray-500">
+                    {latestSeason.showName} · {latestSeason.label}
+                  </p>
                 )}
               </div>
               {latestSeason && (
@@ -195,8 +205,12 @@ export function DashboardPage() {
         title={t('league.create')}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Button>
-            <Button form="create-league-form" type="submit" loading={creating}>{t('league.create')}</Button>
+            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button form="create-league-form" type="submit" loading={creating}>
+              {t('league.create')}
+            </Button>
           </>
         }
       >

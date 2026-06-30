@@ -98,7 +98,10 @@ export function LoginPage() {
 
         <p className="mt-4 text-center text-sm text-gray-500">
           {t('auth.noAccount')}{' '}
-          <Link to="/signup" className="text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+          <Link
+            to="/signup"
+            className="text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+          >
             {t('auth.signUp')}
           </Link>
         </p>

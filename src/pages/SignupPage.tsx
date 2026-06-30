@@ -6,8 +6,6 @@ import { signUp } from '../lib/auth'
 import { trackEvent } from '../lib/analytics'
 import { t } from '../lib/i18n'
 
-const IS_EMULATOR = import.meta.env.VITE_USE_EMULATOR === 'true'
-
 export function SignupPage() {
   const navigate = useNavigate()
   const [displayName, setDisplayName] = useState('')
@@ -51,9 +49,21 @@ export function SignupPage() {
 
         {devPin && (
           <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-4">
-            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">Dev mode — your PIN</p>
+            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">
+              Dev mode — your PIN
+            </p>
             <p className="text-3xl font-mono font-bold text-amber-900 tracking-widest">{devPin}</p>
-            <p className="text-xs text-amber-600 mt-2">Copy this PIN, then <button type="button" className="underline font-medium" onClick={() => navigate('/login')}>log in</button>.</p>
+            <p className="text-xs text-amber-600 mt-2">
+              Copy this PIN, then{' '}
+              <button
+                type="button"
+                className="underline font-medium"
+                onClick={() => navigate('/login')}
+              >
+                log in
+              </button>
+              .
+            </p>
           </div>
         )}
 
@@ -82,7 +92,10 @@ export function SignupPage() {
         </form>
         <p className="mt-4 text-center text-sm text-gray-500">
           {t('auth.alreadyHaveAccount')}{' '}
-          <Link to="/login" className="text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+          <Link
+            to="/login"
+            className="text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+          >
             {t('auth.logIn')}
           </Link>
         </p>

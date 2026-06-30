@@ -24,7 +24,11 @@ export function Input({ label, error, hint, id, className = '', ...props }: Inpu
     <div className="flex flex-col gap-1">
       <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
         {label}
-        {props.required && <span aria-hidden="true" className="ml-1 text-red-500">*</span>}
+        {props.required && (
+          <span aria-hidden="true" className="ml-1 text-red-500">
+            *
+          </span>
+        )}
       </label>
       {hint && (
         <p id={hintId} className="text-xs text-gray-500">
@@ -34,9 +38,13 @@ export function Input({ label, error, hint, id, className = '', ...props }: Inpu
       <input
         id={inputId}
         aria-required={props.required}
-        aria-describedby={[error ? errorId : '', hint ? hintId : ''].filter(Boolean).join(' ') || undefined}
+        aria-describedby={
+          [error ? errorId : '', hint ? hintId : ''].filter(Boolean).join(' ') || undefined
+        }
         aria-invalid={!!error}
-        className={[inputBase, error ? 'border-red-500 focus:ring-red-500/20' : '', className].join(' ')}
+        className={[inputBase, error ? 'border-red-500 focus:ring-red-500/20' : '', className].join(
+          ' '
+        )}
         {...props}
       />
       {error && (
@@ -57,7 +65,11 @@ export function Textarea({ label, error, hint, id, className = '', ...props }: T
     <div className="flex flex-col gap-1">
       <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
         {label}
-        {props.required && <span aria-hidden="true" className="ml-1 text-red-500">*</span>}
+        {props.required && (
+          <span aria-hidden="true" className="ml-1 text-red-500">
+            *
+          </span>
+        )}
       </label>
       {hint && (
         <p id={hintId} className="text-xs text-gray-500">
@@ -67,10 +79,17 @@ export function Textarea({ label, error, hint, id, className = '', ...props }: T
       <textarea
         id={inputId}
         aria-required={props.required}
-        aria-describedby={[error ? errorId : '', hint ? hintId : ''].filter(Boolean).join(' ') || undefined}
+        aria-describedby={
+          [error ? errorId : '', hint ? hintId : ''].filter(Boolean).join(' ') || undefined
+        }
         aria-invalid={!!error}
         rows={3}
-        className={[inputBase, error ? 'border-red-500 focus:ring-red-500/20' : '', 'resize-y', className].join(' ')}
+        className={[
+          inputBase,
+          error ? 'border-red-500 focus:ring-red-500/20' : '',
+          'resize-y',
+          className,
+        ].join(' ')}
         {...props}
       />
       {error && (

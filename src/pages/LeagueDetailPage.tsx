@@ -7,7 +7,6 @@ import {
   collection,
   query,
   where,
-  getDocs,
   addDoc,
   setDoc,
   updateDoc,
@@ -18,7 +17,7 @@ import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { Modal } from '../components/Modal'
-import { Input, Textarea } from '../components/Input'
+import { Input } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import type { LeagueDoc, LeagueMemberDoc, SeasonDoc, MemberRole, AccentColor } from '../lib/types'
 import { t } from '../lib/i18n'
@@ -172,7 +171,9 @@ export function LeagueDetailPage() {
       {/* Invite */}
       <div className="mb-8 rounded-xl border border-gray-200 bg-white p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{t('league.inviteCode')}</p>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {t('league.inviteCode')}
+          </p>
           <p className="font-mono font-bold text-gray-900 tracking-widest">{inviteCode}</p>
           <p className="text-xs text-gray-400 truncate">{inviteLink}</p>
         </div>
@@ -194,7 +195,9 @@ export function LeagueDetailPage() {
             <div className="rounded-xl border-2 border-dashed border-gray-200 p-8 text-center">
               <p className="text-gray-400">No seasons yet.</p>
               {isAdmin && (
-                <Button className="mt-4" onClick={() => setNewSeasonOpen(true)}>{t('league.newSeason')}</Button>
+                <Button className="mt-4" onClick={() => setNewSeasonOpen(true)}>
+                  {t('league.newSeason')}
+                </Button>
               )}
             </div>
           ) : (
@@ -221,7 +224,10 @@ export function LeagueDetailPage() {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('league.members')}</h2>
           <div className="flex flex-col gap-2">
             {members.map((m) => (
-              <div key={m.uid} className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-4 py-3">
+              <div
+                key={m.uid}
+                className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-4 py-3"
+              >
                 <span className="text-sm font-medium text-gray-800">{m.displayName}</span>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400 capitalize">{m.role}</span>
@@ -250,8 +256,12 @@ export function LeagueDetailPage() {
         title={t('season.create')}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setNewSeasonOpen(false)}>{t('common.cancel')}</Button>
-            <Button form="new-season-form" type="submit" loading={creating}>{t('season.create')}</Button>
+            <Button variant="secondary" onClick={() => setNewSeasonOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button form="new-season-form" type="submit" loading={creating}>
+              {t('season.create')}
+            </Button>
           </>
         }
       >

@@ -22,9 +22,7 @@ export class SnakeDraftStrategy implements DraftStrategy {
     if (totalPicked >= totalContestants) return null
 
     const isEvenRound = currentRound % 2 === 0
-    const idx = isEvenRound
-      ? pickOrder.length - currentPickNumber
-      : currentPickNumber - 1
+    const idx = isEvenRound ? pickOrder.length - currentPickNumber : currentPickNumber - 1
 
     return {
       uid: pickOrder[idx],
@@ -34,9 +32,7 @@ export class SnakeDraftStrategy implements DraftStrategy {
   }
 }
 
-export function advancePick(
-  state: DraftState,
-): { round: number; pickNumber: number } | null {
+export function advancePick(state: DraftState): { round: number; pickNumber: number } | null {
   const { pickOrder, currentRound, currentPickNumber, totalContestants } = state
   const totalPicked = (currentRound - 1) * pickOrder.length + currentPickNumber
   if (totalPicked >= totalContestants) return null
@@ -52,7 +48,7 @@ export function advancePick(
 export function resolvePickOrder(
   method: PickOrderMethod,
   memberUids: string[],
-  adminSetOrder?: string[],
+  adminSetOrder?: string[]
 ): string[] {
   if (method === 'admin-set' && adminSetOrder?.length) {
     return adminSetOrder
