@@ -186,9 +186,7 @@ export function DraftRoomPage() {
     }
 
     const nextPickerIdx =
-      next.round % 2 === 0
-        ? draft.pickOrder.length - next.pickNumber
-        : next.pickNumber - 1
+      next.round % 2 === 0 ? draft.pickOrder.length - next.pickNumber : next.pickNumber - 1
     const nextPickerUid = draft.pickOrder[nextPickerIdx]
 
     await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
