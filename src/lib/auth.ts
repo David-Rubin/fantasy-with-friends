@@ -1,5 +1,6 @@
 import {
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
@@ -18,10 +19,16 @@ const IS_EMULATOR = import.meta.env.VITE_USE_EMULATOR === 'true'
 // for the client to ever read the users collection unauthenticated.
 // See: https://firebase.google.com/docs/auth/admin/create-custom-tokens
 
+// AUTH DISABLED (temporary): loginAsUser trusts any caller and skips PIN/password
+// verification entirely — see functions/src/index.ts for the real logic and a note
+// on re-enabling loginWithPin below.
+
 const signUpFn = httpsCallable<
   { displayName: string; email: string; inviteCode?: string },
   { uid: string }
 >(functions, 'signUpUser')
+
+const loginAsUserFn = httpsCallable<{ email: string }, { token: string }>(functions, 'loginAsUser')
 
 const resendPinFn = httpsCallable<{ email: string }, void>(functions, 'resendPin')
 
@@ -45,6 +52,11 @@ export async function signUp(
   }
   await signUpFn({ displayName, email, inviteCode })
   return {}
+}
+
+export async function loginWithEmail(email: string): Promise<void> {
+  const { data } = await loginAsUserFn({ email: email.trim().toLowerCase() })
+  await signInWithCustomToken(auth, data.token)
 }
 
 export async function loginWithPin(email: string, pin: string): Promise<void> {

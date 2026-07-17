@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Input } from '../components/Input'
 import { Button } from '../components/Button'
-import { loginWithPin, resendPin } from '../lib/auth'
+import { loginWithEmail } from '../lib/auth'
 import { t } from '../lib/i18n'
 
 export function LoginPage() {
@@ -13,39 +13,21 @@ export function LoginPage() {
   const [email, setEmail] = useState('')
   const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
-  const [resending, setResending] = useState(false)
   const [error, setError] = useState('')
-  const [resendSuccess, setResendSuccess] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      await loginWithPin(email.trim().toLowerCase(), pin)
+      // Auth is disabled for now — the PIN above is not checked. See loginAsUser
+      // in functions/src/index.ts for the real (temporary) login logic.
+      await loginWithEmail(email.trim())
       navigate(redirect)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : ''
-      if (msg === 'auth/account-locked') {
-        setError(t('auth.accountLocked'))
-      } else {
-        setError(t('auth.incorrectPin'))
-      }
+    } catch {
+      setError(t('auth.userNotFound'))
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function handleResend() {
-    if (!email.trim()) return
-    setResending(true)
-    try {
-      await resendPin(email.trim().toLowerCase())
-      setResendSuccess(true)
-    } catch {
-      setError(t('common.error'))
-    } finally {
-      setResending(false)
     }
   }
 
@@ -62,6 +44,7 @@ export function LoginPage() {
             required
             autoComplete="email"
             autoFocus
+            error={error || undefined}
           />
           <Input
             label={t('auth.pin')}
@@ -71,30 +54,13 @@ export function LoginPage() {
             maxLength={6}
             value={pin}
             onChange={(e) => setPin(e.target.value)}
-            required
             autoComplete="current-password"
-            hint={t('auth.pinHint')}
-            error={error || undefined}
+            hint={t('auth.pinOptionalHint')}
           />
           <Button type="submit" loading={loading} className="w-full mt-2">
             {loading ? t('auth.loggingIn') : t('auth.logIn')}
           </Button>
         </form>
-
-        {resendSuccess ? (
-          <p className="mt-4 text-center text-sm text-green-600">{t('auth.resendPinSuccess')}</p>
-        ) : (
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={handleResend}
-              disabled={resending || !email.trim()}
-              className="text-sm text-blue-600 hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-            >
-              {resending ? t('common.loading') : t('auth.resendPin')}
-            </button>
-          </div>
-        )}
 
         <p className="mt-4 text-center text-sm text-gray-500">
           {t('auth.noAccount')}{' '}
