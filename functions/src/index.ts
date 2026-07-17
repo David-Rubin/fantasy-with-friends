@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin'
-import * as functions from 'firebase-functions'
+import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
 import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
 
@@ -49,6 +49,26 @@ export const signUpUser = functions.https.onCall(
     return { uid: userRecord.uid }
   }
 )
+
+// ── Auth: log in by email (auth disabled — trusts any caller) ─────────────────
+// TEMPORARY: does not check a PIN or password at all. Whoever supplies an
+// email is logged in as that user. Re-enable real verification (see
+// loginWithPin/resendPin below) before this app is used outside a small
+// trusted group.
+
+export const loginAsUser = functions.https.onCall(async (data: { email: string }) => {
+  const email = data.email.trim().toLowerCase()
+
+  let userRecord
+  try {
+    userRecord = await admin.auth().getUserByEmail(email)
+  } catch {
+    throw new functions.https.HttpsError('not-found', 'No account with that email.')
+  }
+
+  const token = await admin.auth().createCustomToken(userRecord.uid)
+  return { token }
+})
 
 // ── Auth: resend PIN ──────────────────────────────────────────────────────────
 
