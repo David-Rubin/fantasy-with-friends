@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
+import { advancePick, pickerAt } from './draft'
 import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
 
 admin.initializeApp()
@@ -171,6 +172,153 @@ async function redeemInviteCode(code: string, uid: string, seasonId?: string, le
   })
 
   await batch.commit()
+}
+
+// ── Draft: submit a pick ──────────────────────────────────────────────────────
+
+/**
+ * The single write path for a draft pick.
+ *
+ * Picks used to be written by the client across four separate documents, three
+ * of which are admin-only, so an ordinary member's pick was denied partway
+ * through and stalled the draft. Security rules cannot fix that on their own:
+ * validating whose turn is next means re-deriving snake order inside a rule,
+ * and "are all contestants drafted" needs an aggregate rules cannot compute.
+ *
+ * So the whole pick happens here, in one transaction: turn and availability are
+ * checked together against committed state, which also removes the race where
+ * two clients pick the same contestant from a stale snapshot.
+ */
+export const submitPick = functions.https.onCall(
+  async (
+    data: { seasonId: string; contestantId: string; onBehalfOf?: string },
+    context
+  ): Promise<{ status: 'active' | 'complete' }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const actingUid = context.auth.uid
+    const { seasonId, contestantId, onBehalfOf } = data
+
+    if (!seasonId || !contestantId) {
+      throw new functions.https.HttpsError('invalid-argument', 'seasonId and contestantId required')
+    }
+
+    const seasonRef = db.doc(`seasons/${seasonId}`)
+    const seasonSnap = await seasonRef.get()
+    if (!seasonSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Season not found')
+    }
+    const leagueId = seasonSnap.data()?.leagueId as string
+
+    // Proxy picks (PRD 3.3.2) are admin-only, and get recorded with the acting
+    // admin's id so the audit trail shows who actually pressed the button.
+    const isAdmin = await isLeagueAdmin(leagueId, actingUid)
+    if (onBehalfOf && !isAdmin) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only an admin can pick on behalf of another member'
+      )
+    }
+    const pickerUid = onBehalfOf ?? actingUid
+
+    // The draft doc has a generated id, so find it rather than assume one.
+    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+    if (draftQuery.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+    }
+    const draftRef = draftQuery.docs[0].ref
+    const contestantRef = db.doc(`seasons/${seasonId}/contestants/${contestantId}`)
+    const contestantsCol = db.collection(`seasons/${seasonId}/contestants`)
+
+    const result = await db.runTransaction(async (tx) => {
+      const [draftSnap, contestantSnap, allContestants] = await Promise.all([
+        tx.get(draftRef),
+        tx.get(contestantRef),
+        tx.get(contestantsCol),
+      ])
+
+      const draft = draftSnap.data()
+      if (!draft || draft.status !== 'active') {
+        throw new functions.https.HttpsError('failed-precondition', 'Draft is not active')
+      }
+      if (!contestantSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Contestant not found')
+      }
+
+      const contestant = contestantSnap.data()
+      if (contestant?.draftedByUid) {
+        throw new functions.https.HttpsError('aborted', 'That contestant has already been drafted')
+      }
+      if (contestant?.eliminatedEpisode !== null && contestant?.eliminatedEpisode !== undefined) {
+        throw new functions.https.HttpsError('failed-precondition', 'Contestant is eliminated')
+      }
+
+      // An admin may pick out of turn only via onBehalfOf; picking for yourself
+      // still requires it to actually be your turn.
+      if (draft.currentPickerUid !== pickerUid) {
+        throw new functions.https.HttpsError('failed-precondition', 'It is not that member’s turn')
+      }
+
+      const pickOrder = (draft.pickOrder ?? []) as string[]
+      const totalContestants = allContestants.size
+      const next = advancePick({
+        pickOrder,
+        currentRound: draft.currentRound as number,
+        currentPickNumber: draft.currentPickNumber as number,
+        totalContestants,
+      })
+
+      tx.create(draftRef.collection('picks').doc(), {
+        contestantId,
+        pickerUid,
+        actingAdminUid: onBehalfOf ? actingUid : null,
+        round: draft.currentRound,
+        pickNumber: draft.currentPickNumber,
+        timestamp: Date.now(),
+      })
+
+      tx.update(contestantRef, {
+        draftedByUid: pickerUid,
+        draftedRound: draft.currentRound,
+      })
+
+      if (!next) {
+        // Board exhausted — close the draft and open the season (PRD 3.3.4).
+        tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+        tx.update(seasonRef, { state: 'active' })
+        return { status: 'complete' as const }
+      }
+
+      tx.update(draftRef, {
+        currentRound: next.round,
+        currentPickNumber: next.pickNumber,
+        currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
+        timerExpiresAt: Date.now() + ((seasonSnap.data()?.timerSeconds as number) ?? 60) * 1000,
+      })
+      return { status: 'active' as const }
+    })
+
+    // Logged here rather than by the caller — a client that skipped the call
+    // used to leave a proxy pick with no trace (PRD 10.1).
+    await db.collection('auditLogs').add({
+      action: onBehalfOf ? 'admin_proxy_pick' : 'draft_pick',
+      seasonId,
+      contestantId,
+      targetUid: onBehalfOf ?? null,
+      actorUid: actingUid,
+      timestamp: Date.now(),
+    })
+
+    return result
+  }
+)
+
+async function isLeagueAdmin(leagueId: string, uid: string): Promise<boolean> {
+  const snap = await db.doc(`leagues/${leagueId}/members/${uid}`).get()
+  if (!snap.exists) return false
+  const role = snap.data()?.role as string | undefined
+  return role === 'owner' || role === 'admin'
 }
 
 // ── Audit log helper ──────────────────────────────────────────────────────────

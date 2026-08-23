@@ -16,7 +16,8 @@ import type {
   MemberRole,
   Contestant,
 } from '../lib/types'
-import { resolvePickOrder, advancePick } from '../lib/draft'
+import { resolvePickOrder } from '../lib/draft'
+import { submitPick } from '../lib/draftApi'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
@@ -33,13 +34,14 @@ export function DraftRoomPage() {
 
   const [season, setSeason] = useState<SeasonDoc | null>(null)
   const [draft, setDraft] = useState<DraftDoc | null>(null)
-  const [draftId, setDraftId] = useState<string | null>(null)
   const [contestants, setContestants] = useState<Contestant[]>([])
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const [teamName, setTeamName] = useState('')
   const [savingTeamName, setSavingTeamName] = useState(false)
   const [startingDraft, setStartingDraft] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [pickError, setPickError] = useState('')
 
   useEffect(() => {
     if (!seasonId) return
@@ -84,9 +86,7 @@ export function DraftRoomPage() {
     if (!seasonId) return
     return listenQuery(collection(db, 'seasons', seasonId, 'draft'), 'draft state', (snap) => {
       if (!snap.empty) {
-        const d = snap.docs[0]
-        setDraftId(d.id)
-        setDraft(d.data() as DraftDoc)
+        setDraft(snap.docs[0].data() as DraftDoc)
       }
     })
   }, [seasonId])
@@ -104,7 +104,7 @@ export function DraftRoomPage() {
       const memberUids = members.map((m) => m.uid)
       const pickOrder = resolvePickOrder(season.pickOrderMethod, memberUids)
 
-      const draftRef = await addDoc(collection(db, 'seasons', seasonId, 'draft'), {
+      await addDoc(collection(db, 'seasons', seasonId, 'draft'), {
         status: 'active',
         currentPickerUid: pickOrder[0],
         currentRound: 1,
@@ -112,7 +112,6 @@ export function DraftRoomPage() {
         pickOrder,
         timerExpiresAt: Date.now() + season.timerSeconds * 1000,
       } satisfies DraftDoc)
-      setDraftId(draftRef.id)
 
       // Assign pick positions to members
       for (let i = 0; i < pickOrder.length; i++) {
@@ -128,80 +127,36 @@ export function DraftRoomPage() {
     }
   }
 
+  /**
+   * A pick is one server call. Writing it from here meant four writes across
+   * documents an ordinary member cannot touch, so a member's pick stalled the
+   * draft halfway through. The function validates turn and availability in a
+   * transaction and performs every write with the Admin SDK.
+   */
   async function handlePick(contestantId: string, onBehalfOf?: string) {
-    if (!seasonId || !draft || !draftId || !user) return
+    if (!seasonId || !draft || !user || picking) return
 
-    const pickerUid = onBehalfOf ?? user.uid
+    setPicking(true)
+    setPickError('')
+    try {
+      const { data } = await submitPick({ seasonId, contestantId, onBehalfOf })
 
-    await addDoc(collection(db, 'seasons', seasonId, 'draft', draftId, 'picks'), {
-      contestantId,
-      pickerUid,
-      actingAdminUid: onBehalfOf ? user.uid : null,
-      round: draft.currentRound,
-      pickNumber: draft.currentPickNumber,
-      // eslint-disable-next-line react-hooks/purity
-      timestamp: Date.now(),
-    })
-
-    await updateDoc(doc(db, 'seasons', seasonId, 'contestants', contestantId), {
-      draftedByUid: pickerUid,
-      draftedRound: draft.currentRound,
-    })
-
-    await logAuditEvent({
-      action: onBehalfOf ? 'admin_proxy_pick' : 'draft_pick',
-      seasonId,
-      contestantId,
-      targetUid: onBehalfOf,
-    })
-
-    trackEvent('draft_pick_made', {
-      round: draft.currentRound,
-      pick_number: draft.currentPickNumber,
-    })
-
-    const remainingCount = available.length - 1
-    if (remainingCount === 0) {
-      // Draft complete
-      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
-        status: 'complete',
-        currentPickerUid: null,
-        timerExpiresAt: null,
+      trackEvent('draft_pick_made', {
+        round: draft.currentRound,
+        pick_number: draft.currentPickNumber,
       })
-      await updateDoc(doc(db, 'seasons', seasonId), { state: 'active' })
-      trackEvent('draft_completed', { season_id: seasonId, total_picks: contestants.length - 1 })
-      return
+      if (data.status === 'complete') {
+        trackEvent('draft_completed', { season_id: seasonId, total_picks: contestants.length })
+      }
+      // The draft listener applies the new state — nothing to set here.
+    } catch (error) {
+      const message =
+        (error as { message?: string }).message ?? 'Could not submit that pick. Try again.'
+      setPickError(message)
+      console.error('Pick rejected', error)
+    } finally {
+      setPicking(false)
     }
-
-    // Advance to next pick
-    const next = advancePick({
-      pickOrder: draft.pickOrder,
-      currentRound: draft.currentRound,
-      currentPickNumber: draft.currentPickNumber,
-      totalContestants: contestants.length,
-    })
-
-    if (!next) {
-      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
-        status: 'complete',
-        currentPickerUid: null,
-        timerExpiresAt: null,
-      })
-      await updateDoc(doc(db, 'seasons', seasonId), { state: 'active' })
-      return
-    }
-
-    const nextPickerIdx =
-      next.round % 2 === 0 ? draft.pickOrder.length - next.pickNumber : next.pickNumber - 1
-    const nextPickerUid = draft.pickOrder[nextPickerIdx]
-
-    await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
-      currentRound: next.round,
-      currentPickNumber: next.pickNumber,
-      currentPickerUid: nextPickerUid,
-      // eslint-disable-next-line react-hooks/purity
-      timerExpiresAt: Date.now() + (season?.timerSeconds ?? 60) * 1000,
-    })
   }
 
   async function handleSaveTeamName() {
@@ -285,6 +240,15 @@ export function DraftRoomPage() {
             durationSeconds={season.timerSeconds}
             isYourTurn={isMyTurn}
           />
+
+          {pickError && (
+            <p
+              role="alert"
+              className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {pickError}
+            </p>
+          )}
 
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
             {/* Contestant list */}
