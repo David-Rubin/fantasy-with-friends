@@ -41,6 +41,12 @@ export interface LeagueDoc {
 }
 
 export interface LeagueMemberDoc {
+  /**
+   * Denormalized copy of the document ID. Required because the dashboard's
+   * collectionGroup('members') query can only be authorized by a rule that
+   * filters on a field — the {uid} path wildcard is unbound during a list.
+   */
+  uid: string
   role: MemberRole
   joinedAt: number
 }
@@ -66,6 +72,8 @@ export interface SeasonDoc {
 }
 
 export interface SeasonMemberDoc {
+  /** Denormalized copy of the document ID — see LeagueMemberDoc.uid */
+  uid: string
   teamName: string
   pickPosition: number | null
   joinedAt: number

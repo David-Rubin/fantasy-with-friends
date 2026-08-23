@@ -56,7 +56,7 @@ export function DraftRoomPage() {
           const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
           const data = d.data() as SeasonMemberDoc
           if (d.id === user.uid) setTeamName(data.teamName)
-          return { uid: d.id, displayName, ...data }
+          return { ...data, uid: d.id, displayName }
         })
       )
       setMembers(list)

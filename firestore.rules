@@ -45,6 +45,15 @@ service cloud.firestore {
         && !('pinHash' in request.resource.data);
     }
 
+    // ── Collection group: a user's own membership docs ────────────────────────
+    // The dashboard runs collectionGroup(db, 'members') to find every league the
+    // signed-in user belongs to. Nested `match /leagues/{id}/members/{uid}` rules
+    // do NOT authorize collection group queries — that needs a {path=**} match.
+    // Scoped to the caller's own uid, so this leaks nothing about other users.
+    match /{path=**}/members/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.uid;
+    }
+
     // ── Leagues ───────────────────────────────────────────────────────────────
     match /leagues/{leagueId} {
       allow read: if isLeagueMember(leagueId);
@@ -54,6 +63,14 @@ service cloud.firestore {
 
       match /members/{uid} {
         allow read: if isLeagueMember(leagueId);
+        // Bootstrap: right after creating a league the owner writes their own
+        // membership doc. At that instant no member docs exist, so isLeagueOwner()
+        // — which calls exists() on this very document — can never be satisfied.
+        // Authorize off the league's ownerId instead, for the caller's own uid only.
+        allow create: if isSignedIn()
+          && request.auth.uid == uid
+          && request.resource.data.uid == uid
+          && get(/databases/$(database)/documents/leagues/$(leagueId)).data.ownerId == request.auth.uid;
         // Role changes (promote/demote) are owner-only
         allow write: if isLeagueOwner(leagueId);
         // Members can join via invite (Cloud Function writes via Admin SDK)
@@ -62,7 +79,11 @@ service cloud.firestore {
 
     // ── Seasons ───────────────────────────────────────────────────────────────
     match /seasons/{seasonId} {
-      allow read: if isSeasonMember(seasonId) || isLeagueMember(seasonLeagueId(seasonId));
+      // `get` can use the bound {seasonId}; `list` cannot — during a query the
+      // wildcard is unbound, so any rule dereferencing it throws a null error.
+      // Queries are authorized off the leagueId field they already filter on.
+      allow get: if isSeasonMember(seasonId) || isLeagueMember(seasonLeagueId(seasonId));
+      allow list: if isSignedIn() && isLeagueMember(resource.data.leagueId);
       allow create: if isSignedIn() &&
         isLeagueAdmin(request.resource.data.leagueId);
       // teamTotals / teamEpisodeTotals are written only by Cloud Functions (Admin SDK)

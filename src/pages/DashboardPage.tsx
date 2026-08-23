@@ -47,41 +47,59 @@ export function DashboardPage() {
   useEffect(() => {
     if (!user) return
 
-    // Watch all member sub-collection docs where this user is a member
-    const unsubscribe = onSnapshot(collectionGroup(db, 'members'), async (snap) => {
-      const leagueIds = new Set<string>()
-      snap.docs.forEach((d) => {
-        // Only direct league/members/{uid} docs (not season members)
-        if (d.id === user.uid && d.ref.parent.parent?.parent?.path === undefined) {
-          const leagueId = d.ref.parent.parent?.id
-          if (leagueId) leagueIds.add(leagueId)
+    // Watch this user's member docs across every league. The `uid` filter is not
+    // just an optimization — security rules can only authorize a collection group
+    // query that constrains a field, so removing it breaks the listener.
+    const membersQuery = query(collectionGroup(db, 'members'), where('uid', '==', user.uid))
+
+    const unsubscribe = onSnapshot(
+      membersQuery,
+      async (snap) => {
+        const leagueIds = new Set<string>()
+        snap.docs.forEach((d) => {
+          // Only leagues/{id}/members/{uid} docs, not seasons/{id}/members/{uid}
+          if (d.ref.parent.parent?.parent?.id === 'leagues') {
+            const leagueId = d.ref.parent.parent?.id
+            if (leagueId) leagueIds.add(leagueId)
+          }
+        })
+
+        try {
+          const results: LeagueWithSeason[] = []
+          for (const leagueId of leagueIds) {
+            const leagueSnap = await getDoc(doc(db, 'leagues', leagueId))
+            if (!leagueSnap.exists()) continue
+            const league = leagueSnap.data() as LeagueDoc
+
+            // Get latest season
+            const seasonsSnap = await getDocs(
+              query(
+                collection(db, 'seasons'),
+                where('leagueId', '==', leagueId),
+                orderBy('createdAt', 'desc'),
+                limit(1)
+              )
+            )
+            const latestSeason = seasonsSnap.empty
+              ? null
+              : { id: seasonsSnap.docs[0].id, ...(seasonsSnap.docs[0].data() as SeasonDoc) }
+
+            results.push({ id: leagueId, league, latestSeason })
+          }
+          setLeagues(results)
+        } catch (error) {
+          // A rejection in here used to skip setLoading(false) and hang the page
+          console.error('Failed to load leagues', error)
+        } finally {
+          setLoading(false)
         }
-      })
-
-      const results: LeagueWithSeason[] = []
-      for (const leagueId of leagueIds) {
-        const leagueSnap = await getDoc(doc(db, 'leagues', leagueId))
-        if (!leagueSnap.exists()) continue
-        const league = leagueSnap.data() as LeagueDoc
-
-        // Get latest season
-        const seasonsSnap = await getDocs(
-          query(
-            collection(db, 'seasons'),
-            where('leagueId', '==', leagueId),
-            orderBy('createdAt', 'desc'),
-            limit(1)
-          )
-        )
-        const latestSeason = seasonsSnap.empty
-          ? null
-          : { id: seasonsSnap.docs[0].id, ...(seasonsSnap.docs[0].data() as SeasonDoc) }
-
-        results.push({ id: leagueId, league, latestSeason })
+      },
+      (error) => {
+        // Without this the listener fails silently and the page hangs on "Loading…"
+        console.error('Failed to load leagues', error)
+        setLoading(false)
       }
-      setLeagues(results)
-      setLoading(false)
-    })
+    )
 
     return unsubscribe
   }, [user])
@@ -100,6 +118,7 @@ export function DashboardPage() {
       } satisfies LeagueDoc)
 
       await setDoc(doc(db, 'leagues', leagueRef.id, 'members', user.uid), {
+        uid: user.uid,
         role: 'owner',
         joinedAt: Date.now(),
       } satisfies LeagueMemberDoc)
@@ -109,8 +128,9 @@ export function DashboardPage() {
       setLeagueName('')
       setLeagueDesc('')
       navigate(`/leagues/${leagueRef.id}`)
-    } catch {
-      // error handled by loading state
+    } catch (error) {
+      // Swallowing this hid a permission-denied write that left leagues memberless
+      console.error('Failed to create league', error)
     } finally {
       setCreating(false)
     }
