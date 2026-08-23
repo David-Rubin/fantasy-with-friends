@@ -86,7 +86,7 @@ export function SeasonDetailPage() {
         snap.docs.map(async (d) => {
           const userSnap = await getDoc(doc(db, 'users', d.id))
           const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-          return { uid: d.id, displayName, ...(d.data() as SeasonMemberDoc) }
+          return { ...(d.data() as SeasonMemberDoc), uid: d.id, displayName }
         })
       )
       setMembers(list)

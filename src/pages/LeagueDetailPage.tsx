@@ -64,7 +64,7 @@ export function LeagueDetailPage() {
           const userSnap = await getDoc(doc(db, 'users', d.id))
           const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
           if (d.id === user?.uid) setMyRole((d.data() as LeagueMemberDoc).role)
-          return { uid: d.id, displayName, ...(d.data() as LeagueMemberDoc) }
+          return { ...(d.data() as LeagueMemberDoc), uid: d.id, displayName }
         })
       )
       setMembers(list)
@@ -139,6 +139,7 @@ export function LeagueDetailPage() {
       // Add league members to the season by default
       for (const member of members) {
         await setDoc(doc(db, 'seasons', seasonRef.id, 'members', member.uid), {
+          uid: member.uid,
           teamName: `${member.displayName}'s Team`,
           pickPosition: null,
           joinedAt: Date.now(),
