@@ -17,7 +17,7 @@ import type {
   Contestant,
 } from '../lib/types'
 import { resolvePickOrder } from '../lib/draft'
-import { submitPick } from '../lib/draftApi'
+import { submitPick, resolveExpiredTurn } from '../lib/draftApi'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
@@ -92,7 +92,37 @@ export function DraftRoomPage() {
   }, [seasonId])
 
   const isAdmin = myRole === 'owner' || myRole === 'admin'
-  const isMyTurn = draft?.status === 'active' && draft.currentPickerUid === user?.uid
+  const isPaused = draft?.status === 'paused'
+  // While paused the turn still belongs to whoever missed it — they may still
+  // pick if they reappear, and an admin may pick for them.
+  const isMyTurn = (draft?.status === 'active' || isPaused) && draft?.currentPickerUid === user?.uid
+
+  /**
+   * Nudge the server when the clock runs out. Purely a prompt — the server
+   * re-checks its own clock and the turn identity, so a stale or duplicated
+   * call does nothing. Every client runs this, which is deliberate: it means
+   * the draft still moves when the member whose turn expired has disconnected.
+   */
+  useEffect(() => {
+    if (!seasonId || !draft || draft.status !== 'active' || !draft.timerExpiresAt) return
+
+    const fire = () => {
+      resolveExpiredTurn({
+        seasonId,
+        round: draft.currentRound,
+        pickNumber: draft.currentPickNumber,
+      }).catch((error) => console.error('Could not resolve expired turn', error))
+    }
+
+    const msLeft = draft.timerExpiresAt - Date.now()
+    if (msLeft <= 0) {
+      fire()
+      return
+    }
+    // Small cushion so clients do not all fire on the exact same millisecond.
+    const timer = setTimeout(fire, msLeft + 250 + Math.random() * 500)
+    return () => clearTimeout(timer)
+  }, [seasonId, draft])
 
   const available = contestants.filter((c) => !c.draftedByUid && c.eliminatedEpisode === null)
   const drafted = contestants.filter((c) => c.draftedByUid)
@@ -231,15 +261,35 @@ export function DraftRoomPage() {
         </div>
       )}
 
-      {/* Active draft */}
-      {draft?.status === 'active' && (
+      {/* Active draft — `paused` is still a live draft, awaiting an admin pick */}
+      {(draft?.status === 'active' || isPaused) && (
         <>
-          <TimerBanner
-            pickerName={currentPickerName}
-            timerExpiresAt={draft.timerExpiresAt}
-            durationSeconds={season.timerSeconds}
-            isYourTurn={isMyTurn}
-          />
+          {isPaused ? (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 flex items-center gap-3"
+            >
+              <span
+                aria-hidden="true"
+                className="h-2.5 w-2.5 rounded-full bg-amber-500 motion-safe:animate-pulse"
+              />
+              <div>
+                <p className="font-semibold text-amber-900">
+                  {currentPickerName} ran out of time — an admin is picking for them
+                </p>
+                <p className="text-sm text-amber-700">
+                  The draft is paused. No one else can pick until this is done.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <TimerBanner
+              pickerName={currentPickerName}
+              timerExpiresAt={draft.timerExpiresAt}
+              durationSeconds={season.timerSeconds}
+              isYourTurn={isMyTurn}
+            />
+          )}
 
           {pickError && (
             <p

@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
-import { advancePick, pickerAt } from './draft'
+import { nextSlot, pickerAt } from './draft'
 import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
 
 admin.initializeApp()
@@ -239,7 +239,9 @@ export const submitPick = functions.https.onCall(
       ])
 
       const draft = draftSnap.data()
-      if (!draft || draft.status !== 'active') {
+      // `paused` is a live draft awaiting an admin proxy pick for the member
+      // who missed their turn, so picks are still accepted here.
+      if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
         throw new functions.https.HttpsError('failed-precondition', 'Draft is not active')
       }
       if (!contestantSnap.exists) {
@@ -261,13 +263,6 @@ export const submitPick = functions.https.onCall(
       }
 
       const pickOrder = (draft.pickOrder ?? []) as string[]
-      const totalContestants = allContestants.size
-      const next = advancePick({
-        pickOrder,
-        currentRound: draft.currentRound as number,
-        currentPickNumber: draft.currentPickNumber as number,
-        totalContestants,
-      })
 
       tx.create(draftRef.collection('picks').doc(), {
         contestantId,
@@ -283,14 +278,26 @@ export const submitPick = functions.https.onCall(
         draftedRound: draft.currentRound,
       })
 
-      if (!next) {
-        // Board exhausted — close the draft and open the season (PRD 3.3.4).
+      // Completion is counted off the board, not off the turn position: skipped
+      // turns advance the position without taking anyone, so the draft runs
+      // until every contestant is gone however many rounds that takes.
+      const undraftedAfterThisPick = allContestants.docs.filter(
+        (d) => !d.data().draftedByUid && d.id !== contestantId
+      ).length
+
+      if (undraftedAfterThisPick === 0) {
         tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
         tx.update(seasonRef, { state: 'active' })
         return { status: 'complete' as const }
       }
 
+      const next = nextSlot(
+        pickOrder,
+        draft.currentRound as number,
+        draft.currentPickNumber as number
+      )
       tx.update(draftRef, {
+        status: 'active',
         currentRound: next.round,
         currentPickNumber: next.pickNumber,
         currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
@@ -313,6 +320,161 @@ export const submitPick = functions.https.onCall(
     return result
   }
 )
+
+// ── Draft: resolve an expired pick timer ──────────────────────────────────────
+
+/**
+ * Apply the season's timer-expiry policy once a pick clock has run out.
+ *
+ * WHO CALLS THIS — and why it is a client nudge for now.
+ *
+ * PRD 4.9 requires the pick timer to be authoritative server-side, so a player
+ * who disconnects cannot stall the draft. Three ways to get that:
+ *
+ *   - A scheduled function. Firebase cron has a one-minute floor and the
+ *     default pick timer is sixty seconds, so the granularity does not fit.
+ *   - Cloud Tasks, enqueued for `timerExpiresAt` when each turn begins. Precise
+ *     to the second and fires even if every participant has closed the tab.
+ *   - This: any connected client that watches the countdown reach zero calls in,
+ *     and the server decides whether the turn has really expired.
+ *
+ * The nudge was chosen because it needs no extra infrastructure, runs in the
+ * emulator, and suits the MVP's scale (PRD 12.2 — 50 concurrent users on the
+ * free tier). Its one real weakness is that with nobody connected, nothing
+ * fires; because expiry is judged from stored state, the draft resolves
+ * correctly as soon as somebody returns, so this degrades rather than corrupts.
+ *
+ * TODO: migrate to Cloud Tasks when drafts start running unattended, or when
+ * anyone reports a draft sitting on an expired clock until someone reopened it.
+ * Enqueue at `timerExpiresAt` inside the same transaction that sets it, and keep
+ * the guard below — a task and a straggling client can both arrive.
+ *
+ * The caller passes the turn it saw expire. Every connected client hits zero at
+ * the same instant, so without that guard a four-person draft would burn four
+ * turns on one expiry. Whichever call lands first advances the turn; the rest
+ * no longer match and do nothing.
+ */
+export const resolveExpiredTurn = functions.https.onCall(
+  async (
+    data: { seasonId: string; round: number; pickNumber: number },
+    context
+  ): Promise<{ outcome: 'auto-picked' | 'skipped' | 'paused' | 'no-op'; status?: string }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const { seasonId, round, pickNumber } = data
+    if (!seasonId || typeof round !== 'number' || typeof pickNumber !== 'number') {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'seasonId, round and pickNumber required'
+      )
+    }
+
+    const seasonRef = db.doc(`seasons/${seasonId}`)
+    const seasonSnap = await seasonRef.get()
+    if (!seasonSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Season not found')
+    }
+    const season = seasonSnap.data()
+    const policy = (season?.timerExpiry as string) ?? 'auto-pick'
+    const timerSeconds = (season?.timerSeconds as number) ?? 60
+
+    // Only a member of the season may nudge the clock.
+    const memberSnap = await db.doc(`seasons/${seasonId}/members/${context.auth.uid}`).get()
+    if (!memberSnap.exists) {
+      throw new functions.https.HttpsError('permission-denied', 'Not a member of this season')
+    }
+
+    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+    if (draftQuery.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+    }
+    const draftRef = draftQuery.docs[0].ref
+    const contestantsCol = db.collection(`seasons/${seasonId}/contestants`)
+
+    return db.runTransaction(async (tx) => {
+      const [draftSnap, allContestants] = await Promise.all([
+        tx.get(draftRef),
+        tx.get(contestantsCol),
+      ])
+      const draft = draftSnap.data()
+      if (!draft || draft.status !== 'active') {
+        return { outcome: 'no-op' as const }
+      }
+
+      // Someone else already handled this turn, or it moved on.
+      if (draft.currentRound !== round || draft.currentPickNumber !== pickNumber) {
+        return { outcome: 'no-op' as const }
+      }
+
+      // The server clock decides, not the caller's.
+      const expiresAt = draft.timerExpiresAt as number | null
+      if (!expiresAt || Date.now() < expiresAt) {
+        return { outcome: 'no-op' as const }
+      }
+
+      const pickOrder = (draft.pickOrder ?? []) as string[]
+      const missedUid = draft.currentPickerUid as string
+
+      if (policy === 'admin-picks') {
+        // Hold the turn where it is, stop the clock, and let an admin pick for
+        // them. Nobody else may pick while this sits (PRD 3.3.1).
+        tx.update(draftRef, { status: 'paused', timerExpiresAt: null })
+        return { outcome: 'paused' as const }
+      }
+
+      const undrafted = allContestants.docs.filter(
+        (d) => !d.data().draftedByUid && d.data().eliminatedEpisode === null
+      )
+
+      if (policy === 'auto-pick' && undrafted.length > 0) {
+        const chosen = undrafted[0]
+        tx.create(draftRef.collection('picks').doc(), {
+          contestantId: chosen.id,
+          pickerUid: missedUid,
+          actingAdminUid: null,
+          round: draft.currentRound,
+          pickNumber: draft.currentPickNumber,
+          timestamp: Date.now(),
+          autoPicked: true,
+        })
+        tx.update(chosen.ref, { draftedByUid: missedUid, draftedRound: draft.currentRound })
+
+        if (undrafted.length === 1) {
+          tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+          tx.update(seasonRef, { state: 'active' })
+          return { outcome: 'auto-picked' as const, status: 'complete' }
+        }
+        advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds)
+        return { outcome: 'auto-picked' as const, status: 'active' }
+      }
+
+      // Skip: the turn passes with nothing taken. No makeup pick — their next
+      // chance is their natural next turn (PRD 3.3.1). Because completion is
+      // counted off the board, the draft still runs until every contestant is
+      // gone; it just ends on a different player than the order first implied.
+      advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds)
+      return { outcome: 'skipped' as const, status: 'active' }
+    })
+  }
+)
+
+function advanceTurn(
+  tx: FirebaseFirestore.Transaction,
+  draftRef: FirebaseFirestore.DocumentReference,
+  pickOrder: string[],
+  draft: FirebaseFirestore.DocumentData,
+  timerSeconds: number
+) {
+  const next = nextSlot(pickOrder, draft.currentRound as number, draft.currentPickNumber as number)
+  tx.update(draftRef, {
+    status: 'active',
+    currentRound: next.round,
+    currentPickNumber: next.pickNumber,
+    currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
+    timerExpiresAt: Date.now() + timerSeconds * 1000,
+  })
+}
 
 async function isLeagueAdmin(leagueId: string, uid: string): Promise<boolean> {
   const snap = await db.doc(`leagues/${leagueId}/members/${uid}`).get()

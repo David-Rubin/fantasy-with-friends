@@ -15,3 +15,17 @@ export const submitPick = httpsCallable<
   { seasonId: string; contestantId: string; onBehalfOf?: string },
   { status: 'active' | 'complete' }
 >(functions, 'submitPick')
+
+/**
+ * Tell the server a pick clock has run out.
+ *
+ * The countdown here is only a display; the server re-checks against its own
+ * clock and ignores the call if the turn has not really expired. `round` and
+ * `pickNumber` identify the turn that was seen expiring, so the many clients
+ * that all hit zero together cannot each burn a turn — the first call wins and
+ * the rest no-op.
+ */
+export const resolveExpiredTurn = httpsCallable<
+  { seasonId: string; round: number; pickNumber: number },
+  { outcome: 'auto-picked' | 'skipped' | 'paused' | 'no-op'; status?: string }
+>(functions, 'resolveExpiredTurn')

@@ -7,19 +7,21 @@
  * a modified client cannot talk its way into an extra turn.
  */
 
-export interface DraftState {
-  pickOrder: string[]
-  currentRound: number
+/**
+ * The next turn slot. Purely positional: it wraps through pickOrder and starts
+ * a new round at the end, and never decides that the draft is over.
+ *
+ * Completion is deliberately not computed here. A skipped turn advances the
+ * slot without drafting anyone, so position no longer tracks how many
+ * contestants have actually been taken — deriving "are we done" from
+ * (round, pickNumber) would end the draft early and strand undrafted
+ * contestants. The caller decides completion by counting the board instead.
+ */
+export function nextSlot(
+  pickOrder: string[],
+  currentRound: number,
   currentPickNumber: number
-  totalContestants: number
-}
-
-/** The next (round, pickNumber), or null when the board is exhausted. */
-export function advancePick(state: DraftState): { round: number; pickNumber: number } | null {
-  const { pickOrder, currentRound, currentPickNumber, totalContestants } = state
-  const totalPicked = (currentRound - 1) * pickOrder.length + currentPickNumber
-  if (totalPicked >= totalContestants) return null
-
+): { round: number; pickNumber: number } {
   if (currentPickNumber >= pickOrder.length) {
     return { round: currentRound + 1, pickNumber: 1 }
   }
@@ -28,7 +30,8 @@ export function advancePick(state: DraftState): { round: number; pickNumber: num
 
 /**
  * Whose turn (round, pickNumber) belongs to. Even rounds run backwards — that
- * reversal is the whole of "snake".
+ * reversal is the whole of "snake". Rounds may run past the number originally
+ * projected when turns get skipped, which the parity check handles fine.
  */
 export function pickerAt(pickOrder: string[], round: number, pickNumber: number): string {
   const isEvenRound = round % 2 === 0

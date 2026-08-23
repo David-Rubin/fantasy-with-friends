@@ -5,7 +5,12 @@ export type SeasonState = 'setup' | 'draft' | 'active' | 'complete'
 export type DraftFormat = 'snake'
 export type PickOrderMethod = 'randomized' | 'admin-set'
 export type TimerExpiry = 'auto-pick' | 'admin-picks' | 'skip'
-export type DraftStatus = 'lobby' | 'active' | 'complete'
+/**
+ * `paused` means a pick timer expired under the `admin-picks` policy: the turn
+ * stays with the member who missed it, the clock stops, and an admin picks on
+ * their behalf. Nobody else may pick until that resolves.
+ */
+export type DraftStatus = 'lobby' | 'active' | 'paused' | 'complete'
 export type ScoringRuleType = 'binary' | 'numeric' | 'bonus_challenge'
 export type BonusChallengeScope = 'per_episode' | 'specific_episodes' | 'season_level'
 export type AccentColor =
