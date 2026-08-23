@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "emulators": "mkdir -p .emulator-data && firebase emulators:start --project demo-project --only auth,firestore,storage,functions --import=.emulator-data --export-on-exit",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

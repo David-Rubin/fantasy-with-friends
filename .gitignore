@@ -13,6 +13,9 @@ dist-ssr
 functions/lib
 *.local
 
+# Firebase emulator persisted data (local dev accounts, Firestore docs)
+.emulator-data
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
