@@ -54,15 +54,12 @@ export function DraftRoomPage() {
       collection(db, 'seasons', seasonId, 'members'),
       'draft members',
       guarded('draft members', async (snap) => {
-        const list: MemberInfo[] = await Promise.all(
-          snap.docs.map(async (d) => {
-            const userSnap = await getDoc(doc(db, 'users', d.id))
-            const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-            const data = d.data() as SeasonMemberDoc
-            if (d.id === user.uid) setTeamName(data.teamName)
-            return { ...data, uid: d.id, displayName }
-          })
-        )
+        const list: MemberInfo[] = snap.docs.map((d) => {
+          const data = d.data() as SeasonMemberDoc
+          if (d.id === user.uid) setTeamName(data.teamName)
+          // See LeagueMemberDoc.displayName — cross-user reads are denied.
+          return { ...data, uid: d.id, displayName: data.displayName || d.id }
+        })
         setMembers(list)
         if (leagueId) {
           const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))

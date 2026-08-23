@@ -86,13 +86,11 @@ export function SeasonDetailPage() {
       collection(db, 'seasons', seasonId, 'members'),
       'season members',
       guarded('season members', async (snap) => {
-        const list: MemberDoc[] = await Promise.all(
-          snap.docs.map(async (d) => {
-            const userSnap = await getDoc(doc(db, 'users', d.id))
-            const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-            return { ...(d.data() as SeasonMemberDoc), uid: d.id, displayName }
-          })
-        )
+        const list: MemberDoc[] = snap.docs.map((d) => {
+          const data = d.data() as SeasonMemberDoc
+          // See LeagueMemberDoc.displayName — cross-user reads are denied.
+          return { ...data, uid: d.id, displayName: data.displayName || d.id }
+        })
         setMembers(list)
 
         // Determine my role in the league

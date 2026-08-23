@@ -1,17 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import {
-  doc,
-  getDoc,
-  collection,
-  query,
-  where,
-  addDoc,
-  setDoc,
-  updateDoc,
-} from 'firebase/firestore'
+import { doc, collection, query, where, addDoc, setDoc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { listenDoc, listenQuery, guarded } from '../lib/listen'
+import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -61,17 +52,16 @@ export function LeagueDetailPage() {
     const unsub = listenQuery(
       collection(db, 'leagues', leagueId, 'members'),
       'league members',
-      guarded('league members', async (snap) => {
-        const list: MemberWithName[] = await Promise.all(
-          snap.docs.map(async (d) => {
-            const userSnap = await getDoc(doc(db, 'users', d.id))
-            const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-            if (d.id === user?.uid) setMyRole((d.data() as LeagueMemberDoc).role)
-            return { ...(d.data() as LeagueMemberDoc), uid: d.id, displayName }
-          })
-        )
+      (snap) => {
+        const list: MemberWithName[] = snap.docs.map((d) => {
+          const data = d.data() as LeagueMemberDoc
+          if (d.id === user?.uid) setMyRole(data.role)
+          // displayName is stored on the member doc; reading users/{uid} for
+          // anyone but yourself is denied, and that doc also holds their email.
+          return { ...data, uid: d.id, displayName: data.displayName || d.id }
+        })
         setMembers(list)
-      })
+      }
     )
     return unsub
   }, [leagueId, user])
@@ -145,6 +135,7 @@ export function LeagueDetailPage() {
       for (const member of members) {
         await setDoc(doc(db, 'seasons', seasonRef.id, 'members', member.uid), {
           uid: member.uid,
+          displayName: member.displayName,
           teamName: `${member.displayName}'s Team`,
           pickPosition: null,
           joinedAt: Date.now(),

@@ -47,6 +47,13 @@ export interface LeagueMemberDoc {
    * filters on a field — the {uid} path wildcard is unbound during a list.
    */
   uid: string
+  /**
+   * Denormalized from the owner's user doc. Member lists cannot read
+   * `users/{uid}` for anyone but themselves — that document also holds the
+   * email address, which PRD §7.3 keeps private between members — so the
+   * display name is copied here at write time instead.
+   */
+  displayName: string
   role: MemberRole
   joinedAt: number
 }
@@ -74,6 +81,8 @@ export interface SeasonDoc {
 export interface SeasonMemberDoc {
   /** Denormalized copy of the document ID — see LeagueMemberDoc.uid */
   uid: string
+  /** Denormalized display name — see LeagueMemberDoc.displayName */
+  displayName: string
   teamName: string
   pickPosition: number | null
   joinedAt: number

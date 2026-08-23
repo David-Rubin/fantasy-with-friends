@@ -154,6 +154,7 @@ async function redeemInviteCode(code: string, uid: string, seasonId?: string, le
       // and the security rule authorizes off it. A member doc without `uid` is
       // invisible to its own owner. See LeagueMemberDoc in src/lib/types.ts.
       uid,
+      displayName,
       role: 'member',
       joinedAt: Date.now(),
     },
@@ -163,6 +164,7 @@ async function redeemInviteCode(code: string, uid: string, seasonId?: string, le
   // Add to season
   batch.set(db.doc(`seasons/${seasonId}/members/${uid}`), {
     uid,
+    displayName,
     teamName: `${displayName}'s Team`,
     pickPosition: null,
     joinedAt: Date.now(),
