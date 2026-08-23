@@ -5,7 +5,6 @@ import {
   collectionGroup,
   query,
   where,
-  onSnapshot,
   orderBy,
   doc,
   getDoc,
@@ -15,6 +14,7 @@ import {
   setDoc,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -52,8 +52,9 @@ export function DashboardPage() {
     // query that constrains a field, so removing it breaks the listener.
     const membersQuery = query(collectionGroup(db, 'members'), where('uid', '==', user.uid))
 
-    const unsubscribe = onSnapshot(
+    const unsubscribe = listenQuery(
       membersQuery,
+      'dashboard leagues',
       async (snap) => {
         const leagueIds = new Set<string>()
         snap.docs.forEach((d) => {
@@ -94,11 +95,9 @@ export function DashboardPage() {
           setLoading(false)
         }
       },
-      (error) => {
-        // Without this the listener fails silently and the page hangs on "Loading…"
-        console.error('Failed to load leagues', error)
-        setLoading(false)
-      }
+      // listenQuery logs; this clears the spinner so a denied read shows the
+      // empty state rather than hanging on "Loading…"
+      () => setLoading(false)
     )
 
     return unsubscribe

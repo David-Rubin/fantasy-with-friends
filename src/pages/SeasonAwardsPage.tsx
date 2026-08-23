@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { doc, onSnapshot, collection, setDoc } from 'firebase/firestore'
+import { doc, collection, setDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -29,31 +30,43 @@ export function SeasonAwardsPage() {
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'contestants'),
+      'awards contestants',
+      (snap) => {
+        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
+      }
+    )
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'scoringRules'), (snap) => {
-      const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) }))
-      setRules(all.filter((r) => r.type === 'bonus_challenge' && r.scope === 'season_level'))
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'scoringRules'),
+      'awards rules',
+      (snap) => {
+        const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) }))
+        setRules(all.filter((r) => r.type === 'bonus_challenge' && r.scope === 'season_level'))
+      }
+    )
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'seasonAwards'), (snap) => {
-      const list = snap.docs.map((d) => d.data() as SeasonAwardDoc)
-      setAwards(list)
-      // Pre-fill selections
-      const sel: Record<string, string> = {}
-      list.forEach((a) => {
-        sel[a.ruleId] = a.contestantId
-      })
-      setSelections(sel)
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'seasonAwards'),
+      'season awards',
+      (snap) => {
+        const list = snap.docs.map((d) => d.data() as SeasonAwardDoc)
+        setAwards(list)
+        // Pre-fill selections
+        const sel: Record<string, string> = {}
+        list.forEach((a) => {
+          sel[a.ruleId] = a.contestantId
+        })
+        setSelections(sel)
+      }
+    )
   }, [seasonId])
 
   async function handleSave() {

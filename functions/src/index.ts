@@ -150,6 +150,10 @@ async function redeemInviteCode(code: string, uid: string, seasonId?: string, le
   batch.set(
     db.doc(`leagues/${leagueId}/members/${uid}`),
     {
+      // Denormalized doc ID — the dashboard's collectionGroup query filters on it,
+      // and the security rule authorizes off it. A member doc without `uid` is
+      // invisible to its own owner. See LeagueMemberDoc in src/lib/types.ts.
+      uid,
       role: 'member',
       joinedAt: Date.now(),
     },
@@ -158,6 +162,7 @@ async function redeemInviteCode(code: string, uid: string, seasonId?: string, le
 
   // Add to season
   batch.set(db.doc(`seasons/${seasonId}/members/${uid}`), {
+    uid,
     teamName: `${displayName}'s Team`,
     pickPosition: null,
     joinedAt: Date.now(),

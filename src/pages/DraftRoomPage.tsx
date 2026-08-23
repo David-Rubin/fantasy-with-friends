@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { doc, onSnapshot, collection, updateDoc, addDoc, getDoc } from 'firebase/firestore'
+import { doc, collection, updateDoc, addDoc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -42,41 +43,49 @@ export function DraftRoomPage() {
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(doc(db, 'seasons', seasonId), (snap) => {
+    return listenDoc(doc(db, 'seasons', seasonId), 'draft season', (snap) => {
       if (snap.exists()) setSeason(snap.data() as SeasonDoc)
     })
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId || !user) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'members'), async (snap) => {
-      const list: MemberInfo[] = await Promise.all(
-        snap.docs.map(async (d) => {
-          const userSnap = await getDoc(doc(db, 'users', d.id))
-          const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-          const data = d.data() as SeasonMemberDoc
-          if (d.id === user.uid) setTeamName(data.teamName)
-          return { ...data, uid: d.id, displayName }
-        })
-      )
-      setMembers(list)
-      if (leagueId) {
-        const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
-        if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
-      }
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'members'),
+      'draft members',
+      guarded('draft members', async (snap) => {
+        const list: MemberInfo[] = await Promise.all(
+          snap.docs.map(async (d) => {
+            const userSnap = await getDoc(doc(db, 'users', d.id))
+            const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
+            const data = d.data() as SeasonMemberDoc
+            if (d.id === user.uid) setTeamName(data.teamName)
+            return { ...data, uid: d.id, displayName }
+          })
+        )
+        setMembers(list)
+        if (leagueId) {
+          const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
+          if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
+        }
+      })
+    )
   }, [seasonId, user, leagueId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'contestants'),
+      'draft contestants',
+      (snap) => {
+        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
+      }
+    )
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'draft'), (snap) => {
+    return listenQuery(collection(db, 'seasons', seasonId, 'draft'), 'draft state', (snap) => {
       if (!snap.empty) {
         const d = snap.docs[0]
         setDraftId(d.id)

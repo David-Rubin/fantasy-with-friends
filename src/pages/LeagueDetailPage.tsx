@@ -3,7 +3,6 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   doc,
   getDoc,
-  onSnapshot,
   collection,
   query,
   where,
@@ -12,6 +11,7 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -50,7 +50,7 @@ export function LeagueDetailPage() {
 
   useEffect(() => {
     if (!leagueId) return
-    const unsub = onSnapshot(doc(db, 'leagues', leagueId), (snap) => {
+    const unsub = listenDoc(doc(db, 'leagues', leagueId), 'league', (snap) => {
       if (snap.exists()) setLeague(snap.data() as LeagueDoc)
     })
     return unsub
@@ -58,24 +58,29 @@ export function LeagueDetailPage() {
 
   useEffect(() => {
     if (!leagueId) return
-    const unsub = onSnapshot(collection(db, 'leagues', leagueId, 'members'), async (snap) => {
-      const list: MemberWithName[] = await Promise.all(
-        snap.docs.map(async (d) => {
-          const userSnap = await getDoc(doc(db, 'users', d.id))
-          const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-          if (d.id === user?.uid) setMyRole((d.data() as LeagueMemberDoc).role)
-          return { ...(d.data() as LeagueMemberDoc), uid: d.id, displayName }
-        })
-      )
-      setMembers(list)
-    })
+    const unsub = listenQuery(
+      collection(db, 'leagues', leagueId, 'members'),
+      'league members',
+      guarded('league members', async (snap) => {
+        const list: MemberWithName[] = await Promise.all(
+          snap.docs.map(async (d) => {
+            const userSnap = await getDoc(doc(db, 'users', d.id))
+            const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
+            if (d.id === user?.uid) setMyRole((d.data() as LeagueMemberDoc).role)
+            return { ...(d.data() as LeagueMemberDoc), uid: d.id, displayName }
+          })
+        )
+        setMembers(list)
+      })
+    )
     return unsub
   }, [leagueId, user])
 
   useEffect(() => {
     if (!leagueId) return
-    const unsub = onSnapshot(
+    const unsub = listenQuery(
       query(collection(db, 'seasons'), where('leagueId', '==', leagueId)),
+      'league seasons',
       (snap) => {
         setSeasons(
           snap.docs

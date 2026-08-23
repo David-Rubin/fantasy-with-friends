@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { doc, onSnapshot, collection, updateDoc, writeBatch } from 'firebase/firestore'
+import { doc, collection, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -47,34 +48,43 @@ export function EpisodeScoringPage() {
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(doc(db, 'seasons', seasonId), (snap) => {
+    return listenDoc(doc(db, 'seasons', seasonId), 'scoring season', (snap) => {
       if (snap.exists()) setSeason(snap.data() as SeasonDoc)
     })
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'contestants'),
+      'scoring contestants',
+      (snap) => {
+        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
+      }
+    )
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'scoringRules'), (snap) => {
-      setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'scoringRules'),
+      'scoring rules',
+      (snap) => {
+        setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
+      }
+    )
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId || !episodeNumber) return
     const epDoc = doc(db, 'seasons', seasonId, 'episodeScores', episodeNumber)
-    const unsubEp = onSnapshot(epDoc, (snap) => {
+    const unsubEp = listenDoc(epDoc, 'episode score', (snap) => {
       setExistingScore(snap.exists() ? (snap.data() as EpisodeScoreDoc) : null)
     })
 
-    const unsubScores = onSnapshot(
+    const unsubScores = listenQuery(
       collection(db, 'seasons', seasonId, 'episodeScores', episodeNumber, 'contestantScores'),
+      'contestant scores',
       (snap) => {
         const map: Record<string, ContestantScoreDoc> = {}
         snap.docs.forEach((d) => {
