@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
-import { nextSlot, pickerAt, isDraftComplete } from './draft'
+import { nextSlot, pickerAt, draftOutcome, openSlots } from './draft'
 import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
 
 admin.initializeApp()
@@ -193,7 +193,7 @@ export const submitPick = functions.https.onCall(
   async (
     data: { seasonId: string; contestantId: string; onBehalfOf?: string },
     context
-  ): Promise<{ status: 'active' | 'complete' }> => {
+  ): Promise<{ status: 'active' | 'awaiting-close' | 'complete' }> => {
     if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
     }
@@ -279,17 +279,25 @@ export const submitPick = functions.https.onCall(
       })
 
       // The draft finishes on a round boundary once too few contestants remain
-      // to give everyone one more; whatever is left over becomes a free agent
-      // (PRD 3.3.5). See isDraftComplete for why parity counts turns, not rosters.
+      // to give everyone one more. If a roster is short and the bench still has
+      // someone on it, an admin settles that before the draft closes.
       const remaining = allContestants.docs.filter(
         (d) =>
           !d.data().draftedByUid && d.data().eliminatedEpisode === null && d.id !== contestantId
       ).length
+      const rosterCounts = countRosters(allContestants.docs, pickOrder, contestantId, pickerUid)
 
-      if (isDraftComplete(draft.currentPickNumber as number, pickOrder.length, remaining)) {
-        tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
-        tx.update(seasonRef, { state: 'active' })
-        return { status: 'complete' as const }
+      const outcome = draftOutcome(
+        draft.currentPickNumber as number,
+        pickOrder.length,
+        remaining,
+        rosterCounts
+      )
+
+      if (outcome !== 'continue') {
+        tx.update(draftRef, { status: outcome, currentPickerUid: null, timerExpiresAt: null })
+        if (outcome === 'complete') tx.update(seasonRef, { state: 'active' })
+        return { status: outcome }
       }
 
       const next = nextSlot(
@@ -441,12 +449,20 @@ export const resolveExpiredTurn = functions.https.onCall(
         })
         tx.update(chosen.ref, { draftedByUid: missedUid, draftedRound: draft.currentRound })
 
-        if (
-          isDraftComplete(draft.currentPickNumber as number, pickOrder.length, undrafted.length - 1)
-        ) {
-          tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
-          tx.update(seasonRef, { state: 'active' })
-          return { outcome: 'auto-picked' as const, status: 'complete' }
+        const autoOutcome = draftOutcome(
+          draft.currentPickNumber as number,
+          pickOrder.length,
+          undrafted.length - 1,
+          countRosters(allContestants.docs, pickOrder, chosen.id, missedUid)
+        )
+        if (autoOutcome !== 'continue') {
+          tx.update(draftRef, {
+            status: autoOutcome,
+            currentPickerUid: null,
+            timerExpiresAt: null,
+          })
+          if (autoOutcome === 'complete') tx.update(seasonRef, { state: 'active' })
+          return { outcome: 'auto-picked' as const, status: autoOutcome }
         }
         advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds)
         return { outcome: 'auto-picked' as const, status: 'active' }
@@ -455,17 +471,187 @@ export const resolveExpiredTurn = functions.https.onCall(
       // Skip: the turn passes with nothing taken. No makeup pick — their next
       // chance is their natural next turn (PRD 3.3.1). The board is unchanged,
       // but a skip still consumes the slot, so this can be the turn that carries
-      // the draft over a round boundary and ends it.
-      if (isDraftComplete(draft.currentPickNumber as number, pickOrder.length, undrafted.length)) {
-        tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
-        tx.update(seasonRef, { state: 'active' })
-        return { outcome: 'skipped' as const, status: 'complete' }
+      // the draft over a round boundary. It is also the turn most likely to leave
+      // a roster short, which is what hands the ending to an admin.
+      const skipOutcome = draftOutcome(
+        draft.currentPickNumber as number,
+        pickOrder.length,
+        undrafted.length,
+        countRosters(allContestants.docs, pickOrder)
+      )
+      if (skipOutcome !== 'continue') {
+        tx.update(draftRef, { status: skipOutcome, currentPickerUid: null, timerExpiresAt: null })
+        if (skipOutcome === 'complete') tx.update(seasonRef, { state: 'active' })
+        return { outcome: 'skipped' as const, status: skipOutcome }
       }
       advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds)
       return { outcome: 'skipped' as const, status: 'active' }
     })
   }
 )
+
+/**
+ * Contestants held per team, in pickOrder order.
+ *
+ * `pendingId`/`pendingUid` let a caller count a pick that is being written in
+ * the same transaction and so is not yet reflected in the snapshot.
+ */
+function countRosters(
+  docs: FirebaseFirestore.QueryDocumentSnapshot[],
+  pickOrder: string[],
+  pendingId?: string,
+  pendingUid?: string
+): number[] {
+  return pickOrder.map(
+    (uid) =>
+      docs.filter((d) => {
+        const owner = d.id === pendingId ? pendingUid : (d.data().draftedByUid as string | null)
+        return owner === uid
+      }).length
+  )
+}
+
+// ── Draft: bench assignment and closing ───────────────────────────────────────
+
+/**
+ * Give a bench contestant to a team that finished a roster short.
+ *
+ * Only reachable while the draft is `awaiting-close`, and only by an admin —
+ * members do not get to top themselves up. A team can be brought level with the
+ * largest roster and no further, so this repairs a skip rather than rewarding it.
+ */
+export const assignFromBench = functions.https.onCall(
+  async (data: { seasonId: string; contestantId: string; toUid: string }, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const { seasonId, contestantId, toUid } = data
+    if (!seasonId || !contestantId || !toUid) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'seasonId, contestantId and toUid required'
+      )
+    }
+
+    const seasonRef = db.doc(`seasons/${seasonId}`)
+    const seasonSnap = await seasonRef.get()
+    if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
+
+    if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Admins only')
+    }
+
+    const memberSnap = await db.doc(`seasons/${seasonId}/members/${toUid}`).get()
+    if (!memberSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'That member is not in this season')
+    }
+
+    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+    if (draftQuery.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+    }
+    const draftRef = draftQuery.docs[0].ref
+    const contestantRef = db.doc(`seasons/${seasonId}/contestants/${contestantId}`)
+    const contestantsCol = db.collection(`seasons/${seasonId}/contestants`)
+
+    await db.runTransaction(async (tx) => {
+      const [draftSnap, contestantSnap, allContestants] = await Promise.all([
+        tx.get(draftRef),
+        tx.get(contestantRef),
+        tx.get(contestantsCol),
+      ])
+      const draft = draftSnap.data()
+      if (!draft || draft.status !== 'awaiting-close') {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'The draft is not waiting to be closed'
+        )
+      }
+      if (!contestantSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Contestant not found')
+      }
+      if (contestantSnap.data()?.draftedByUid) {
+        throw new functions.https.HttpsError('aborted', 'That contestant is already on a team')
+      }
+
+      const pickOrder = (draft.pickOrder ?? []) as string[]
+      const rosterCounts = countRosters(allContestants.docs, pickOrder)
+      const idx = pickOrder.indexOf(toUid)
+      if (idx === -1) {
+        throw new functions.https.HttpsError('failed-precondition', 'That member is not drafting')
+      }
+      if (openSlots(rosterCounts[idx], rosterCounts) === 0) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'That team has no open slots left'
+        )
+      }
+
+      tx.update(contestantRef, { draftedByUid: toUid, draftedRound: null })
+    })
+
+    await db.collection('auditLogs').add({
+      action: 'free_agent_assigned',
+      seasonId,
+      contestantId,
+      targetUid: toUid,
+      actorUid: context.auth.uid,
+      timestamp: Date.now(),
+    })
+
+    return { ok: true }
+  }
+)
+
+/**
+ * Close a draft that is waiting on an admin.
+ *
+ * Deliberately explicit rather than automatic: the admin may have chosen to
+ * leave rosters uneven and the remaining contestants on the bench, and that is a
+ * decision worth making on purpose.
+ */
+export const closeDraft = functions.https.onCall(async (data: { seasonId: string }, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+  }
+  const { seasonId } = data
+  if (!seasonId) throw new functions.https.HttpsError('invalid-argument', 'seasonId required')
+
+  const seasonRef = db.doc(`seasons/${seasonId}`)
+  const seasonSnap = await seasonRef.get()
+  if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
+
+  if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
+    throw new functions.https.HttpsError('permission-denied', 'Admins only')
+  }
+
+  const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+  if (draftQuery.empty) {
+    throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+  }
+  const draftRef = draftQuery.docs[0].ref
+
+  await db.runTransaction(async (tx) => {
+    const draftSnap = await tx.get(draftRef)
+    if (draftSnap.data()?.status !== 'awaiting-close') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'The draft is not waiting to be closed'
+      )
+    }
+    tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+    tx.update(seasonRef, { state: 'active' })
+  })
+
+  await db.collection('auditLogs').add({
+    action: 'draft_closed',
+    seasonId,
+    actorUid: context.auth.uid,
+    timestamp: Date.now(),
+  })
+
+  return { ok: true }
+})
 
 function advanceTurn(
   tx: FirebaseFirestore.Transaction,

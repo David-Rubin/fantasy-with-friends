@@ -17,7 +17,7 @@ import type {
   Contestant,
 } from '../lib/types'
 import { resolvePickOrder } from '../lib/draft'
-import { submitPick, resolveExpiredTurn } from '../lib/draftApi'
+import { submitPick, resolveExpiredTurn, assignFromBench, closeDraft } from '../lib/draftApi'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
@@ -42,6 +42,8 @@ export function DraftRoomPage() {
   const [startingDraft, setStartingDraft] = useState(false)
   const [picking, setPicking] = useState(false)
   const [pickError, setPickError] = useState('')
+  const [assigning, setAssigning] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
 
   useEffect(() => {
     if (!seasonId) return
@@ -126,6 +128,44 @@ export function DraftRoomPage() {
 
   const available = contestants.filter((c) => !c.draftedByUid && c.eliminatedEpisode === null)
   const drafted = contestants.filter((c) => c.draftedByUid)
+
+  // Bench settlement: the picking rounds are over, but somebody finished short
+  // and contestants are going spare. An admin tops up and confirms the close.
+  const isAwaitingClose = draft?.status === 'awaiting-close'
+  const rosterSizes = members.map((m) => contestants.filter((c) => c.draftedByUid === m.uid).length)
+  const largestRoster = rosterSizes.length ? Math.max(...rosterSizes) : 0
+  const teamsWithSlots = members
+    .map((m, i) => ({ member: m, openSlots: largestRoster - rosterSizes[i] }))
+    .filter((t) => t.openSlots > 0)
+
+  async function handleAssignFromBench(contestantId: string, toUid: string) {
+    if (!seasonId || assigning) return
+    setAssigning(true)
+    setPickError('')
+    try {
+      await assignFromBench({ seasonId, contestantId, toUid })
+    } catch (error) {
+      setPickError((error as { message?: string }).message ?? 'Could not assign that contestant.')
+      console.error('Bench assignment rejected', error)
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  async function handleCloseDraft() {
+    if (!seasonId || assigning) return
+    setAssigning(true)
+    setPickError('')
+    try {
+      await closeDraft({ seasonId })
+      setConfirmClose(false)
+    } catch (error) {
+      setPickError((error as { message?: string }).message ?? 'Could not close the draft.')
+      console.error('Close draft rejected', error)
+    } finally {
+      setAssigning(false)
+    }
+  }
 
   async function handleStartDraft() {
     if (!seasonId || !season || !user) return
@@ -257,6 +297,87 @@ export function DraftRoomPage() {
             <Button onClick={handleStartDraft} loading={startingDraft}>
               {t('draft.lobby.startDraft')}
             </Button>
+          )}
+        </div>
+      )}
+
+      {/* Bench settlement — picking is over but a roster finished short */}
+      {isAwaitingClose && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+          <h2 className="text-lg font-semibold text-blue-900">Draft picking is finished</h2>
+          <p className="mt-1 text-sm text-blue-800">
+            {available.length} {available.length === 1 ? 'contestant is' : 'contestants are'} still
+            on the bench, and{' '}
+            {teamsWithSlots.length === 1
+              ? '1 team has an open slot'
+              : `${teamsWithSlots.length} teams have open slots`}
+            . {isAdmin ? 'Fill them from the bench, or close as is.' : 'An admin is settling up.'}
+          </p>
+
+          {pickError && (
+            <p role="alert" className="mt-3 text-sm text-red-700">
+              {pickError}
+            </p>
+          )}
+
+          {isAdmin && (
+            <div className="mt-4 flex flex-col gap-3">
+              {available.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-white px-4 py-3"
+                >
+                  <span className="font-medium text-gray-900 flex-1 min-w-0">{c.name}</span>
+                  {teamsWithSlots.length === 0 ? (
+                    <span className="text-sm text-gray-500">No open slots</span>
+                  ) : (
+                    <>
+                      <label className="sr-only" htmlFor={`assign-${c.id}`}>
+                        Assign {c.name} to a team
+                      </label>
+                      <select
+                        id={`assign-${c.id}`}
+                        defaultValue=""
+                        disabled={assigning}
+                        onChange={(e) => {
+                          if (e.target.value) handleAssignFromBench(c.id, e.target.value)
+                        }}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Assign to…</option>
+                        {teamsWithSlots.map(({ member, openSlots }) => (
+                          <option key={member.uid} value={member.uid}>
+                            {member.displayName} ({openSlots} open)
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                </div>
+              ))}
+
+              <div className="mt-2">
+                {confirmClose ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-sm text-blue-900">
+                      Close the draft
+                      {available.length > 0
+                        ? ` with ${available.length} still on the bench?`
+                        : '?'}{' '}
+                      This cannot be undone.
+                    </p>
+                    <Button onClick={handleCloseDraft} loading={assigning}>
+                      Yes, close it
+                    </Button>
+                    <Button variant="secondary" onClick={() => setConfirmClose(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button onClick={() => setConfirmClose(true)}>Close draft</Button>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}

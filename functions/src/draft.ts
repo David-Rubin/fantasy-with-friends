@@ -60,6 +60,45 @@ export function isDraftComplete(
 }
 
 /**
+ * What happens once a turn has been used: keep going, hand over to an admin, or
+ * close outright.
+ *
+ * `awaiting-close` is the skip-recovery case. A skipped player takes nothing
+ * that round and never draws level again, so the draft can reach its last round
+ * with somebody short while contestants sit undrafted. Closing there would strand
+ * both. Instead an admin gets to top up the short rosters from the bench and then
+ * confirm (PRD 3.3.5).
+ *
+ * A tidy finish — everyone level, or nothing left over — still closes on its own.
+ * Leftovers alone are not enough: a draft that ends level with a contestant spare
+ * has simply produced a free agent, and needs no adjudication.
+ *
+ * @param rosterCounts contestants held per team after this turn, one entry per team
+ */
+export function draftOutcome(
+  justUsedPickNumber: number,
+  teams: number,
+  remaining: number,
+  rosterCounts: number[]
+): 'continue' | 'awaiting-close' | 'complete' {
+  if (!isDraftComplete(justUsedPickNumber, teams, remaining)) return 'continue'
+
+  const uneven = rosterCounts.length > 0 && Math.min(...rosterCounts) < Math.max(...rosterCounts)
+  if (remaining > 0 && uneven) return 'awaiting-close'
+  return 'complete'
+}
+
+/**
+ * How many contestants a team may still be given from the bench: enough to draw
+ * level with the largest roster, and no further. Nobody gets topped up past the
+ * players who took all their turns.
+ */
+export function openSlots(rosterCount: number, rosterCounts: number[]): number {
+  if (rosterCounts.length === 0) return 0
+  return Math.max(0, Math.max(...rosterCounts) - rosterCount)
+}
+
+/**
  * Whose turn (round, pickNumber) belongs to. Even rounds run backwards — that
  * reversal is the whole of "snake". Rounds may run past the number originally
  * projected when turns get skipped, which the parity check handles fine.

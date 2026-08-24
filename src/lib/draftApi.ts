@@ -13,8 +13,20 @@ import { functions } from './firebase'
  */
 export const submitPick = httpsCallable<
   { seasonId: string; contestantId: string; onBehalfOf?: string },
-  { status: 'active' | 'complete' }
+  { status: 'active' | 'awaiting-close' | 'complete' }
 >(functions, 'submitPick')
+
+/**
+ * Give a bench contestant to a team that finished a roster short. Admin only,
+ * and only while the draft is awaiting close.
+ */
+export const assignFromBench = httpsCallable<
+  { seasonId: string; contestantId: string; toUid: string },
+  { ok: true }
+>(functions, 'assignFromBench')
+
+/** Close a draft that is waiting on an admin. Admin only. */
+export const closeDraft = httpsCallable<{ seasonId: string }, { ok: true }>(functions, 'closeDraft')
 
 /**
  * Tell the server a pick clock has run out.

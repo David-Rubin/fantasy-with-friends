@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nextSlot, pickerAt, isDraftComplete } from './draft'
+import { nextSlot, pickerAt, isDraftComplete, draftOutcome, openSlots } from './draft'
 
 describe('nextSlot', () => {
   const twoTeams = ['alice', 'bob']
@@ -83,5 +83,50 @@ describe('isDraftComplete', () => {
     // and the draft would drain the board instead of stopping.
     const teams = 2
     expect(isDraftComplete(2, teams, 1)).toBe(true)
+  })
+})
+
+describe('draftOutcome', () => {
+  it('keeps going while the finish condition is unmet', () => {
+    expect(draftOutcome(1, 2, 4, [1, 0])).toBe('continue')
+  })
+
+  it('closes outright when everyone is level and the board is bare', () => {
+    expect(draftOutcome(2, 2, 0, [2, 2])).toBe('complete')
+  })
+
+  it('closes outright when everyone is level and a contestant is spare', () => {
+    // The 2-team, 5-contestant ending: nobody is short, so the leftover is
+    // simply a free agent and there is nothing for an admin to settle.
+    expect(draftOutcome(2, 2, 1, [2, 2])).toBe('complete')
+  })
+
+  it('waits for an admin when a roster is short and the bench is not empty', () => {
+    // The skip case: one player took a turn fewer, and a contestant is going
+    // spare that could fill the gap.
+    expect(draftOutcome(2, 2, 1, [1, 2])).toBe('awaiting-close')
+  })
+
+  it('closes outright when a roster is short but nothing is left to give', () => {
+    // Uneven, but the bench is empty — an admin has no decision to make.
+    expect(draftOutcome(2, 2, 0, [1, 2])).toBe('complete')
+  })
+})
+
+describe('openSlots', () => {
+  it('is the gap up to the largest roster', () => {
+    expect(openSlots(1, [1, 3])).toBe(2)
+  })
+
+  it('is zero for a team already at the top', () => {
+    expect(openSlots(3, [1, 3])).toBe(0)
+  })
+
+  it('never goes negative', () => {
+    expect(openSlots(5, [1, 3])).toBe(0)
+  })
+
+  it('is zero when everyone is level', () => {
+    expect(openSlots(2, [2, 2, 2])).toBe(0)
   })
 })
