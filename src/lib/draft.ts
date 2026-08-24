@@ -1,47 +1,19 @@
-import type { DraftDoc, PickOrderMethod } from './types'
+import type { PickOrderMethod } from './types'
 
-// ── Strategy interface ────────────────────────────────────────────────────────
-
-export interface DraftState {
-  pickOrder: string[] // uid[]
-  currentRound: number
-  currentPickNumber: number
-  totalContestants: number
-}
-
-export interface DraftStrategy {
-  getNextPicker(state: DraftState): { uid: string; round: number; pickNumber: number } | null
-}
-
-// ── Snake draft ───────────────────────────────────────────────────────────────
-
-export class SnakeDraftStrategy implements DraftStrategy {
-  getNextPicker(state: DraftState): { uid: string; round: number; pickNumber: number } | null {
-    const { pickOrder, currentRound, currentPickNumber, totalContestants } = state
-    const totalPicked = (currentRound - 1) * pickOrder.length + (currentPickNumber - 1)
-    if (totalPicked >= totalContestants) return null
-
-    const isEvenRound = currentRound % 2 === 0
-    const idx = isEvenRound ? pickOrder.length - currentPickNumber : currentPickNumber - 1
-
-    return {
-      uid: pickOrder[idx],
-      round: currentRound,
-      pickNumber: currentPickNumber,
-    }
-  }
-}
-
-export function advancePick(state: DraftState): { round: number; pickNumber: number } | null {
-  const { pickOrder, currentRound, currentPickNumber, totalContestants } = state
-  const totalPicked = (currentRound - 1) * pickOrder.length + currentPickNumber
-  if (totalPicked >= totalContestants) return null
-
-  if (currentPickNumber >= pickOrder.length) {
-    return { round: currentRound + 1, pickNumber: 1 }
-  }
-  return { round: currentRound, pickNumber: currentPickNumber + 1 }
-}
+/**
+ * Client-side draft helpers.
+ *
+ * Turn order and completion are NOT decided here. They live in the submitPick
+ * and resolveExpiredTurn Cloud Functions (see functions/src/draft.ts), because
+ * a client that computes its own next turn can award itself extra ones. This
+ * module previously carried an `advancePick` that ended the draft once the turn
+ * position implied every slot was used; that rule is wrong under skips and is
+ * now gone rather than left here to be copied by mistake.
+ *
+ * Pick order resolution stays client-side: it runs once, before the draft opens,
+ * and the resulting order is written to the draft document for the server to
+ * work from.
+ */
 
 // ── Pick order resolution ─────────────────────────────────────────────────────
 
@@ -60,11 +32,4 @@ export function resolvePickOrder(
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
   return arr
-}
-
-// ── Current picker from DraftDoc ──────────────────────────────────────────────
-
-export function getCurrentPickerUid(draft: DraftDoc): string | null {
-  if (draft.status !== 'active') return null
-  return draft.currentPickerUid
 }

@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
-import { nextSlot, pickerAt } from './draft'
+import { nextSlot, pickerAt, isDraftComplete } from './draft'
 import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
 
 admin.initializeApp()
@@ -278,14 +278,15 @@ export const submitPick = functions.https.onCall(
         draftedRound: draft.currentRound,
       })
 
-      // Completion is counted off the board, not off the turn position: skipped
-      // turns advance the position without taking anyone, so the draft runs
-      // until every contestant is gone however many rounds that takes.
-      const undraftedAfterThisPick = allContestants.docs.filter(
-        (d) => !d.data().draftedByUid && d.id !== contestantId
+      // The draft finishes on a round boundary once too few contestants remain
+      // to give everyone one more; whatever is left over becomes a free agent
+      // (PRD 3.3.5). See isDraftComplete for why parity counts turns, not rosters.
+      const remaining = allContestants.docs.filter(
+        (d) =>
+          !d.data().draftedByUid && d.data().eliminatedEpisode === null && d.id !== contestantId
       ).length
 
-      if (undraftedAfterThisPick === 0) {
+      if (isDraftComplete(draft.currentPickNumber as number, pickOrder.length, remaining)) {
         tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
         tx.update(seasonRef, { state: 'active' })
         return { status: 'complete' as const }
@@ -440,7 +441,9 @@ export const resolveExpiredTurn = functions.https.onCall(
         })
         tx.update(chosen.ref, { draftedByUid: missedUid, draftedRound: draft.currentRound })
 
-        if (undrafted.length === 1) {
+        if (
+          isDraftComplete(draft.currentPickNumber as number, pickOrder.length, undrafted.length - 1)
+        ) {
           tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
           tx.update(seasonRef, { state: 'active' })
           return { outcome: 'auto-picked' as const, status: 'complete' }
@@ -450,9 +453,14 @@ export const resolveExpiredTurn = functions.https.onCall(
       }
 
       // Skip: the turn passes with nothing taken. No makeup pick — their next
-      // chance is their natural next turn (PRD 3.3.1). Because completion is
-      // counted off the board, the draft still runs until every contestant is
-      // gone; it just ends on a different player than the order first implied.
+      // chance is their natural next turn (PRD 3.3.1). The board is unchanged,
+      // but a skip still consumes the slot, so this can be the turn that carries
+      // the draft over a round boundary and ends it.
+      if (isDraftComplete(draft.currentPickNumber as number, pickOrder.length, undrafted.length)) {
+        tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+        tx.update(seasonRef, { state: 'active' })
+        return { outcome: 'skipped' as const, status: 'complete' }
+      }
       advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds)
       return { outcome: 'skipped' as const, status: 'active' }
     })

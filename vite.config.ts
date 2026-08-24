@@ -9,7 +9,9 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    // Cloud Function logic is covered here too — the draft rules that decide
+    // turn order and completion live server-side and are worth testing directly.
+    include: ['src/**/*.test.{ts,tsx}', 'functions/src/**/*.test.ts'],
     exclude: ['e2e/**', 'node_modules/**'],
     coverage: {
       provider: 'v8',
