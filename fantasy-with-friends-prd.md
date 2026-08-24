@@ -1,8 +1,10 @@
 # Product Requirements Document: Fantasy With Friends
 
-**Version**: 1.0
-**Date**: 2026-06-28
+**Version**: 1.1
+**Date**: 2026-08-23
 **Status**: Draft
+
+*1.1 — draft completion, timer expiry, and bench settlement revised to match the implemented behavior (3.3.1, 3.3.4, 3.3.5, 4.6, 4.9, 7.2, 8.2).*
 
 ---
 
@@ -133,8 +135,10 @@ The existing codebase is a basic React scaffold with no implemented features. Th
   |--------------|--------------------------------------------------------------------------------|
   | Auto-pick    | App automatically selects the first available contestant (default)             |
   | Admin picks  | Draft pauses and an Admin selects on the player's behalf                       |
-  | Skip         | Player's turn is skipped. They receive no makeup picks. Their next opportunity is their natural next turn in the snake order. |
+  | Skip         | Player's turn is skipped. They receive no makeup picks. Their next opportunity is their natural next turn in the snake order. A skipped player therefore finishes a contestant short, which is settled from the bench at the end of the draft (3.3.5). |
 
+- Expiry is **decided server-side**. Clients display the countdown and prompt the server when it reaches zero, but the server re-checks its own clock and which turn it is before acting, so a disconnected player cannot stall the draft and simultaneous prompts from several clients only ever advance the turn once.
+- Under **Admin picks** the draft holds at `paused`: the turn stays with the player who missed it, the clock stops, nobody else may pick, and all participants see which player is being covered. The Admin's selection is untimed.
 - All league members can see the draft lobby and their assigned pick position once the draft opens.
 
 **3.3.2 Draft Session (Real-Time)**
@@ -156,13 +160,18 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 - Team names are displayed throughout the app wherever a team is referenced (leaderboard, draft rosters, season detail).
 
 **3.3.4 Draft Completion**
-- When all contestants are drafted (or all picks are exhausted), the draft closes automatically.
+- The draft ends on a **round boundary** — once every player has taken the same number of turns and fewer contestants remain than there are teams. It never ends mid-round, which would give players early in the order a contestant the rest never had a chance at.
+- Parity is measured in **turns taken**, not roster size. A player whose turn was skipped takes nothing that round and, with no makeup picks, can never draw level again; requiring equal rosters would leave the draft with no reachable ending.
 - Any remaining undrafted contestants are placed on a **free-agent bench**.
-- The season transitions to `active`.
+- When the rounds end with every roster level, the draft closes automatically and the season transitions to `active`. A single contestant left over is simply a free agent and needs no intervention.
+- When the rounds end with **a roster short and the bench occupied** — which only happens after a skipped turn — the draft does **not** close automatically. It enters an `awaiting-close` state for an Admin to settle (below).
 
 **3.3.5 Free-Agent Bench**
-- Admins can assign free-agent contestants to a player's team mid-season (e.g. if rules change or a player wants to pick up an unowned contestant).
+- **Settling an unfinished draft**: while a draft is `awaiting-close`, an Admin can assign bench contestants to the teams that finished short. A team can be topped up to match the largest roster and no further, so this repairs a skipped turn rather than rewarding it. Only Admins can assign; members cannot claim from the bench themselves.
+- The Admin must **explicitly confirm** closing the draft, whether or not they assigned anyone — leaving rosters uneven is a legitimate choice, and worth making deliberately. Only then does the season transition to `active`.
+- Admins can also assign free-agent contestants to a player's team mid-season (e.g. if rules change or a player wants to pick up an unowned contestant).
 - Free agents are visible to all members on the season page.
+- All bench assignments and the draft close are recorded in the audit log with the acting Admin's ID.
 
 ---
 
@@ -310,6 +319,11 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 - **Team naming**: Each player sees an editable team name field in their team roster panel at all times during the draft. Name defaults to "[Player name]'s Team."
 - **Skip expiry**: When a player's timer expires and the behavior is set to "Skip," their turn is forfeited with no makeup picks. Their next pick opportunity is their natural next turn in the snake order.
 
+**Settling up (only when a roster finished short and the bench is occupied)**
+- All participants see that picking has finished and how many contestants remain on the bench.
+- The Admin sees each bench contestant alongside the teams with open slots, and a "Close draft" action that asks for confirmation — naming how many would be left behind — before it commits.
+- Everyone else sees that an Admin is settling up. The draft is not closed and the season is not yet `active`.
+
 **Draft Complete**
 - Completion banner: "Draft complete! Your team is [team name]."
 - Players can still edit their team name until first episode scores are submitted.
@@ -346,7 +360,9 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 |------------------------------------|--------------------------------------------------------------|
 | No leagues yet                     | Dashboard shows empty state with "Create League" CTA         |
 | Season in `setup` with no rules    | "Open Draft" is disabled with tooltip explanation            |
-| Draft room — player disconnects    | Reconnects automatically; pick timer continues server-side   |
+| Draft room — player disconnects    | Reconnects automatically; expiry is judged from stored state, so their turn resolves whether or not they return |
+| Draft room — everyone disconnects  | Nothing resolves until someone reopens the room, at which point the expired turn is applied from stored state |
+| Draft ends with a roster short     | Draft holds at `awaiting-close` for an Admin to settle from the bench (3.3.5) |
 | Invite code not found              | Error page with "Check the link or ask for a new one"        |
 | Episode already scored             | "Score Episode" replaced with "View Scores" + "Unlock"       |
 | All contestants eliminated         | Season can still be marked `complete` manually by Admin      |
@@ -517,7 +533,7 @@ WCAG 2.1 AA as a guiding reference, applied pragmatically. The goal is a solid, 
 - **Season membership**: Only users who have been invited to and joined a specific season can read that season's data.
 - **Write access**: Only Admins and Owners can create/edit seasons, contestants, scoring rules, and episode scores. Members are read-only.
 - **Role elevation**: Only the Owner can promote/demote Admin roles. Admins cannot modify other Admins' roles or the Owner's role.
-- **Draft actions**: Picks are validated server-side (via Firestore rules or Cloud Functions) — a member cannot submit a pick out of turn or for a contestant already drafted.
+- **Draft actions**: Picks are submitted through a Cloud Function, not written by the client. Security rules alone cannot police a draft — validating whose turn comes next would mean re-deriving snake order inside a rule, and detecting a finished draft needs an aggregate rules cannot compute — so members have no write access to draft, contestant, or season documents at all. The function checks turn and availability together in one transaction, which also prevents two clients picking the same contestant from a stale view. Bench assignment and closing the draft are likewise Admin-only Cloud Functions.
 
 ### 7.3 Data Sensitivity
 
@@ -545,10 +561,10 @@ WCAG 2.1 AA as a guiding reference, applied pragmatically. The goal is a solid, 
 Fantasy With Friends is built show-agnostic from day one. No GBBO-specific logic exists in the core data model, scoring engine, or draft system. New shows, rule formats, and draft mechanics can be added by extending defined interfaces rather than modifying core logic.
 
 ### 8.2 Draft Format
-- The draft engine is implemented behind a `DraftStrategy` interface.
-- Snake draft is the default implementation.
-- New formats (randomized auto-draft, async picks, auction draft) are added as new strategy implementations without touching the draft room UI or data model.
-- The `draftFormat` field on a season document is a typed enum; adding a new format requires adding an enum value and a corresponding strategy class.
+- The draft engine lives **server-side**, in the Cloud Functions that submit a pick and resolve an expired turn. Turn order and completion are decided there because the client cannot be trusted to compute its own next turn.
+- Snake draft is the default implementation: turn order, completion, and expiry policy are separate functions, so a new format replaces the turn-order logic without touching the rest.
+- New formats (randomized auto-draft, async picks, auction draft) are added alongside it, without changes to the draft room UI or the data model.
+- The `draftFormat` field on a season document is a typed enum; adding a new format requires adding an enum value and the matching server-side logic.
 
 ### 8.3 Pick Order Methodology
 - Pick order is resolved by a `PickOrderStrategy` interface called before the draft opens.
