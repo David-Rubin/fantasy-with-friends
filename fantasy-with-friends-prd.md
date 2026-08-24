@@ -1,10 +1,11 @@
 # Product Requirements Document: Fantasy With Friends
 
-**Version**: 1.1
-**Date**: 2026-08-23
+**Version**: 1.2
+**Date**: 2026-08-24
 **Status**: Draft
 
 *1.1 — draft completion, timer expiry, and bench settlement revised to match the implemented behavior (3.3.1, 3.3.4, 3.3.5, 4.6, 4.9, 7.2, 8.2).*
+*1.2 — app-level Superadmin role and user directory added (3.1.3, 3.1.4, 4.1, 7.2); admin-controlled clock pause added (3.3.1, 4.6).*
 
 ---
 
@@ -63,10 +64,22 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 - A user must have an account to be added to a season.
 
 **3.1.3 Admin Roles**
+
+These three are **per league**. A user's role in one league says nothing about another, and "season admin" is not a separate thing — it resolves to admin of the league the season belongs to.
+
 - **Owner**: Full control — can create/delete seasons, manage members, grant/revoke Admin role.
 - **Admin**: Can create/edit seasons, add contestants, define scoring rules, enter episode scores, and manage the draft. Cannot remove the Owner.
 - **Member**: Read-only access to league data; participates in drafts.
 - The Owner can promote any Member to Admin (and demote Admins back to Member).
+
+**3.1.4 Superadmin (app level)**
+
+A single role that spans the whole app, separate from the per-league roles above — deliberately not called "Owner", which is already taken at the league level.
+
+- A Superadmin can do anything any user can do, in any league or season, without being a member of it. This grants **no new abilities**: actions closed to everyone — writing a draft pick directly, reading audit logs, granting the role itself — stay closed to Superadmins too.
+- Superadmins can view a directory of every account, including email addresses. This is the one place emails are visible to anyone other than their owner (see 7.3), and each viewing is recorded in the audit log.
+- **Bootstrapping**: the first account created in an environment with no existing users automatically becomes Superadmin. This fires once per environment and does not re-arm — an environment that already has accounts will never auto-grant, since "the next person to sign up gets it" would be a way in rather than a bootstrap.
+- There is no in-app way to grant the role, not even for a Superadmin. Subsequent grants are made directly against the database.
 
 ---
 
@@ -139,6 +152,7 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 
 - Expiry is **decided server-side**. Clients display the countdown and prompt the server when it reaches zero, but the server re-checks its own clock and which turn it is before acting, so a disconnected player cannot stall the draft and simultaneous prompts from several clients only ever advance the turn once.
 - Under **Admin picks** the draft holds at `paused`: the turn stays with the player who missed it, the clock stops, nobody else may pick, and all participants see which player is being covered. The Admin's selection is untimed.
+- **Pausing the clock**: an Admin can stop and restart the pick clock at any point during a live draft. It stops server-side and so stops for everyone, not just the Admin who pressed it — the countdown each client draws is only a view of the shared expiry time. Whatever was left is banked and handed back on resume, so a pause costs the current picker nothing, and a turn cannot expire while paused. This is distinct from the `paused` state above: here the turn is untouched and its holder can still pick, the clock simply is not running.
 - All league members can see the draft lobby and their assigned pick position once the draft opens.
 
 **3.3.2 Draft Session (Real-Time)**
@@ -233,6 +247,7 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 /leagues/:leagueId/seasons/:seasonId/draft                  → Draft room
 /leagues/:leagueId/seasons/:seasonId/score/:episodeNumber   → Episode scoring (admin)
 /leagues/:leagueId/seasons/:seasonId/awards                 → Season awards (admin)
+/admin/users                                                → User directory (superadmin)
 ```
 
 ### 4.2 Auth Flow
@@ -311,7 +326,7 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 **Active Draft**
 - Layout (desktop): contestant list on the left, team rosters panel on the right, active picker + timer banner at the top.
 - Layout (mobile): stacked — timer banner, then tabs to switch between "Contestants" and "Teams."
-- **Active picker banner**: visible to all participants at all times. Displays "[Player name]'s pick" and the countdown timer.
+- **Active picker banner**: visible to all participants at all times. Displays "[Player name]'s pick" and the countdown timer. Admins also see a control to pause and resume the clock; while paused, everyone sees that it is stopped and how much time will be left when it restarts.
 - Contestant list ordering (maintained in real time):
   1. Available contestants — shown first. Active picker sees "Pick" buttons; all others see cards as non-interactive.
   2. Drafted contestants — shown at the end, greyed out, bio still accessible on hover/tap, owner name displayed on the card.
@@ -533,6 +548,8 @@ WCAG 2.1 AA as a guiding reference, applied pragmatically. The goal is a solid, 
 - **Season membership**: Only users who have been invited to and joined a specific season can read that season's data.
 - **Write access**: Only Admins and Owners can create/edit seasons, contestants, scoring rules, and episode scores. Members are read-only.
 - **Role elevation**: Only the Owner can promote/demote Admin roles. Admins cannot modify other Admins' roles or the Owner's role.
+- **Superadmin**: Treated as a member and admin of every league, so the checks above pass for them without membership. Folded into the shared membership helpers rather than repeated per rule, so rules and Cloud Functions cannot drift apart on who may act. It is a widening of existing permissions only — rules closed to everybody stay closed. The role is stored in its own collection with writes disabled, never as a field on the user document: that document is self-writable, so a flag there would let any account promote itself.
+- **User directory**: Listing accounts goes through a Cloud Function that checks the role server-side, not a Firestore query. The `users` read rule stays own-document-only, so there is exactly one audited path to anything wider; widening the rule would make every future client query a potential leak.
 - **Draft actions**: Picks are submitted through a Cloud Function, not written by the client. Security rules alone cannot police a draft — validating whose turn comes next would mean re-deriving snake order inside a rule, and detecting a finished draft needs an aggregate rules cannot compute — so members have no write access to draft, contestant, or season documents at all. The function checks turn and availability together in one transaction, which also prevents two clients picking the same contestant from a stale view. Bench assignment and closing the draft are likewise Admin-only Cloud Functions.
 
 ### 7.3 Data Sensitivity
@@ -632,6 +649,10 @@ The following actions are recorded with a timestamp and the acting user's ID:
 | Admin role granted/revoked       | League ID, granting user ID, target user ID         |
 | Free agent assigned to team      | Season ID, admin user ID, contestant ID, team ID    |
 | Team renamed                     | Season ID, user ID, old name, new name              |
+| Draft clock paused/resumed       | Season ID, admin user ID                            |
+| Draft closed                     | Season ID, admin user ID                            |
+| User directory viewed            | Superadmin user ID, account count                   |
+| Superadmin granted               | Target user ID, reason (e.g. first account)         |
 
 ### 10.2 Storage
 - Audit logs are stored as a subcollection in Firestore (`/auditLogs`), append-only.

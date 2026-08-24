@@ -138,5 +138,7 @@
   "admin.users.email": "Email",
   "admin.users.joined": "Joined",
   "admin.users.empty": "No accounts yet.",
-  "admin.users.noMatches": "No users match that filter."
+  "admin.users.noMatches": "No users match that filter.",
+  "draft.pauseTimer": "Pause clock",
+  "draft.resumeTimer": "Resume clock"
 }

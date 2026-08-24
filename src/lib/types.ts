@@ -169,6 +169,13 @@ export interface DraftDoc {
   consecutiveSkips: number
   /** Why the draft halted, when it did so for a reason other than finishing. */
   haltedReason: 'skips' | null
+  /**
+   * Milliseconds left on the clock when an admin paused it, or null when it is
+   * running. Distinct from `status: 'paused'`, which means a turn expired under
+   * the admin-picks policy and is waiting on a proxy pick. Here the turn still
+   * belongs to whoever holds it and they can still pick — only the clock stops.
+   */
+  timerPausedRemainingMs: number | null
 }
 
 export interface DraftPickDoc {

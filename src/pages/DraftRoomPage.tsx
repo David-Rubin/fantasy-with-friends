@@ -17,7 +17,13 @@ import type {
   Contestant,
 } from '../lib/types'
 import { resolvePickOrder } from '../lib/draft'
-import { submitPick, resolveExpiredTurn, assignFromBench, closeDraft } from '../lib/draftApi'
+import {
+  submitPick,
+  resolveExpiredTurn,
+  assignFromBench,
+  closeDraft,
+  setTimerPaused,
+} from '../lib/draftApi'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
@@ -44,6 +50,7 @@ export function DraftRoomPage() {
   const [pickError, setPickError] = useState('')
   const [assigning, setAssigning] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
+  const [togglingTimer, setTogglingTimer] = useState(false)
 
   useEffect(() => {
     if (!seasonId) return
@@ -95,6 +102,24 @@ export function DraftRoomPage() {
 
   const isAdmin = myRole === 'owner' || myRole === 'admin'
   const isPaused = draft?.status === 'paused'
+  // An admin stopped the clock. Distinct from `status: 'paused'` above, which is
+  // a turn that expired and is waiting on a proxy pick.
+  const timerPaused =
+    draft?.timerPausedRemainingMs !== null && draft?.timerPausedRemainingMs !== undefined
+
+  async function handleToggleTimer() {
+    if (!seasonId || togglingTimer) return
+    setTogglingTimer(true)
+    setPickError('')
+    try {
+      await setTimerPaused({ seasonId, paused: !timerPaused })
+    } catch (error) {
+      setPickError((error as { message?: string }).message ?? 'Could not change the timer.')
+      console.error('Timer toggle rejected', error)
+    } finally {
+      setTogglingTimer(false)
+    }
+  }
   // While paused the turn still belongs to whoever missed it — they may still
   // pick if they reappear, and an admin may pick for them.
   const isMyTurn = (draft?.status === 'active' || isPaused) && draft?.currentPickerUid === user?.uid
@@ -184,6 +209,7 @@ export function DraftRoomPage() {
         timerExpiresAt: Date.now() + season.timerSeconds * 1000,
         consecutiveSkips: 0,
         haltedReason: null,
+        timerPausedRemainingMs: null,
       } satisfies DraftDoc)
 
       // Assign pick positions to members
@@ -414,13 +440,42 @@ export function DraftRoomPage() {
                 </p>
               </div>
             </div>
+          ) : timerPaused ? (
+            <div
+              role="status"
+              className="rounded-xl border border-gray-300 bg-white px-5 py-4 flex flex-wrap items-center gap-3"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-900">
+                  Clock paused — {currentPickerName}&rsquo;s pick
+                </p>
+                <p className="text-sm text-gray-500">
+                  {Math.ceil((draft.timerPausedRemainingMs ?? 0) / 1000)}s will be left when it
+                  restarts. They can still pick while it is paused.
+                </p>
+              </div>
+              {isAdmin && (
+                <Button onClick={handleToggleTimer} loading={togglingTimer}>
+                  {t('draft.resumeTimer')}
+                </Button>
+              )}
+            </div>
           ) : (
-            <TimerBanner
-              pickerName={currentPickerName}
-              timerExpiresAt={draft.timerExpiresAt}
-              durationSeconds={season.timerSeconds}
-              isYourTurn={isMyTurn}
-            />
+            <>
+              <TimerBanner
+                pickerName={currentPickerName}
+                timerExpiresAt={draft.timerExpiresAt}
+                durationSeconds={season.timerSeconds}
+                isYourTurn={isMyTurn}
+              />
+              {isAdmin && (
+                <div className="mt-2 flex justify-end">
+                  <Button variant="secondary" onClick={handleToggleTimer} loading={togglingTimer}>
+                    {t('draft.pauseTimer')}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
 
           {pickError && (

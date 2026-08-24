@@ -7,9 +7,21 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isLeagueMember(leagueId) {
+    // App-level role. Folded into the membership helpers below rather than
+    // repeated at every rule, so a superadmin can reach any league or season
+    // without being a member of it. Deliberately NOT folded into the rules that
+    // are closed to everybody — picks, audit logs, granting the role itself —
+    // since those are not actions any user can take either.
+    function isSuperadmin() {
       return isSignedIn() &&
-        exists(/databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid));
+        exists(/databases/$(database)/documents/superadmins/$(request.auth.uid));
+    }
+
+    function isLeagueMember(leagueId) {
+      return isSignedIn() && (
+        isSuperadmin() ||
+        exists(/databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid))
+      );
     }
 
     function leagueMemberRole(leagueId) {
@@ -17,17 +29,22 @@ service cloud.firestore {
     }
 
     function isLeagueAdmin(leagueId) {
-      return isLeagueMember(leagueId) &&
-        leagueMemberRole(leagueId) in ['owner', 'admin'];
+      return isSuperadmin() || (
+        isLeagueMember(leagueId) && leagueMemberRole(leagueId) in ['owner', 'admin']
+      );
     }
 
     function isLeagueOwner(leagueId) {
-      return isLeagueMember(leagueId) && leagueMemberRole(leagueId) == 'owner';
+      return isSuperadmin() || (
+        isLeagueMember(leagueId) && leagueMemberRole(leagueId) == 'owner'
+      );
     }
 
     function isSeasonMember(seasonId) {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/seasons/$(seasonId)/members/$(request.auth.uid));
+      return isSignedIn() && (
+        isSuperadmin() ||
+        exists(/databases/$(database)/documents/seasons/$(seasonId)/members/$(request.auth.uid))
+      );
     }
 
     function seasonLeagueId(seasonId) {
@@ -159,6 +176,14 @@ service cloud.firestore {
           allow write: if false;
         }
       }
+    }
+
+    // ── App config ────────────────────────────────────────────────────────────
+    // Holds the one-shot marker recording that the first account has already
+    // been made superadmin. Closed to clients entirely — a client that could
+    // delete it could re-arm the grant and take the role by signing up again.
+    match /appConfig/{docId} {
+      allow read, write: if false;
     }
 
     // ── Audit Logs ────────────────────────────────────────────────────────────
