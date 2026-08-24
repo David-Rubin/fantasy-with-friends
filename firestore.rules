@@ -7,9 +7,21 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isLeagueMember(leagueId) {
+    // App-level role. Folded into the membership helpers below rather than
+    // repeated at every rule, so a superadmin can reach any league or season
+    // without being a member of it. Deliberately NOT folded into the rules that
+    // are closed to everybody — picks, audit logs, granting the role itself —
+    // since those are not actions any user can take either.
+    function isSuperadmin() {
       return isSignedIn() &&
-        exists(/databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid));
+        exists(/databases/$(database)/documents/superadmins/$(request.auth.uid));
+    }
+
+    function isLeagueMember(leagueId) {
+      return isSignedIn() && (
+        isSuperadmin() ||
+        exists(/databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid))
+      );
     }
 
     function leagueMemberRole(leagueId) {
@@ -17,17 +29,22 @@ service cloud.firestore {
     }
 
     function isLeagueAdmin(leagueId) {
-      return isLeagueMember(leagueId) &&
-        leagueMemberRole(leagueId) in ['owner', 'admin'];
+      return isSuperadmin() || (
+        isLeagueMember(leagueId) && leagueMemberRole(leagueId) in ['owner', 'admin']
+      );
     }
 
     function isLeagueOwner(leagueId) {
-      return isLeagueMember(leagueId) && leagueMemberRole(leagueId) == 'owner';
+      return isSuperadmin() || (
+        isLeagueMember(leagueId) && leagueMemberRole(leagueId) == 'owner'
+      );
     }
 
     function isSeasonMember(seasonId) {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/seasons/$(seasonId)/members/$(request.auth.uid));
+      return isSignedIn() && (
+        isSuperadmin() ||
+        exists(/databases/$(database)/documents/seasons/$(seasonId)/members/$(request.auth.uid))
+      );
     }
 
     function seasonLeagueId(seasonId) {
@@ -43,6 +60,26 @@ service cloud.firestore {
       allow read: if request.auth.uid == uid;
       allow write: if request.auth.uid == uid
         && !('pinHash' in request.resource.data);
+    }
+
+    // ── Superadmins ───────────────────────────────────────────────────────────
+    // App-level role, distinct from the per-league owner/admin/member roles.
+    // Deliberately its own collection rather than a field on /users: that
+    // document is self-writable, so a flag there would let anyone promote
+    // themselves. Reading is limited to your own record, which is all the client
+    // needs to decide whether to show the link.
+    //
+    // There is no UI for granting — `allow write: if false` means not even a
+    // superadmin can create another from the app. Add a document keyed by the
+    // user's uid out of band: the Firestore console in production, or against
+    // the emulator with
+    //   curl -X POST "$FIRESTORE/superadmins?documentId=<uid>" \
+    //     -H "Authorization: Bearer owner" -H "Content-Type: application/json" \
+    //     -d '{"fields":{"grantedAt":{"integerValue":"0"}}}'
+    // The document's contents are never read; its existence is the grant.
+    match /superadmins/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
     }
 
     // ── Collection group: a user's own membership docs ────────────────────────
@@ -139,6 +176,14 @@ service cloud.firestore {
           allow write: if false;
         }
       }
+    }
+
+    // ── App config ────────────────────────────────────────────────────────────
+    // Holds the one-shot marker recording that the first account has already
+    // been made superadmin. Closed to clients entirely — a client that could
+    // delete it could re-arm the grant and take the role by signing up again.
+    match /appConfig/{docId} {
+      allow read, write: if false;
     }
 
     // ── Audit Logs ────────────────────────────────────────────────────────────

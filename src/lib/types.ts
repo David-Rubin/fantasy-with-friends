@@ -1,6 +1,18 @@
 // ── Role / State enums ────────────────────────────────────────────────────────
 
+/**
+ * Roles within a single league. Separate from the app-level superadmin role,
+ * which is not stored here — see the `superadmins` collection.
+ */
 export type MemberRole = 'owner' | 'admin' | 'member'
+
+/** A row in the superadmin user directory. */
+export interface AppUser {
+  uid: string
+  displayName: string
+  email: string
+  createdAt: number | null
+}
 export type SeasonState = 'setup' | 'draft' | 'active' | 'complete'
 export type DraftFormat = 'snake'
 export type PickOrderMethod = 'randomized' | 'admin-set'
@@ -157,6 +169,13 @@ export interface DraftDoc {
   consecutiveSkips: number
   /** Why the draft halted, when it did so for a reason other than finishing. */
   haltedReason: 'skips' | null
+  /**
+   * Milliseconds left on the clock when an admin paused it, or null when it is
+   * running. Distinct from `status: 'paused'`, which means a turn expired under
+   * the admin-picks policy and is waiting on a proxy pick. Here the turn still
+   * belongs to whoever holds it and they can still pick — only the clock stops.
+   */
+  timerPausedRemainingMs: number | null
 }
 
 export interface DraftPickDoc {

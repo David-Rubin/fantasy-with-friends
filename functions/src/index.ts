@@ -393,9 +393,10 @@ export const resolveExpiredTurn = functions.https.onCall(
     const policy = (season?.timerExpiry as string) ?? 'auto-pick'
     const timerSeconds = (season?.timerSeconds as number) ?? 60
 
-    // Only a member of the season may nudge the clock.
+    // Only someone in the season may nudge the clock — or a superadmin, who can
+    // act in any season without joining it.
     const memberSnap = await db.doc(`seasons/${seasonId}/members/${context.auth.uid}`).get()
-    if (!memberSnap.exists) {
+    if (!memberSnap.exists && !(await isSuperadmin(context.auth.uid))) {
       throw new functions.https.HttpsError('permission-denied', 'Not a member of this season')
     }
 
@@ -530,6 +531,92 @@ function countRosters(
       }).length
   )
 }
+
+// ── Draft: pause and resume the clock ─────────────────────────────────────────
+
+/**
+ * Stop or restart the pick clock, at an admin's discretion.
+ *
+ * Server-side so it reaches everyone: the countdown each client renders is only
+ * a view of `timerExpiresAt`, so clearing it stops every participant's clock at
+ * once rather than just the admin's. What is left is banked and handed back on
+ * resume, so a pause costs the current picker nothing.
+ *
+ * Expiry needs no extra guard while paused — both the client nudge and
+ * resolveExpiredTurn already do nothing without a `timerExpiresAt`.
+ *
+ * Separate from `status: 'paused'`, which means a turn expired under the
+ * admin-picks policy. Here the turn is untouched and its holder can still pick.
+ */
+export const setTimerPaused = functions.https.onCall(
+  async (
+    data: { seasonId: string; paused: boolean },
+    context
+  ): Promise<{ paused: boolean; remainingMs: number | null }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const { seasonId, paused } = data
+    if (!seasonId || typeof paused !== 'boolean') {
+      throw new functions.https.HttpsError('invalid-argument', 'seasonId and paused required')
+    }
+
+    const seasonSnap = await db.doc(`seasons/${seasonId}`).get()
+    if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
+
+    if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Admins only')
+    }
+
+    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+    if (draftQuery.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+    }
+    const draftRef = draftQuery.docs[0].ref
+    const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
+
+    const result = await db.runTransaction(async (tx) => {
+      const draftSnap = await tx.get(draftRef)
+      const draft = draftSnap.data()
+      if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
+        throw new functions.https.HttpsError('failed-precondition', 'Draft is not running')
+      }
+
+      const bankedMs = draft.timerPausedRemainingMs as number | null
+
+      if (paused) {
+        if (bankedMs !== null && bankedMs !== undefined) {
+          return { paused: true, remainingMs: bankedMs } // already paused
+        }
+        const expiresAt = draft.timerExpiresAt as number | null
+        // Bank whatever is left, never a negative. An already-expired clock
+        // banks nothing, so resuming hands back a fresh turn rather than one
+        // that fires the moment it restarts.
+        const remainingMs = expiresAt ? Math.max(0, expiresAt - Date.now()) : timerSeconds * 1000
+        tx.update(draftRef, { timerPausedRemainingMs: remainingMs, timerExpiresAt: null })
+        return { paused: true, remainingMs }
+      }
+
+      if (bankedMs === null || bankedMs === undefined) {
+        return { paused: false, remainingMs: null } // already running
+      }
+      tx.update(draftRef, {
+        timerPausedRemainingMs: null,
+        timerExpiresAt: Date.now() + (bankedMs > 0 ? bankedMs : timerSeconds * 1000),
+      })
+      return { paused: false, remainingMs: null }
+    })
+
+    await db.collection('auditLogs').add({
+      action: paused ? 'draft_timer_paused' : 'draft_timer_resumed',
+      seasonId,
+      actorUid: context.auth.uid,
+      timestamp: Date.now(),
+    })
+
+    return result
+  }
+)
 
 // ── Draft: bench assignment and closing ───────────────────────────────────────
 
@@ -698,12 +785,125 @@ function advanceTurn(
   })
 }
 
+/**
+ * Admin of this league — or a superadmin, who is admin of everything.
+ *
+ * Mirrors the same fold in firestore.rules, so the two agree about who may act
+ * without every call site having to remember the app-level role exists.
+ */
 async function isLeagueAdmin(leagueId: string, uid: string): Promise<boolean> {
+  if (await isSuperadmin(uid)) return true
   const snap = await db.doc(`leagues/${leagueId}/members/${uid}`).get()
   if (!snap.exists) return false
   const role = snap.data()?.role as string | undefined
   return role === 'owner' || role === 'admin'
 }
+
+// ── Superadmin: app-wide user directory ───────────────────────────────────────
+
+/** App-level role, unrelated to the per-league owner/admin/member roles. */
+async function isSuperadmin(uid: string): Promise<boolean> {
+  return (await db.doc(`superadmins/${uid}`).get()).exists
+}
+
+/**
+ * Make the very first account on an environment a superadmin.
+ *
+ * A trigger rather than a branch inside signUpUser, because that is not the only
+ * way an account gets made — the emulator path in src/lib/auth.ts writes the user
+ * document straight from the client and never calls the function. Hanging this
+ * off the document itself catches every route in.
+ *
+ * The one-shot marker is what makes it safe: two signups landing together would
+ * both see an empty superadmins collection, so instead the transaction claims a
+ * single document, and Firestore serializes contention on it. Whichever trigger
+ * claims it grants the role; the other finds it taken and does nothing.
+ *
+ * Deleting the last superadmin does not re-arm this. Recovering from that means
+ * granting out of band, same as the first one in an environment that already has
+ * users — which is deliberate, since "next person to sign up becomes superadmin"
+ * would be a way in rather than a recovery.
+ */
+export const grantFirstUserSuperadmin = functions.firestore
+  .document('users/{uid}')
+  .onCreate(async (_snap, context) => {
+    const { uid } = context.params
+    const markerRef = db.doc('appConfig/bootstrap')
+
+    // Only in a genuinely empty environment. Without this, deploying to a
+    // project that already has accounts would hand the role to whoever signed
+    // up next — a way in rather than a bootstrap. The trigger runs after the
+    // write, so one document means this account and nobody else.
+    const existing = await db.collection('users').limit(2).get()
+    if (existing.size > 1) return
+
+    const granted = await db.runTransaction(async (tx) => {
+      const marker = await tx.get(markerRef)
+      if (marker.exists) return false
+
+      tx.set(markerRef, { superadminGrantedTo: uid, grantedAt: Date.now() })
+      tx.set(db.doc(`superadmins/${uid}`), {
+        grantedAt: Date.now(),
+        note: 'first account on this environment',
+      })
+      return true
+    })
+
+    if (granted) {
+      functions.logger.info(`Granted superadmin to first user ${uid}`)
+      await db.collection('auditLogs').add({
+        action: 'superadmin_granted',
+        actorUid: 'system',
+        targetUid: uid,
+        reason: 'first-user',
+        timestamp: Date.now(),
+      })
+    }
+  })
+
+/**
+ * Every account on the app, for the superadmin user directory.
+ *
+ * Served through a function rather than a Firestore query on purpose. Listing
+ * users means exposing email addresses, which PRD 7.3 otherwise keeps private
+ * between league members — so the `users` read rule stays own-document-only and
+ * this is the single audited way to see more. Widening the rule instead would
+ * make every future client query a potential leak.
+ */
+export const listAllUsers = functions.https.onCall(
+  async (
+    _data: unknown,
+    context
+  ): Promise<{
+    users: { uid: string; displayName: string; email: string; createdAt: number | null }[]
+  }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    if (!(await isSuperadmin(context.auth.uid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Superadmins only')
+    }
+
+    const snap = await db.collection('users').get()
+    const users = snap.docs
+      .map((d) => ({
+        uid: d.id,
+        displayName: (d.data().displayName as string) ?? '',
+        email: (d.data().email as string) ?? '',
+        createdAt: (d.data().createdAt as number) ?? null,
+      }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName))
+
+    await db.collection('auditLogs').add({
+      action: 'user_directory_viewed',
+      actorUid: context.auth.uid,
+      userCount: users.length,
+      timestamp: Date.now(),
+    })
+
+    return { users }
+  }
+)
 
 // ── Audit log helper ──────────────────────────────────────────────────────────
 

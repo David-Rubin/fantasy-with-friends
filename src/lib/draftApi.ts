@@ -25,6 +25,18 @@ export const assignFromBench = httpsCallable<
   { ok: true }
 >(functions, 'assignFromBench')
 
+/**
+ * Stop or restart the pick clock. Admin only.
+ *
+ * Server-side so it reaches every participant, not just the admin who pressed
+ * it. Time left is banked and handed back on resume, so the current picker
+ * loses nothing.
+ */
+export const setTimerPaused = httpsCallable<
+  { seasonId: string; paused: boolean },
+  { paused: boolean; remainingMs: number | null }
+>(functions, 'setTimerPaused')
+
 /** Close a draft that is waiting on an admin. Admin only. */
 export const closeDraft = httpsCallable<{ seasonId: string }, { ok: true }>(functions, 'closeDraft')
 
