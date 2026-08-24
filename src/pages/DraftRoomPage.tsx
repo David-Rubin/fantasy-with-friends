@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { doc, onSnapshot, collection, updateDoc, addDoc, getDoc } from 'firebase/firestore'
+import { doc, collection, updateDoc, addDoc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -15,7 +16,8 @@ import type {
   MemberRole,
   Contestant,
 } from '../lib/types'
-import { resolvePickOrder, advancePick } from '../lib/draft'
+import { resolvePickOrder } from '../lib/draft'
+import { submitPick, resolveExpiredTurn, assignFromBench, closeDraft } from '../lib/draftApi'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
@@ -32,64 +34,138 @@ export function DraftRoomPage() {
 
   const [season, setSeason] = useState<SeasonDoc | null>(null)
   const [draft, setDraft] = useState<DraftDoc | null>(null)
-  const [draftId, setDraftId] = useState<string | null>(null)
   const [contestants, setContestants] = useState<Contestant[]>([])
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const [teamName, setTeamName] = useState('')
   const [savingTeamName, setSavingTeamName] = useState(false)
   const [startingDraft, setStartingDraft] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [pickError, setPickError] = useState('')
+  const [assigning, setAssigning] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(doc(db, 'seasons', seasonId), (snap) => {
+    return listenDoc(doc(db, 'seasons', seasonId), 'draft season', (snap) => {
       if (snap.exists()) setSeason(snap.data() as SeasonDoc)
     })
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId || !user) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'members'), async (snap) => {
-      const list: MemberInfo[] = await Promise.all(
-        snap.docs.map(async (d) => {
-          const userSnap = await getDoc(doc(db, 'users', d.id))
-          const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'members'),
+      'draft members',
+      guarded('draft members', async (snap) => {
+        const list: MemberInfo[] = snap.docs.map((d) => {
           const data = d.data() as SeasonMemberDoc
           if (d.id === user.uid) setTeamName(data.teamName)
-          return { ...data, uid: d.id, displayName }
+          // See LeagueMemberDoc.displayName — cross-user reads are denied.
+          return { ...data, uid: d.id, displayName: data.displayName || d.id }
         })
-      )
-      setMembers(list)
-      if (leagueId) {
-        const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
-        if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
-      }
-    })
+        setMembers(list)
+        if (leagueId) {
+          const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
+          if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
+        }
+      })
+    )
   }, [seasonId, user, leagueId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-    })
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'contestants'),
+      'draft contestants',
+      (snap) => {
+        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
+      }
+    )
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    return onSnapshot(collection(db, 'seasons', seasonId, 'draft'), (snap) => {
+    return listenQuery(collection(db, 'seasons', seasonId, 'draft'), 'draft state', (snap) => {
       if (!snap.empty) {
-        const d = snap.docs[0]
-        setDraftId(d.id)
-        setDraft(d.data() as DraftDoc)
+        setDraft(snap.docs[0].data() as DraftDoc)
       }
     })
   }, [seasonId])
 
   const isAdmin = myRole === 'owner' || myRole === 'admin'
-  const isMyTurn = draft?.status === 'active' && draft.currentPickerUid === user?.uid
+  const isPaused = draft?.status === 'paused'
+  // While paused the turn still belongs to whoever missed it — they may still
+  // pick if they reappear, and an admin may pick for them.
+  const isMyTurn = (draft?.status === 'active' || isPaused) && draft?.currentPickerUid === user?.uid
+
+  /**
+   * Nudge the server when the clock runs out. Purely a prompt — the server
+   * re-checks its own clock and the turn identity, so a stale or duplicated
+   * call does nothing. Every client runs this, which is deliberate: it means
+   * the draft still moves when the member whose turn expired has disconnected.
+   */
+  useEffect(() => {
+    if (!seasonId || !draft || draft.status !== 'active' || !draft.timerExpiresAt) return
+
+    const fire = () => {
+      resolveExpiredTurn({
+        seasonId,
+        round: draft.currentRound,
+        pickNumber: draft.currentPickNumber,
+      }).catch((error) => console.error('Could not resolve expired turn', error))
+    }
+
+    const msLeft = draft.timerExpiresAt - Date.now()
+    if (msLeft <= 0) {
+      fire()
+      return
+    }
+    // Small cushion so clients do not all fire on the exact same millisecond.
+    const timer = setTimeout(fire, msLeft + 250 + Math.random() * 500)
+    return () => clearTimeout(timer)
+  }, [seasonId, draft])
 
   const available = contestants.filter((c) => !c.draftedByUid && c.eliminatedEpisode === null)
   const drafted = contestants.filter((c) => c.draftedByUid)
+
+  // Bench settlement: the picking rounds are over, but somebody finished short
+  // and contestants are going spare. An admin tops up and confirms the close.
+  const isAwaitingClose = draft?.status === 'awaiting-close'
+  const rosterSizes = members.map((m) => contestants.filter((c) => c.draftedByUid === m.uid).length)
+  const largestRoster = rosterSizes.length ? Math.max(...rosterSizes) : 0
+  const teamsWithSlots = members
+    .map((m, i) => ({ member: m, openSlots: largestRoster - rosterSizes[i] }))
+    .filter((t) => t.openSlots > 0)
+
+  async function handleAssignFromBench(contestantId: string, toUid: string) {
+    if (!seasonId || assigning) return
+    setAssigning(true)
+    setPickError('')
+    try {
+      await assignFromBench({ seasonId, contestantId, toUid })
+    } catch (error) {
+      setPickError((error as { message?: string }).message ?? 'Could not assign that contestant.')
+      console.error('Bench assignment rejected', error)
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  async function handleCloseDraft() {
+    if (!seasonId || assigning) return
+    setAssigning(true)
+    setPickError('')
+    try {
+      await closeDraft({ seasonId })
+      setConfirmClose(false)
+    } catch (error) {
+      setPickError((error as { message?: string }).message ?? 'Could not close the draft.')
+      console.error('Close draft rejected', error)
+    } finally {
+      setAssigning(false)
+    }
+  }
 
   async function handleStartDraft() {
     if (!seasonId || !season || !user) return
@@ -98,7 +174,7 @@ export function DraftRoomPage() {
       const memberUids = members.map((m) => m.uid)
       const pickOrder = resolvePickOrder(season.pickOrderMethod, memberUids)
 
-      const draftRef = await addDoc(collection(db, 'seasons', seasonId, 'draft'), {
+      await addDoc(collection(db, 'seasons', seasonId, 'draft'), {
         status: 'active',
         currentPickerUid: pickOrder[0],
         currentRound: 1,
@@ -106,7 +182,6 @@ export function DraftRoomPage() {
         pickOrder,
         timerExpiresAt: Date.now() + season.timerSeconds * 1000,
       } satisfies DraftDoc)
-      setDraftId(draftRef.id)
 
       // Assign pick positions to members
       for (let i = 0; i < pickOrder.length; i++) {
@@ -122,80 +197,36 @@ export function DraftRoomPage() {
     }
   }
 
+  /**
+   * A pick is one server call. Writing it from here meant four writes across
+   * documents an ordinary member cannot touch, so a member's pick stalled the
+   * draft halfway through. The function validates turn and availability in a
+   * transaction and performs every write with the Admin SDK.
+   */
   async function handlePick(contestantId: string, onBehalfOf?: string) {
-    if (!seasonId || !draft || !draftId || !user) return
+    if (!seasonId || !draft || !user || picking) return
 
-    const pickerUid = onBehalfOf ?? user.uid
+    setPicking(true)
+    setPickError('')
+    try {
+      const { data } = await submitPick({ seasonId, contestantId, onBehalfOf })
 
-    await addDoc(collection(db, 'seasons', seasonId, 'draft', draftId, 'picks'), {
-      contestantId,
-      pickerUid,
-      actingAdminUid: onBehalfOf ? user.uid : null,
-      round: draft.currentRound,
-      pickNumber: draft.currentPickNumber,
-      // eslint-disable-next-line react-hooks/purity
-      timestamp: Date.now(),
-    })
-
-    await updateDoc(doc(db, 'seasons', seasonId, 'contestants', contestantId), {
-      draftedByUid: pickerUid,
-      draftedRound: draft.currentRound,
-    })
-
-    await logAuditEvent({
-      action: onBehalfOf ? 'admin_proxy_pick' : 'draft_pick',
-      seasonId,
-      contestantId,
-      targetUid: onBehalfOf,
-    })
-
-    trackEvent('draft_pick_made', {
-      round: draft.currentRound,
-      pick_number: draft.currentPickNumber,
-    })
-
-    const remainingCount = available.length - 1
-    if (remainingCount === 0) {
-      // Draft complete
-      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
-        status: 'complete',
-        currentPickerUid: null,
-        timerExpiresAt: null,
+      trackEvent('draft_pick_made', {
+        round: draft.currentRound,
+        pick_number: draft.currentPickNumber,
       })
-      await updateDoc(doc(db, 'seasons', seasonId), { state: 'active' })
-      trackEvent('draft_completed', { season_id: seasonId, total_picks: contestants.length - 1 })
-      return
+      if (data.status === 'complete') {
+        trackEvent('draft_completed', { season_id: seasonId, total_picks: contestants.length })
+      }
+      // The draft listener applies the new state — nothing to set here.
+    } catch (error) {
+      const message =
+        (error as { message?: string }).message ?? 'Could not submit that pick. Try again.'
+      setPickError(message)
+      console.error('Pick rejected', error)
+    } finally {
+      setPicking(false)
     }
-
-    // Advance to next pick
-    const next = advancePick({
-      pickOrder: draft.pickOrder,
-      currentRound: draft.currentRound,
-      currentPickNumber: draft.currentPickNumber,
-      totalContestants: contestants.length,
-    })
-
-    if (!next) {
-      await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
-        status: 'complete',
-        currentPickerUid: null,
-        timerExpiresAt: null,
-      })
-      await updateDoc(doc(db, 'seasons', seasonId), { state: 'active' })
-      return
-    }
-
-    const nextPickerIdx =
-      next.round % 2 === 0 ? draft.pickOrder.length - next.pickNumber : next.pickNumber - 1
-    const nextPickerUid = draft.pickOrder[nextPickerIdx]
-
-    await updateDoc(doc(db, 'seasons', seasonId, 'draft', draftId), {
-      currentRound: next.round,
-      currentPickNumber: next.pickNumber,
-      currentPickerUid: nextPickerUid,
-      // eslint-disable-next-line react-hooks/purity
-      timerExpiresAt: Date.now() + (season?.timerSeconds ?? 60) * 1000,
-    })
   }
 
   async function handleSaveTeamName() {
@@ -270,15 +301,125 @@ export function DraftRoomPage() {
         </div>
       )}
 
-      {/* Active draft */}
-      {draft?.status === 'active' && (
+      {/* Bench settlement — picking is over but a roster finished short */}
+      {isAwaitingClose && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+          <h2 className="text-lg font-semibold text-blue-900">Draft picking is finished</h2>
+          <p className="mt-1 text-sm text-blue-800">
+            {available.length} {available.length === 1 ? 'contestant is' : 'contestants are'} still
+            on the bench, and{' '}
+            {teamsWithSlots.length === 1
+              ? '1 team has an open slot'
+              : `${teamsWithSlots.length} teams have open slots`}
+            . {isAdmin ? 'Fill them from the bench, or close as is.' : 'An admin is settling up.'}
+          </p>
+
+          {pickError && (
+            <p role="alert" className="mt-3 text-sm text-red-700">
+              {pickError}
+            </p>
+          )}
+
+          {isAdmin && (
+            <div className="mt-4 flex flex-col gap-3">
+              {available.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-white px-4 py-3"
+                >
+                  <span className="font-medium text-gray-900 flex-1 min-w-0">{c.name}</span>
+                  {teamsWithSlots.length === 0 ? (
+                    <span className="text-sm text-gray-500">No open slots</span>
+                  ) : (
+                    <>
+                      <label className="sr-only" htmlFor={`assign-${c.id}`}>
+                        Assign {c.name} to a team
+                      </label>
+                      <select
+                        id={`assign-${c.id}`}
+                        defaultValue=""
+                        disabled={assigning}
+                        onChange={(e) => {
+                          if (e.target.value) handleAssignFromBench(c.id, e.target.value)
+                        }}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Assign to…</option>
+                        {teamsWithSlots.map(({ member, openSlots }) => (
+                          <option key={member.uid} value={member.uid}>
+                            {member.displayName} ({openSlots} open)
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                </div>
+              ))}
+
+              <div className="mt-2">
+                {confirmClose ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-sm text-blue-900">
+                      Close the draft
+                      {available.length > 0
+                        ? ` with ${available.length} still on the bench?`
+                        : '?'}{' '}
+                      This cannot be undone.
+                    </p>
+                    <Button onClick={handleCloseDraft} loading={assigning}>
+                      Yes, close it
+                    </Button>
+                    <Button variant="secondary" onClick={() => setConfirmClose(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button onClick={() => setConfirmClose(true)}>Close draft</Button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Active draft — `paused` is still a live draft, awaiting an admin pick */}
+      {(draft?.status === 'active' || isPaused) && (
         <>
-          <TimerBanner
-            pickerName={currentPickerName}
-            timerExpiresAt={draft.timerExpiresAt}
-            durationSeconds={season.timerSeconds}
-            isYourTurn={isMyTurn}
-          />
+          {isPaused ? (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 flex items-center gap-3"
+            >
+              <span
+                aria-hidden="true"
+                className="h-2.5 w-2.5 rounded-full bg-amber-500 motion-safe:animate-pulse"
+              />
+              <div>
+                <p className="font-semibold text-amber-900">
+                  {currentPickerName} ran out of time — an admin is picking for them
+                </p>
+                <p className="text-sm text-amber-700">
+                  The draft is paused. No one else can pick until this is done.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <TimerBanner
+              pickerName={currentPickerName}
+              timerExpiresAt={draft.timerExpiresAt}
+              durationSeconds={season.timerSeconds}
+              isYourTurn={isMyTurn}
+            />
+          )}
+
+          {pickError && (
+            <p
+              role="alert"
+              className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {pickError}
+            </p>
+          )}
 
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
             {/* Contestant list */}

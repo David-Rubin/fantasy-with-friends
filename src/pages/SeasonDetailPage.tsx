@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { doc, getDoc, onSnapshot, collection, updateDoc, addDoc } from 'firebase/firestore'
+import { doc, getDoc, collection, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
@@ -65,7 +66,7 @@ export function SeasonDetailPage() {
 
   useEffect(() => {
     if (!seasonId) return
-    const unsub = onSnapshot(doc(db, 'seasons', seasonId), (snap) => {
+    const unsub = listenDoc(doc(db, 'seasons', seasonId), 'season', (snap) => {
       if (snap.exists()) {
         const data = { id: snap.id, ...(snap.data() as SeasonDoc) }
         setSeason(data)
@@ -81,50 +82,64 @@ export function SeasonDetailPage() {
 
   useEffect(() => {
     if (!seasonId || !user) return
-    const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'members'), async (snap) => {
-      const list: MemberDoc[] = await Promise.all(
-        snap.docs.map(async (d) => {
-          const userSnap = await getDoc(doc(db, 'users', d.id))
-          const displayName = userSnap.exists() ? (userSnap.data().displayName as string) : d.id
-          return { ...(d.data() as SeasonMemberDoc), uid: d.id, displayName }
+    const unsub = listenQuery(
+      collection(db, 'seasons', seasonId, 'members'),
+      'season members',
+      guarded('season members', async (snap) => {
+        const list: MemberDoc[] = snap.docs.map((d) => {
+          const data = d.data() as SeasonMemberDoc
+          // See LeagueMemberDoc.displayName — cross-user reads are denied.
+          return { ...data, uid: d.id, displayName: data.displayName || d.id }
         })
-      )
-      setMembers(list)
+        setMembers(list)
 
-      // Determine my role in the league
-      if (leagueId && user) {
-        const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
-        if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
-      }
-    })
+        // Determine my role in the league
+        if (leagueId && user) {
+          const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
+          if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
+        }
+      })
+    )
     return unsub
   }, [seasonId, user, leagueId])
 
   useEffect(() => {
     if (!seasonId) return
-    const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'contestants'), (snap) => {
-      setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-    })
+    const unsub = listenQuery(
+      collection(db, 'seasons', seasonId, 'contestants'),
+      'season contestants',
+      (snap) => {
+        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
+      }
+    )
     return unsub
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'scoringRules'), (snap) => {
-      setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
-    })
+    const unsub = listenQuery(
+      collection(db, 'seasons', seasonId, 'scoringRules'),
+      'season rules',
+      (snap) => {
+        setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
+      }
+    )
     return unsub
   }, [seasonId])
 
   useEffect(() => {
     if (!seasonId) return
-    const unsub = onSnapshot(collection(db, 'seasons', seasonId, 'episodeScores'), (snap) => {
-      const statuses: Record<string, boolean> = {}
-      snap.docs.forEach((d) => {
-        statuses[d.id] = (d.data() as EpisodeScoreDoc).locked
-      })
-      setEpisodeStatuses(statuses)
-    })
+    const unsub = listenQuery(
+      collection(db, 'seasons', seasonId, 'episodeScores'),
+      'episode statuses',
+      (snap) => {
+        const statuses: Record<string, boolean> = {}
+        snap.docs.forEach((d) => {
+          statuses[d.id] = (d.data() as EpisodeScoreDoc).locked
+        })
+        setEpisodeStatuses(statuses)
+      }
+    )
     return unsub
   }, [seasonId])
 

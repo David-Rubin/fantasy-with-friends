@@ -131,13 +131,12 @@ service cloud.firestore {
 
         match /picks/{pickId} {
           allow read: if isSeasonMember(seasonId);
-          allow create: if isSeasonMember(seasonId) && (
-            // Own turn
-            request.auth.uid == get(/databases/$(database)/documents/seasons/$(seasonId)/draft/$(draftId)).data.currentPickerUid
-            // Or admin proxy pick
-            || isSeasonAdmin(seasonId)
-          );
-          allow update, delete: if false; // picks are append-only
+          // Picks are written only by the submitPick Cloud Function via the
+          // Admin SDK. Rules cannot validate a pick on their own: deriving the
+          // next picker means re-implementing snake order here, and detecting a
+          // finished board needs an aggregate rules cannot compute. Letting the
+          // client write directly would mean trusting it on both.
+          allow write: if false;
         }
       }
     }

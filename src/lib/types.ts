@@ -5,7 +5,22 @@ export type SeasonState = 'setup' | 'draft' | 'active' | 'complete'
 export type DraftFormat = 'snake'
 export type PickOrderMethod = 'randomized' | 'admin-set'
 export type TimerExpiry = 'auto-pick' | 'admin-picks' | 'skip'
-export type DraftStatus = 'lobby' | 'active' | 'complete'
+/**
+ * `paused` means a pick timer expired under the `admin-picks` policy: the turn
+ * stays with the member who missed it, the clock stops, and an admin picks on
+ * their behalf. Nobody else may pick until that resolves.
+ */
+/**
+ * `paused` means a pick timer expired under the `admin-picks` policy: the turn
+ * stays with the member who missed it, the clock stops, and an admin picks on
+ * their behalf. Nobody else may pick until that resolves.
+ *
+ * `awaiting-close` means the picking rounds are over but the draft is not
+ * settled: contestants are still on the bench and somebody's roster is short —
+ * which happens when a turn was skipped. An admin may top up the short teams
+ * from the bench, and must confirm before the draft closes.
+ */
+export type DraftStatus = 'lobby' | 'active' | 'paused' | 'awaiting-close' | 'complete'
 export type ScoringRuleType = 'binary' | 'numeric' | 'bonus_challenge'
 export type BonusChallengeScope = 'per_episode' | 'specific_episodes' | 'season_level'
 export type AccentColor =
@@ -47,6 +62,13 @@ export interface LeagueMemberDoc {
    * filters on a field — the {uid} path wildcard is unbound during a list.
    */
   uid: string
+  /**
+   * Denormalized from the owner's user doc. Member lists cannot read
+   * `users/{uid}` for anyone but themselves — that document also holds the
+   * email address, which PRD §7.3 keeps private between members — so the
+   * display name is copied here at write time instead.
+   */
+  displayName: string
   role: MemberRole
   joinedAt: number
 }
@@ -74,6 +96,8 @@ export interface SeasonDoc {
 export interface SeasonMemberDoc {
   /** Denormalized copy of the document ID — see LeagueMemberDoc.uid */
   uid: string
+  /** Denormalized display name — see LeagueMemberDoc.displayName */
+  displayName: string
   teamName: string
   pickPosition: number | null
   joinedAt: number
