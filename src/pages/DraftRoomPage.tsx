@@ -132,6 +132,7 @@ export function DraftRoomPage() {
   // Bench settlement: the picking rounds are over, but somebody finished short
   // and contestants are going spare. An admin tops up and confirms the close.
   const isAwaitingClose = draft?.status === 'awaiting-close'
+  const haltedForSkips = draft?.haltedReason === 'skips'
   const rosterSizes = members.map((m) => contestants.filter((c) => c.draftedByUid === m.uid).length)
   const largestRoster = rosterSizes.length ? Math.max(...rosterSizes) : 0
   const teamsWithSlots = members
@@ -181,6 +182,8 @@ export function DraftRoomPage() {
         currentPickNumber: 1,
         pickOrder,
         timerExpiresAt: Date.now() + season.timerSeconds * 1000,
+        consecutiveSkips: 0,
+        haltedReason: null,
       } satisfies DraftDoc)
 
       // Assign pick positions to members
@@ -301,11 +304,19 @@ export function DraftRoomPage() {
         </div>
       )}
 
-      {/* Bench settlement — picking is over but a roster finished short */}
+      {/* Bench settlement — picking is over, or the room went quiet */}
       {isAwaitingClose && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
-          <h2 className="text-lg font-semibold text-blue-900">Draft picking is finished</h2>
+          <h2 className="text-lg font-semibold text-blue-900">
+            {haltedForSkips ? 'Draft paused — nobody is picking' : 'Draft picking is finished'}
+          </h2>
           <p className="mt-1 text-sm text-blue-800">
+            {haltedForSkips ? (
+              <>
+                Every player&rsquo;s turn passed without a pick, so the draft stopped rather than
+                cycling.{' '}
+              </>
+            ) : null}
             {available.length} {available.length === 1 ? 'contestant is' : 'contestants are'} still
             on the bench, and{' '}
             {teamsWithSlots.length === 1

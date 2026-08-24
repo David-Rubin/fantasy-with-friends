@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
-import { nextSlot, pickerAt, draftOutcome, openSlots } from './draft'
+import { nextSlot, pickerAt, draftOutcome, openSlots, skipLimitReached } from './draft'
 import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
 
 admin.initializeApp()
@@ -311,6 +311,8 @@ export const submitPick = functions.https.onCall(
         currentPickNumber: next.pickNumber,
         currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
         timerExpiresAt: Date.now() + ((seasonSnap.data()?.timerSeconds as number) ?? 60) * 1000,
+        // Somebody picked, so the room is not abandoned.
+        consecutiveSkips: 0,
       })
       return { status: 'active' as const }
     })
@@ -367,7 +369,10 @@ export const resolveExpiredTurn = functions.https.onCall(
   async (
     data: { seasonId: string; round: number; pickNumber: number },
     context
-  ): Promise<{ outcome: 'auto-picked' | 'skipped' | 'paused' | 'no-op'; status?: string }> => {
+  ): Promise<{
+    outcome: 'auto-picked' | 'skipped' | 'halted' | 'paused' | 'no-op'
+    status?: string
+  }> => {
     if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
     }
@@ -484,7 +489,22 @@ export const resolveExpiredTurn = functions.https.onCall(
         if (skipOutcome === 'complete') tx.update(seasonRef, { state: 'active' })
         return { outcome: 'skipped' as const, status: skipOutcome }
       }
-      advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds)
+
+      // A skip that finishes a full lap of the order without anybody picking
+      // means the room has emptied out. Halt for an admin rather than cycling.
+      const consecutiveSkips = ((draft.consecutiveSkips as number) ?? 0) + 1
+      if (skipLimitReached(consecutiveSkips, pickOrder.length)) {
+        tx.update(draftRef, {
+          status: 'awaiting-close',
+          haltedReason: 'skips',
+          consecutiveSkips,
+          currentPickerUid: null,
+          timerExpiresAt: null,
+        })
+        return { outcome: 'halted' as const, status: 'awaiting-close' }
+      }
+
+      advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds, consecutiveSkips)
       return { outcome: 'skipped' as const, status: 'active' }
     })
   }
@@ -653,12 +673,19 @@ export const closeDraft = functions.https.onCall(async (data: { seasonId: string
   return { ok: true }
 })
 
+/**
+ * Hand the turn to the next player.
+ *
+ * `consecutiveSkips` defaults to 0 because most callers got here by way of a
+ * pick, and a pick is what proves the draft is still moving.
+ */
 function advanceTurn(
   tx: FirebaseFirestore.Transaction,
   draftRef: FirebaseFirestore.DocumentReference,
   pickOrder: string[],
   draft: FirebaseFirestore.DocumentData,
-  timerSeconds: number
+  timerSeconds: number,
+  consecutiveSkips = 0
 ) {
   const next = nextSlot(pickOrder, draft.currentRound as number, draft.currentPickNumber as number)
   tx.update(draftRef, {
@@ -667,6 +694,7 @@ function advanceTurn(
     currentPickNumber: next.pickNumber,
     currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
     timerExpiresAt: Date.now() + timerSeconds * 1000,
+    consecutiveSkips,
   })
 }
 
