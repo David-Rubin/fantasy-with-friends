@@ -705,6 +705,57 @@ async function isLeagueAdmin(leagueId: string, uid: string): Promise<boolean> {
   return role === 'owner' || role === 'admin'
 }
 
+// ── Superadmin: app-wide user directory ───────────────────────────────────────
+
+/** App-level role, unrelated to the per-league owner/admin/member roles. */
+async function isSuperadmin(uid: string): Promise<boolean> {
+  return (await db.doc(`superadmins/${uid}`).get()).exists
+}
+
+/**
+ * Every account on the app, for the superadmin user directory.
+ *
+ * Served through a function rather than a Firestore query on purpose. Listing
+ * users means exposing email addresses, which PRD 7.3 otherwise keeps private
+ * between league members — so the `users` read rule stays own-document-only and
+ * this is the single audited way to see more. Widening the rule instead would
+ * make every future client query a potential leak.
+ */
+export const listAllUsers = functions.https.onCall(
+  async (
+    _data: unknown,
+    context
+  ): Promise<{
+    users: { uid: string; displayName: string; email: string; createdAt: number | null }[]
+  }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    if (!(await isSuperadmin(context.auth.uid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Superadmins only')
+    }
+
+    const snap = await db.collection('users').get()
+    const users = snap.docs
+      .map((d) => ({
+        uid: d.id,
+        displayName: (d.data().displayName as string) ?? '',
+        email: (d.data().email as string) ?? '',
+        createdAt: (d.data().createdAt as number) ?? null,
+      }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName))
+
+    await db.collection('auditLogs').add({
+      action: 'user_directory_viewed',
+      actorUid: context.auth.uid,
+      userCount: users.length,
+      timestamp: Date.now(),
+    })
+
+    return { users }
+  }
+)
+
 // ── Audit log helper ──────────────────────────────────────────────────────────
 
 export const logAuditEvent = functions.https.onCall(async (data, context) => {

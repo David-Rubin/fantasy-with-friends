@@ -9,7 +9,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { userDoc } = useAuth()
+  const { userDoc, isSuperadmin } = useAuth()
   const navigate = useNavigate()
 
   async function handleSignOut() {
@@ -28,6 +28,14 @@ export function Layout({ children }: LayoutProps) {
             {t('nav.appName')}
           </Link>
           <div className="flex items-center gap-4">
+            {isSuperadmin && (
+              <Link
+                to="/admin/users"
+                className="text-sm text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
+              >
+                {t('nav.users')}
+              </Link>
+            )}
             {userDoc && (
               <span className="hidden text-sm text-gray-600 sm:block">{userDoc.displayName}</span>
             )}

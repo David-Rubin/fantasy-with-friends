@@ -11,6 +11,7 @@ import { SeasonDetailPage } from './pages/SeasonDetailPage'
 import { DraftRoomPage } from './pages/DraftRoomPage'
 import { EpisodeScoringPage } from './pages/EpisodeScoringPage'
 import { SeasonAwardsPage } from './pages/SeasonAwardsPage'
+import { AdminUsersPage } from './pages/AdminUsersPage'
 
 export default function App() {
   return (
@@ -67,6 +68,16 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SeasonAwardsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* App-level, not scoped to a league */}
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedRoute requireSuperadmin>
+                <AdminUsersPage />
               </ProtectedRoute>
             }
           />

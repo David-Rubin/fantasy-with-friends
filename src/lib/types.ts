@@ -1,6 +1,18 @@
 // ── Role / State enums ────────────────────────────────────────────────────────
 
+/**
+ * Roles within a single league. Separate from the app-level superadmin role,
+ * which is not stored here — see the `superadmins` collection.
+ */
 export type MemberRole = 'owner' | 'admin' | 'member'
+
+/** A row in the superadmin user directory. */
+export interface AppUser {
+  uid: string
+  displayName: string
+  email: string
+  createdAt: number | null
+}
 export type SeasonState = 'setup' | 'draft' | 'active' | 'complete'
 export type DraftFormat = 'snake'
 export type PickOrderMethod = 'randomized' | 'admin-set'

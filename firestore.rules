@@ -45,6 +45,26 @@ service cloud.firestore {
         && !('pinHash' in request.resource.data);
     }
 
+    // ── Superadmins ───────────────────────────────────────────────────────────
+    // App-level role, distinct from the per-league owner/admin/member roles.
+    // Deliberately its own collection rather than a field on /users: that
+    // document is self-writable, so a flag there would let anyone promote
+    // themselves. Reading is limited to your own record, which is all the client
+    // needs to decide whether to show the link.
+    //
+    // There is no UI for granting — `allow write: if false` means not even a
+    // superadmin can create another from the app. Add a document keyed by the
+    // user's uid out of band: the Firestore console in production, or against
+    // the emulator with
+    //   curl -X POST "$FIRESTORE/superadmins?documentId=<uid>" \
+    //     -H "Authorization: Bearer owner" -H "Content-Type: application/json" \
+    //     -d '{"fields":{"grantedAt":{"integerValue":"0"}}}'
+    // The document's contents are never read; its existence is the grant.
+    match /superadmins/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
     // ── Collection group: a user's own membership docs ────────────────────────
     // The dashboard runs collectionGroup(db, 'members') to find every league the
     // signed-in user belongs to. Nested `match /leagues/{id}/members/{uid}` rules
