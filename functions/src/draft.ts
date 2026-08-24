@@ -89,6 +89,21 @@ export function draftOutcome(
 }
 
 /**
+ * Has the draft gone a full round with nobody picking?
+ *
+ * Skips advance the turn without taking anyone, so a room where everybody has
+ * wandered off would otherwise cycle indefinitely, burning a slot per expiry and
+ * running the round counter up forever. One skip per player is the point at
+ * which that stops being a draft in progress and starts being an abandoned one.
+ *
+ * The count resets on any pick — automatic ones included — so a draft that is
+ * still moving never trips this, however many individual turns get missed.
+ */
+export function skipLimitReached(consecutiveSkips: number, teams: number): boolean {
+  return teams > 0 && consecutiveSkips >= teams
+}
+
+/**
  * How many contestants a team may still be given from the bench: enough to draw
  * level with the largest roster, and no further. Nobody gets topped up past the
  * players who took all their turns.

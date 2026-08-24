@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { nextSlot, pickerAt, isDraftComplete, draftOutcome, openSlots } from './draft'
+import {
+  nextSlot,
+  pickerAt,
+  isDraftComplete,
+  draftOutcome,
+  openSlots,
+  skipLimitReached,
+} from './draft'
 
 describe('nextSlot', () => {
   const twoTeams = ['alice', 'bob']
@@ -128,5 +135,28 @@ describe('openSlots', () => {
 
   it('is zero when everyone is level', () => {
     expect(openSlots(2, [2, 2, 2])).toBe(0)
+  })
+})
+
+describe('skipLimitReached', () => {
+  it('allows each player one missed turn', () => {
+    // 3 players, two turns skipped — somebody may still be about to pick.
+    expect(skipLimitReached(2, 3)).toBe(false)
+  })
+
+  it('halts once every player has passed without picking', () => {
+    expect(skipLimitReached(3, 3)).toBe(true)
+  })
+
+  it('halts if the count somehow overshoots', () => {
+    expect(skipLimitReached(5, 3)).toBe(true)
+  })
+
+  it('does not halt a draft that has not skipped at all', () => {
+    expect(skipLimitReached(0, 3)).toBe(false)
+  })
+
+  it('is inert with no players, rather than halting instantly', () => {
+    expect(skipLimitReached(0, 0)).toBe(false)
   })
 })

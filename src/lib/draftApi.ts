@@ -39,5 +39,5 @@ export const closeDraft = httpsCallable<{ seasonId: string }, { ok: true }>(func
  */
 export const resolveExpiredTurn = httpsCallable<
   { seasonId: string; round: number; pickNumber: number },
-  { outcome: 'auto-picked' | 'skipped' | 'paused' | 'no-op'; status?: string }
+  { outcome: 'auto-picked' | 'skipped' | 'halted' | 'paused' | 'no-op'; status?: string }
 >(functions, 'resolveExpiredTurn')

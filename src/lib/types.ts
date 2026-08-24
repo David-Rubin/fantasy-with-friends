@@ -148,6 +148,15 @@ export interface DraftDoc {
   currentPickNumber: number
   pickOrder: string[] // uid[]
   timerExpiresAt: number | null
+  /**
+   * Turns skipped in a row without anyone picking. Reset by any pick, manual or
+   * automatic. Once it reaches the number of players a full round has gone by
+   * with nobody drafting, which means the draft has stalled rather than
+   * progressed, so it halts for an admin instead of cycling forever.
+   */
+  consecutiveSkips: number
+  /** Why the draft halted, when it did so for a reason other than finishing. */
+  haltedReason: 'skips' | null
 }
 
 export interface DraftPickDoc {
