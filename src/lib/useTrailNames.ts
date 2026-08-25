@@ -22,23 +22,32 @@ import type { LeagueDoc, SeasonDoc } from './types'
 export function useTrailNames(
   leagueId: string | undefined,
   seasonId?: string
-): { leagueName: string | undefined; seasonName: string | undefined } {
+): {
+  leagueName: string | undefined
+  /** The league's show. Pages below a league title themselves with it. */
+  showName: string | undefined
+  seasonName: string | undefined
+} {
   const [leagueName, setLeagueName] = useState<string>()
+  const [showName, setShowName] = useState<string>()
   const [seasonName, setSeasonName] = useState<string>()
 
   useEffect(() => {
     if (!leagueId) return
     return listenDoc(doc(db, 'leagues', leagueId), 'breadcrumb league', (snap) => {
-      if (snap.exists()) setLeagueName((snap.data() as LeagueDoc).name)
+      if (!snap.exists()) return
+      const league = snap.data() as LeagueDoc
+      setLeagueName(league.name)
+      setShowName(league.showName)
     })
   }, [leagueId])
 
   useEffect(() => {
     if (!seasonId) return
     return listenDoc(doc(db, 'seasons', seasonId), 'breadcrumb season', (snap) => {
-      if (snap.exists()) setSeasonName((snap.data() as SeasonDoc).showName)
+      if (snap.exists()) setSeasonName((snap.data() as SeasonDoc).label)
     })
   }, [seasonId])
 
-  return { leagueName, seasonName }
+  return { leagueName, showName, seasonName }
 }

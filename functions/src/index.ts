@@ -145,6 +145,9 @@ export const removeLeagueMember = functions.https.onCall(
     }
 
     const ownerId = leagueSnap.data()?.ownerId as string
+    // The show lives on the league now, so a season is named by its label plus
+    // the league's show — "The Traitors — Season 3" rather than a bare label.
+    const showName = (leagueSnap.data()?.showName as string) ?? ''
     const actingUid = context.auth.uid
     if (actingUid !== ownerId && !(await isSuperadmin(actingUid))) {
       throw new functions.https.HttpsError(
@@ -176,7 +179,7 @@ export const removeLeagueMember = functions.https.onCall(
         return {
           id: d.id,
           state: season.state,
-          label: `${season.showName} — ${season.label}`,
+          label: showName ? `${showName} — ${season.label}` : season.label,
         }
       })
     )

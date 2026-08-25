@@ -57,14 +57,13 @@ export function LeagueDetailPage() {
   const joinRequestStatus = useMyJoinRequests(user?.uid)
   const [newSeasonOpen, setNewSeasonOpen] = useState(false)
   const [seasonForm, setSeasonForm] = useState({
-    showName: '',
     label: '',
     episodeCount: '',
     accentColor: 'blue' as AccentColor,
   })
   const [creating, setCreating] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
-  const [editForm, setEditForm] = useState({ name: '', description: '' })
+  const [editForm, setEditForm] = useState({ name: '', showName: '', description: '' })
   const [savingEdit, setSavingEdit] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<MemberWithName | null>(null)
   const [removing, setRemoving] = useState(false)
@@ -190,7 +189,11 @@ export function LeagueDetailPage() {
 
   function openEdit() {
     if (!league) return
-    setEditForm({ name: league.name, description: league.description })
+    setEditForm({
+      name: league.name,
+      showName: league.showName,
+      description: league.description,
+    })
     setEditOpen(true)
   }
 
@@ -201,8 +204,12 @@ export function LeagueDetailPage() {
     try {
       await updateLeagueDetails(
         leagueId,
-        { name: league.name, description: league.description },
-        { name: editForm.name.trim(), description: editForm.description.trim() }
+        { name: league.name, showName: league.showName, description: league.description },
+        {
+          name: editForm.name.trim(),
+          showName: editForm.showName.trim(),
+          description: editForm.description.trim(),
+        }
       )
       setEditOpen(false)
     } catch (error) {
@@ -244,12 +251,11 @@ export function LeagueDetailPage() {
 
   async function handleCreateSeason(e: React.FormEvent) {
     e.preventDefault()
-    if (!leagueId || !user) return
+    if (!leagueId || !user || !league) return
     setCreating(true)
     try {
       const seasonRef = await addDoc(collection(db, 'seasons'), {
         leagueId,
-        showName: seasonForm.showName.trim(),
         label: seasonForm.label.trim(),
         episodeCount: parseInt(seasonForm.episodeCount, 10),
         state: 'setup',
@@ -275,7 +281,7 @@ export function LeagueDetailPage() {
         })
       }
 
-      trackEvent('season_created', { show_name: seasonForm.showName.trim() })
+      trackEvent('season_created', { show_name: league.showName })
       setNewSeasonOpen(false)
       navigate(`/leagues/${leagueId}/seasons/${seasonRef.id}`)
     } finally {
@@ -296,6 +302,7 @@ export function LeagueDetailPage() {
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{league.name}</h1>
+          {league.showName && <p className="mt-1 font-medium text-gray-700">{league.showName}</p>}
           {league.description && <p className="mt-1 text-gray-500">{league.description}</p>}
           <p className="mt-1 text-sm text-gray-400">
             {league.memberCount === 1
@@ -387,8 +394,7 @@ export function LeagueDetailPage() {
                 const summary = (
                   <>
                     <div>
-                      <p className="font-semibold text-gray-900">{season.showName}</p>
-                      <p className="text-sm text-gray-500">{season.label}</p>
+                      <p className="font-semibold text-gray-900">{season.label}</p>
                     </div>
                     <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
                   </>
@@ -487,6 +493,13 @@ export function LeagueDetailPage() {
             required
             autoFocus
           />
+          <Input
+            label={t('league.showName')}
+            value={editForm.showName}
+            onChange={(e) => setEditForm((f) => ({ ...f, showName: e.target.value }))}
+            placeholder="The Traitors"
+            required
+          />
           <Textarea
             label={t('league.description')}
             value={editForm.description}
@@ -533,18 +546,12 @@ export function LeagueDetailPage() {
       >
         <form id="new-season-form" onSubmit={handleCreateSeason} className="flex flex-col gap-4">
           <Input
-            label={t('season.showName')}
-            value={seasonForm.showName}
-            onChange={(e) => setSeasonForm((f) => ({ ...f, showName: e.target.value }))}
-            required
-            autoFocus
-          />
-          <Input
             label={t('season.label')}
             value={seasonForm.label}
             onChange={(e) => setSeasonForm((f) => ({ ...f, label: e.target.value }))}
             placeholder="Season 15 — 2026"
             required
+            autoFocus
           />
           <Input
             label={t('season.episodeCount')}

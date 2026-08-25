@@ -21,11 +21,12 @@ import type { LeagueDoc } from './types'
  */
 export async function updateLeagueDetails(
   leagueId: string,
-  previous: Pick<LeagueDoc, 'name' | 'description'>,
-  next: Pick<LeagueDoc, 'name' | 'description'>
+  previous: Pick<LeagueDoc, 'name' | 'showName' | 'description'>,
+  next: Pick<LeagueDoc, 'name' | 'showName' | 'description'>
 ): Promise<void> {
   await updateDoc(doc(db, 'leagues', leagueId), {
     name: next.name,
+    showName: next.showName,
     description: next.description,
   })
 
