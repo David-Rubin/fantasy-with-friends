@@ -10,8 +10,13 @@ import type { SeasonDoc } from './types'
  * writing lives in ./seasonApi.
  */
 
-/** The parts of a season an admin can correct after the fact. */
-export type SeasonDetails = Pick<SeasonDoc, 'showName' | 'label' | 'episodeCount' | 'accentColor'>
+/**
+ * The parts of a season an admin can correct after the fact.
+ *
+ * The show name is not among them — it belongs to the league now, and is edited
+ * there. See LeagueDoc.showName.
+ */
+export type SeasonDetails = Pick<SeasonDoc, 'label' | 'episodeCount' | 'accentColor'>
 
 /**
  * The highest episode number that already has a scores document.

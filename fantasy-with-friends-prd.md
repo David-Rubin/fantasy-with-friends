@@ -1,6 +1,6 @@
 # Product Requirements Document: Fantasy With Friends
 
-**Version**: 1.5
+**Version**: 1.6
 **Date**: 2026-08-25
 **Status**: Draft
 
@@ -9,6 +9,7 @@
 *1.3 — invite codes replaced with request-to-join leagues (1.4, 3.1.1, 3.1.2, 3.2.2, 4.1–4.5, 7.2–7.5, 10.1, 12.7, 13.1).*
 *1.4 — league owners can rename a league, edit its description, and remove members (3.1.3, 4.9, 7.2, 10.1).*
 *1.5 — season details editable in any state by owners, admins and superadmins (3.2.3, 10.1).*
+*1.6 — the show moved from the season to the league: a league is one show (3.1.1, 3.2.1, 3.2.3, 4.3, 4.5).*
 
 ---
 
@@ -57,7 +58,8 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 ### 3.1 League Management
 
 **3.1.1 Create a League**
-- Any authenticated user can create a league by providing a name and optional description.
+- Any authenticated user can create a league by providing a name, the **show** the league plays (e.g. "The Great British Bake Off"), and an optional description.
+- **A league is one show.** The show belongs to the league, not to its seasons: a league is a group of friends watching a particular show together, and every season of that league is a season of that show. A group that wants to play a different show creates a different league.
 - The creator is automatically assigned the Owner role.
 - The Owner reviews and decides every request to join the league.
 
@@ -74,7 +76,7 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 
 **3.1.3 Managing a League (Owner)**
 
-- The Owner can rename a league and change its description at any time, from the league page.
+- The Owner can rename a league, change the show it plays, and change its description at any time, from the league page.
 - The Owner can remove a member from the league.
 - **A member can only be removed if they are not in any season that is `draft` or `active`.** Pick order is fixed to a list of uids when a draft is randomized, and episode scores are keyed by uid, so removing a player mid-season would leave a draft that cannot complete or a leaderboard with a hole in it. The refusal names the seasons standing in the way; the Owner waits for them to finish.
 - Removal drops the member from the league and from any season still in `setup` — the mirror of approval, which enrolls a new member in exactly those seasons.
@@ -106,9 +108,9 @@ A single role that spans the whole app, separate from the per-league roles above
 
 **3.2.1 Create a Season**
 - Admins create a season within a league by specifying:
-  - Show name (e.g. "The Great British Bake Off")
   - Season label (e.g. "Season 15 — 2026")
   - Number of episodes (can be updated later)
+- The show is not asked for — it is the league's, and every season inherits it.
 - A season exists in one of four states: `setup`, `draft`, `active`, `complete`.
 - Season configuration (contestants, scoring rules, draft settings) can be saved at any point during `setup` without opening the draft. This allows Admins to prepare a season in advance and open the draft at a later date.
 
@@ -119,8 +121,8 @@ A single role that spans the whole app, separate from the per-league roles above
 
 **3.2.3 Edit Season Details**
 
-- A season's show name, season label, episode count, and accent colour can be edited by the league's Owner, any league Admin, or a Superadmin.
-- **Editing is available in every season state** — `setup`, `draft`, `active`, and `complete` alike. A show name typo or a season that turns out to run longer than announced needs correcting whether or not the draft has opened.
+- A season's label, episode count, and accent colour can be edited by the league's Owner, any league Admin, or a Superadmin. The show is edited on the league (3.1.1).
+- **Editing is available in every season state** — `setup`, `draft`, `active`, and `complete` alike. A mislabelled season, or one that turns out to run longer than announced, needs correcting whether or not the draft has opened.
 - Draft settings (pick order method, timer duration, timer expiry behaviour) are not part of this. They belong to the draft and are set from the setup panel while the season is still in `setup`.
 - The one restriction is not about state: the episode count cannot be lowered below the highest episode that already has scores. The season page lists episodes by counting up to the episode count, so those scores would disappear from the UI while still counting toward every team's total. The message names the episode in the way.
 
@@ -253,7 +255,7 @@ A single role that spans the whole app, separate from the per-league roles above
 - **Draft format**: The draft engine is implemented behind an interface; snake draft is the default. Other formats (randomized, async, auction) can be added as alternative implementations without changing core data structures.
 - **Pick order methodology**: Stored as a typed enum on the season; new methods can be added without restructuring the draft session.
 - **Scoring rule types**: New rule types and scopes can be added by extending the rule type enum and the score-calculation function.
-- **Show type**: Seasons are not GBBO-specific; the show name and structure are fully parameterized.
+- **Show type**: Leagues are not GBBO-specific; the show and the scoring structure are fully parameterized.
 
 ---
 
@@ -305,7 +307,7 @@ A single role that spans the whole app, separate from the per-league roles above
 ### 4.3 Dashboard
 
 - If the user has one or more active seasons (state = `active` or `draft`), the most recently updated one is surfaced prominently at the top:
-  - Show name, season label, current episode number, and the user's team name.
+  - The league's show, season label, current episode number, and the user's team name.
   - Current rank is intentionally not shown — users discover their rank by opening the season, preserving suspense after each new episode.
   - CTA button: "View Season" or "Join Draft" depending on season state.
 - Below the featured season: "Your leagues", listing every league the user belongs to with its name and most recent season status.
@@ -326,7 +328,7 @@ A single role that spans the whole app, separate from the per-league roles above
 
 ### 4.5 Season Setup Flow (Admin)
 
-1. Admin enters: show name, season label, episode count.
+1. Admin enters: season label, episode count. (The show comes from the league.)
 2. **Players**: every current league member is enrolled in the season automatically, as is anyone admitted to the league while the season is still in `setup`. There is no per-season invite.
 3. Admin adds contestants (name + optional photo + bio). Minimum 2 required to proceed to draft.
 4. Admin defines scoring rules (type, point value, scope). Minimum 1 required.

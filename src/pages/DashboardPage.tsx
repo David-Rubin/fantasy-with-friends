@@ -49,6 +49,7 @@ export function DashboardPage() {
   const joinRequestStatus = useMyJoinRequests(user?.uid)
   const [createOpen, setCreateOpen] = useState(false)
   const [leagueName, setLeagueName] = useState('')
+  const [leagueShow, setLeagueShow] = useState('')
   const [leagueDesc, setLeagueDesc] = useState('')
   const [accentColor, setAccentColor] = useState<AccentColor>('blue')
   const [creating, setCreating] = useState(false)
@@ -132,6 +133,7 @@ export function DashboardPage() {
     try {
       const leagueRef = await addDoc(collection(db, 'leagues'), {
         name: leagueName.trim(),
+        showName: leagueShow.trim(),
         description: leagueDesc.trim(),
         ownerId: user.uid,
         createdAt: Date.now(),
@@ -152,6 +154,7 @@ export function DashboardPage() {
       trackEvent('league_created')
       setCreateOpen(false)
       setLeagueName('')
+      setLeagueShow('')
       setLeagueDesc('')
       navigate(`/leagues/${leagueRef.id}`)
     } catch (error) {
@@ -195,7 +198,7 @@ export function DashboardPage() {
                   : t('season.states.active')}
               </Badge>
               <h2 className="mt-2 text-xl font-semibold text-gray-900">
-                {featuredSeason.season.showName}
+                {featuredSeason.league.showName}
               </h2>
               <p className="text-sm text-gray-500">{featuredSeason.season.label}</p>
               <p className="mt-1 text-sm text-gray-500">{featuredSeason.league.name}</p>
@@ -239,7 +242,8 @@ export function DashboardPage() {
                     <p className="font-semibold text-gray-900">{league.name}</p>
                     {latestSeason && (
                       <p className="text-sm text-gray-500">
-                        {latestSeason.showName} · {latestSeason.label}
+                        {league.showName ? `${league.showName} · ` : ''}
+                        {latestSeason.label}
                       </p>
                     )}
                   </div>
@@ -276,6 +280,9 @@ export function DashboardPage() {
                     >
                       {league.name}
                     </Link>
+                    {league.showName && (
+                      <p className="truncate text-sm text-gray-600">{league.showName}</p>
+                    )}
                     {league.description && (
                       <p className="truncate text-sm text-gray-500">{league.description}</p>
                     )}
@@ -311,6 +318,13 @@ export function DashboardPage() {
         }
       >
         <form id="create-league-form" onSubmit={handleCreateLeague} className="flex flex-col gap-4">
+          <Input
+            label={t('league.showName')}
+            value={leagueShow}
+            onChange={(e) => setLeagueShow(e.target.value)}
+            placeholder="The Traitors"
+            required
+          />
           <Input
             label={t('league.name')}
             value={leagueName}

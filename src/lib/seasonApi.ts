@@ -25,7 +25,6 @@ export async function updateSeasonDetails(
   next: SeasonDetails
 ): Promise<void> {
   await updateDoc(doc(db, 'seasons', seasonId), {
-    showName: next.showName,
     label: next.label,
     episodeCount: next.episodeCount,
     accentColor: next.accentColor,

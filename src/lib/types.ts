@@ -61,6 +61,12 @@ export interface UserDoc {
 
 export interface LeagueDoc {
   name: string
+  /**
+   * The show this league plays. A league is a group watching one show, and its
+   * seasons are seasons of that show — so the show belongs here, not on each
+   * season, where two seasons of one league could name different shows.
+   */
+  showName: string
   description: string
   ownerId: string
   createdAt: number
@@ -122,7 +128,7 @@ export interface LeagueJoinRequestDoc {
 
 export interface SeasonDoc {
   leagueId: string
-  showName: string
+  /** Which season of the league's show this is, e.g. "Season 3 — 2026". */
   label: string
   episodeCount: number
   state: SeasonState

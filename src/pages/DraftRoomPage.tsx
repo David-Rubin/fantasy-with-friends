@@ -298,7 +298,7 @@ export function DraftRoomPage() {
     >
       <div className="mb-4">
         <h1 className="text-xl font-bold text-gray-900">
-          {season.showName} — {t('dashboard.joinDraft')}
+          {season.label} — {t('dashboard.joinDraft')}
         </h1>
       </div>
 

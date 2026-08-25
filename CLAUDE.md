@@ -11,10 +11,10 @@ ephemeral containers, so anything not in the repository is gone by the next one.
 - Seasons within a league do not change show. A group that wants to play a
   different show starts a different league.
 
-This is the intended product model. Note that nothing enforces it yet:
-`SeasonDoc.showName` is stored per season (`src/lib/types.ts`), so two seasons of
-one league can currently name different shows. Treat that as a gap, not as
-permission — do not design around leagues being show-agnostic.
+The schema enforces this: `showName` lives on `LeagueDoc` and a season carries
+only its `label` (`src/lib/types.ts`). Creating a league asks for the show;
+creating a season does not. Leagues made before that move have no `showName`, so
+reads tolerate it being absent — an owner sets it from the league's edit dialog.
 
 ## Dummy data must reflect that
 
@@ -24,17 +24,17 @@ league name say which show it is.
 
 Good:
 
-| League | Seasons |
-| --- | --- |
+| League                         | Seasons                                          |
+| ------------------------------ | ------------------------------------------------ |
 | Traitors — Thursday Night Crew | The Traitors — Season 2, The Traitors — Season 3 |
-| Survivor Superfans | Survivor — Season 49, Survivor — Season 50 |
+| Survivor Superfans             | Survivor — Season 49, Survivor — Season 50       |
 
 Wrong — a generic league name with unrelated shows under it, which is what makes
 a screenshot impossible to read:
 
-| League | Seasons |
-| --- | --- |
-| Bravo League | Survivor, Big Brother |
+| League       | Seasons                   |
+| ------------ | ------------------------- |
+| Bravo League | Survivor, Big Brother     |
 | Delta League | The Traitors, Love Island |
 
 Naming people is free-form, but keep it obvious who is who — `Ada Owner`,

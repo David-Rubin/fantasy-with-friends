@@ -49,7 +49,7 @@ export function SeasonDetailPage() {
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
-  const { leagueName } = useTrailNames(leagueId)
+  const { leagueName, showName } = useTrailNames(leagueId)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
   // Setup form state
   const [contestantForm, setContestantForm] = useState({ name: '', photoUrl: '', bio: '' })
@@ -67,7 +67,6 @@ export function SeasonDetailPage() {
   const [assignFreeAgentOpen, setAssignFreeAgentOpen] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState({
-    showName: '',
     label: '',
     episodeCount: '',
     accentColor: 'blue' as AccentColor,
@@ -258,7 +257,6 @@ export function SeasonDetailPage() {
   function openEditSeason() {
     if (!season) return
     setEditForm({
-      showName: season.showName,
       label: season.label,
       episodeCount: String(season.episodeCount),
       accentColor: season.accentColor,
@@ -293,13 +291,11 @@ export function SeasonDetailPage() {
         seasonId,
         leagueId,
         {
-          showName: season.showName,
           label: season.label,
           episodeCount: season.episodeCount,
           accentColor: season.accentColor,
         },
         {
-          showName: editForm.showName.trim(),
           label: editForm.label.trim(),
           episodeCount,
           accentColor: editForm.accentColor,
@@ -333,12 +329,12 @@ export function SeasonDetailPage() {
   ]
 
   return (
-    <Layout breadcrumbs={seasonTrail(leagueId, leagueName, season.showName)}>
+    <Layout breadcrumbs={seasonTrail(leagueId, leagueName, season.label)}>
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{season.showName}</h1>
-          <p className="text-gray-500">{season.label}</p>
+          <h1 className="text-2xl font-bold text-gray-900">{season.label}</h1>
+          <p className="text-gray-500">{showName}</p>
         </div>
         <div className="flex items-center gap-3">
           <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
@@ -753,17 +749,11 @@ export function SeasonDetailPage() {
           className="flex flex-col gap-4"
         >
           <Input
-            label={t('season.showName')}
-            value={editForm.showName}
-            onChange={(e) => setEditForm((f) => ({ ...f, showName: e.target.value }))}
-            required
-            autoFocus
-          />
-          <Input
             label={t('season.label')}
             value={editForm.label}
             onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
             required
+            autoFocus
           />
           <Input
             label={t('season.episodeCount')}
