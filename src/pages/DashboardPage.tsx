@@ -23,6 +23,7 @@ import { Input, Textarea } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { Badge } from '../components/Badge'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
+import { dashboardTrail } from '../lib/breadcrumbs'
 import { useMyJoinRequests } from '../lib/joinRequests'
 import type { LeagueDoc, LeagueMemberDoc, SeasonDoc } from '../lib/types'
 import type { AccentColor } from '../lib/types'
@@ -177,7 +178,7 @@ export function DashboardPage() {
     .sort((a, b) => (b.season.createdAt ?? 0) - (a.season.createdAt ?? 0))[0]
 
   return (
-    <Layout>
+    <Layout breadcrumbs={dashboardTrail()}>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('dashboard.title')}</h1>
         <Button onClick={() => setCreateOpen(true)}>{t('dashboard.createLeague')}</Button>

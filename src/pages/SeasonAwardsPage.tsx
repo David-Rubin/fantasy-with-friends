@@ -5,6 +5,8 @@ import { db } from '../lib/firebase'
 import { listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
+import { seasonChildTrail } from '../lib/breadcrumbs'
+import { useTrailNames } from '../lib/useTrailNames'
 import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
 import { Button } from '../components/Button'
 import type {
@@ -29,6 +31,7 @@ export function SeasonAwardsPage() {
   const [selections, setSelections] = useState<Record<string, string>>({}) // ruleId -> contestantId
   const [saving, setSaving] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const { leagueName, seasonName } = useTrailNames(leagueId, seasonId)
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -95,7 +98,9 @@ export function SeasonAwardsPage() {
   if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
   return (
-    <Layout>
+    <Layout
+      breadcrumbs={seasonChildTrail(leagueId, leagueName, seasonId, seasonName, t('awards.title'))}
+    >
       <h1 className="text-2xl font-bold text-gray-900 mb-6">{t('awards.title')}</h1>
 
       {rules.length === 0 ? (
