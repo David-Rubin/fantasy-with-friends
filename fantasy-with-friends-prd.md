@@ -27,7 +27,7 @@ The app is designed to be show-agnostic from day one. The data model, scoring en
 
 ### 1.4 Target Users
 - **Primary**: Small friend groups (3–20 people) who want a structured, competitive way to watch reality TV together.
-- **MVP scope**: Invite-only leagues. A user creates a league and shares an invite link or code with friends. There is no public discovery.
+- **MVP scope**: Request-to-join leagues. Every signed-in user can browse all leagues and ask to join one; the league's Owner approves or declines. There is no public sign-up-free discovery — browsing requires an account.
 - **Future scope**: Any user can sign up and create their own public or private leagues.
 
 ### 1.5 Tech Stack (Recommended)
@@ -56,12 +56,18 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 **3.1.1 Create a League**
 - Any authenticated user can create a league by providing a name and optional description.
 - The creator is automatically assigned the Owner role.
-- The Owner receives an invite link (and shareable code) to distribute to friends.
+- The Owner reviews and decides every request to join the league.
 
 **3.1.2 Join a League**
-- League membership is scoped to seasons, not the league itself. Being in a league does not automatically include you in any of its seasons.
-- Users join a specific season via a season-level invite link or code distributed by an Admin.
-- A user must have an account to be added to a season.
+- Every signed-in user sees every league: the ones they belong to first, then all others, each with a "Join" button.
+- A user can open any league's page before joining. They see its name, description, member count, and the list of its seasons, but cannot open a season page.
+- Clicking "Join" creates a pending request. While it is pending the button reads "Request pending" and is disabled, on both the dashboard and the league page.
+- The league's Owner sees pending requests on the league page and approves or rejects each one.
+- **Approval** admits the user to the league, and to any season still in `setup`. Seasons that have moved on to `draft`, `active`, or `complete` are not joined: pick order is fixed when a draft is randomized, so a member added afterward would hold no pick position. A user admitted mid-season plays from the next season.
+- **Rejection** is recorded but not final — the button returns to "Join" and the user may ask again. The Owner keeps the history of decided requests.
+- League membership does not by itself grant season membership; the two are separate, and only the seasons listed above are joined automatically.
+- A user must have an account to request to join anything.
+- Superadmins can view and edit every league without belonging to one. Participating is a separate, deliberate act: to play, a superadmin requests to join like any other user.
 
 **3.1.3 Admin Roles**
 
@@ -93,11 +99,10 @@ A single role that spans the whole app, separate from the per-league roles above
 - A season exists in one of four states: `setup`, `draft`, `active`, `complete`.
 - Season configuration (contestants, scoring rules, draft settings) can be saved at any point during `setup` without opening the draft. This allows Admins to prepare a season in advance and open the draft at a later date.
 
-**3.2.2 Season Invites**
-- Each season has its own invite link and 6-character code, independent of any league-level invite.
-- When creating a new season, the Admin sees a checklist of all users who participated in any prior season within the same league. The Admin can select any subset to auto-send a season invite.
-- The Admin can also generate and share the season invite link to add new players not previously in the league.
-- A user who receives a season invite and does not yet have an account is directed through the sign-up flow first, then auto-joined to the season.
+**3.2.2 Season Membership**
+- Creating a season enrolls every current league member in it.
+- A user admitted to the league later is enrolled in any season still in `setup` at that moment.
+- *(Known limitation)* There is no way to add a member to a season once it has left `setup`, and no UI for an Admin to invite a specific user directly. Both are deferred: direct invites are a planned future iteration, and admitting a late member to a season in progress depends on being able to restart a draft.
 
 **3.2.3 Add Contestants**
 - Admins add contestants to a season before the draft opens.
@@ -240,7 +245,6 @@ A single role that spans the whole app, separate from the per-league roles above
 /                          → Landing / marketing page (logged-out)
 /login                     → Login
 /signup                    → Sign up
-/invite/:code              → Invite landing (redirects post-auth)
 /dashboard                 → Home after login
 /leagues/:leagueId         → League detail (members, seasons)
 /leagues/:leagueId/seasons/:seasonId                        → Season detail
@@ -256,8 +260,7 @@ A single role that spans the whole app, separate from the per-league roles above
 1. User lands on `/signup`, enters display name and email address. No password is required.
 2. Firebase Auth creates the account and sends a unique 6-digit PIN to the provided email address.
 3. The PIN is the user's permanent credential for future logins. It is communicated only via email and is not set by the user.
-4. If a pending invite code exists in session storage (set when they hit `/invite/:code` before auth), they are auto-joined to that season after account creation.
-5. Redirect to `/dashboard`.
+4. Redirect to `/dashboard`, where they can create a league or ask to join an existing one.
 
 *(Note: User-provided passwords may be supported in a future iteration. The PIN-only approach avoids storing user-chosen passwords that may be reused across services.)*
 
@@ -269,12 +272,13 @@ A single role that spans the whole app, separate from the per-league roles above
 5. Error state: incorrect PIN → "Incorrect PIN. Check your email or request a new one." with a "Resend PIN" link.
 6. After 5 consecutive failed attempts, the account is locked for 15 minutes.
 
-**Invite Link Flow**
-1. User hits `/invite/:code`.
-2. If not logged in: store invite code in session storage, redirect to `/signup` (or `/login` with a toggle).
-3. After auth: app reads the stored code, joins the user to the season, clears session storage, redirects to that season's page.
-4. If already logged in: join immediately and redirect to the season page.
-5. Error states: invalid code → error page with "Check the link or ask for a new one"; already a member → confirmation message with redirect to season.
+**Join Request Flow**
+1. From the dashboard or a league page, the user clicks "Join" on a league they do not belong to.
+2. A request is written at `leagues/{leagueId}/joinRequests/{uid}` with status `pending`. The button becomes "Request pending" everywhere it appears.
+3. The Owner sees the request on the league page and approves or rejects it.
+4. On approval the user becomes a league member and joins any season still in `setup`; the league moves into their "Your leagues" section.
+5. On rejection the league page tells them the request was declined and the button returns to "Join".
+6. Requests are keyed by the requester's uid, so asking twice replaces one request rather than queueing two.
 
 ---
 
@@ -284,8 +288,9 @@ A single role that spans the whole app, separate from the per-league roles above
   - Show name, season label, current episode number, and the user's team name.
   - Current rank is intentionally not shown — users discover their rank by opening the season, preserving suspense after each new episode.
   - CTA button: "View Season" or "Join Draft" depending on season state.
-- Below the featured season: a list of all leagues the user belongs to, each showing its name and most recent season status.
-- Empty state (no leagues/seasons): prompt to create a league or enter an invite code.
+- Below the featured season: "Your leagues", listing every league the user belongs to with its name and most recent season status.
+- Below that: "Other leagues", listing every remaining league in the app with its name, description, member count, and a "Join" / "Request pending" button. League names link to the league page, which is readable before joining.
+- Empty state (no leagues): prompt to create a league or join one from the list below.
 
 ---
 
@@ -294,7 +299,7 @@ A single role that spans the whole app, separate from the per-league roles above
 1. Admin clicks "Create League" from the dashboard.
 2. Enters league name (required) and optional description.
 3. League is created; Admin lands on the league detail page.
-4. Admin copies and shares the invite link or 6-character code.
+4. Admin approves join requests from the league page as they arrive.
 5. Admin clicks "New Season" to begin season setup.
 
 ---
@@ -302,9 +307,7 @@ A single role that spans the whole app, separate from the per-league roles above
 ### 4.5 Season Setup Flow (Admin)
 
 1. Admin enters: show name, season label, episode count.
-2. **Invite players**:
-   - A checklist of all users from prior seasons in this league is shown. Admin selects any to auto-send a season invite.
-   - Admin can also copy the season invite link to share externally.
+2. **Players**: every current league member is enrolled in the season automatically, as is anyone admitted to the league while the season is still in `setup`. There is no per-season invite.
 3. Admin adds contestants (name + optional photo + bio). Minimum 2 required to proceed to draft.
 4. Admin defines scoring rules (type, point value, scope). Minimum 1 required.
 5. Admin configures draft settings:
@@ -312,8 +315,8 @@ A single role that spans the whole app, separate from the per-league roles above
    - If Admin-set: a drag-to-reorder list of league members.
    - Timer duration per pick (default 60 seconds).
    - Timer expiry behavior (Auto-pick / Admin picks / Skip).
-6. **Admin can save progress at any point** using a "Save Draft Setup" button. The season remains in `setup` state; no invite or draft is triggered yet.
-7. When ready, Admin clicks "Open Draft" — season transitions to `draft` state and the draft lobby becomes visible to invited members.
+6. **Admin can save progress at any point** using a "Save Draft Setup" button. The season remains in `setup` state; no draft is triggered yet.
+7. When ready, Admin clicks "Open Draft" — season transitions to `draft` state and the draft lobby becomes visible to season members. From this point the season's roster is closed: users admitted to the league later will not join it.
 
 ---
 
@@ -378,7 +381,8 @@ A single role that spans the whole app, separate from the per-league roles above
 | Draft room — player disconnects    | Reconnects automatically; expiry is judged from stored state, so their turn resolves whether or not they return |
 | Draft room — everyone disconnects  | Nothing resolves until someone reopens the room, at which point the expired turn is applied from stored state |
 | Draft ends with a roster short     | Draft holds at `awaiting-close` for an Admin to settle from the bench (3.3.5) |
-| Invite code not found              | Error page with "Check the link or ask for a new one"        |
+| Non-member opens a season page     | "You're not a member of this season." with a link back to the league |
+| Join request rejected              | League page says the request was declined; the button returns to "Join" |
 | Episode already scored             | "Score Episode" replaced with "View Scores" + "Unlock"       |
 | All contestants eliminated         | Season can still be marked `complete` manually by Admin      |
 
@@ -544,8 +548,10 @@ WCAG 2.1 AA as a guiding reference, applied pragmatically. The goal is a solid, 
 ### 7.2 Authorization
 
 - All Firestore reads and writes are protected by Firebase Security Rules — no data is publicly readable or writable.
-- **League data**: Only league members (any role) can read league, season, and contestant data.
-- **Season membership**: Only users who have been invited to and joined a specific season can read that season's data.
+- **League discovery**: Every signed-in user can read any league document and any season document — that is what makes browsing and the pre-join league page possible. Season documents expose point totals keyed by uid; the display names that would make them meaningful live in the members subcollection, which is not readable. `memberCount` is denormalized onto the league precisely so a prospective member can size up a league without reading its roster.
+- **League data**: Only league members (any role) can read a league's roster and its seasons' contestant, draft, and scoring data.
+- **Season membership**: Only users who have joined a specific season can read that season's data. League membership alone does not grant it.
+- **Join requests**: A user may write only their own request, only as `pending`, and only for a league they are not already in — the decision fields are not theirs to set. The league's Owner is the only one who can approve or reject, and approval writes the request's status and the new membership in a single atomic batch.
 - **Write access**: Only Admins and Owners can create/edit seasons, contestants, scoring rules, and episode scores. Members are read-only.
 - **Role elevation**: Only the Owner can promote/demote Admin roles. Admins cannot modify other Admins' roles or the Owner's role.
 - **Superadmin**: Treated as a member and admin of every league, so the checks above pass for them without membership. Folded into the shared membership helpers rather than repeated per rule, so rules and Cloud Functions cannot drift apart on who may act. It is a widening of existing permissions only — rules closed to everybody stay closed. The role is stored in its own collection with writes disabled, never as a field on the user document: that document is self-writable, so a flag there would let any account promote itself.
@@ -562,13 +568,14 @@ WCAG 2.1 AA as a guiding reference, applied pragmatically. The goal is a solid, 
 
 - All user-generated text inputs (team names, contestant bios, league names, season labels) are sanitized before storage to prevent XSS.
 - Photo uploads (contestant images) are restricted to image MIME types and capped at 2MB. Files are stored in Firebase Storage. *(TBD: URL input vs. upload only — if URL input is allowed, URLs must be validated and content must not be rendered as HTML.)*
-- Invite codes are validated server-side before granting access.
+- Join requests are constrained by security rules: the requester's uid must match the document, the status must be `pending`, and the decision fields must be null.
 
 ### 7.5 Threat Surface Notes
 
-- **Invite code guessing**: 6-character alphanumeric codes provide ~2.2B combinations. Rate-limit invite code validation attempts (5 attempts per IP per hour) to prevent enumeration.
+- **Join request spam**: requests are keyed by the requester's uid, so a user cannot queue more than one request per league, and a rejected user re-asking overwrites their previous request rather than adding to the Owner's queue. Repeated re-requests after rejection are possible and are accepted for now; throttling is a future consideration.
+- **League metadata exposure**: league names, descriptions, member counts, and season names are readable by any signed-in user by design. Rosters, picks, and scores are not.
 - **Admin impersonation during draft**: Proxy pick actions (Admin picking on behalf of a member) are logged with the acting Admin's user ID for auditability.
-- **Low overall sensitivity**: This is a private, invite-only app for friends with no financial or health data. Security posture is proportionate to that risk level.
+- **Low overall sensitivity**: This is a private, account-only app for friends with no financial or health data. Security posture is proportionate to that risk level.
 
 ---
 
@@ -622,7 +629,7 @@ Fantasy With Friends has no formal regulatory obligations in MVP:
 - No formal enterprise customers (no SOC 2 requirement)
 
 ### 9.2 GDPR / CCPA
-The app stores user email addresses and display names, which qualify as personal data under GDPR and CCPA. Given the private, invite-only nature of the MVP, formal compliance programs are out of scope. However, the following baseline practices apply:
+The app stores user email addresses and display names, which qualify as personal data under GDPR and CCPA. Given the private, account-only nature of the MVP, formal compliance programs are out of scope. However, the following baseline practices apply:
 - Users can request deletion of their account and associated data. In MVP, this is handled manually by the Owner upon request (no self-serve delete UI).
 - No user data is sold or shared with third parties.
 - Firebase's data processing terms cover the infrastructure layer.
@@ -653,6 +660,9 @@ The following actions are recorded with a timestamp and the acting user's ID:
 | Draft closed                     | Season ID, admin user ID                            |
 | User directory viewed            | Superadmin user ID, account count                   |
 | Superadmin granted               | Target user ID, reason (e.g. first account)         |
+| Join requested                   | League ID, requesting user ID                       |
+| Join request approved            | League ID, deciding user ID, target user ID, seasons joined |
+| Join request rejected            | League ID, deciding user ID, target user ID         |
 
 ### 10.2 Storage
 - Audit logs are stored as a subcollection in Firestore (`/auditLogs`), append-only.
@@ -727,7 +737,7 @@ Lightweight and pragmatic for MVP. The goal is basic visibility into usage — n
 ### 12.7 Testing
 - **Unit tests**: Required for all scoring logic (rule evaluators, score calculation pipeline, pick order strategies).
 - **End-to-end tests**: A baseline E2E suite using **Playwright** covering the core happy paths:
-  - Sign up and join a league via invite link
+  - Sign up, request to join a league, and be approved by the Owner
   - Season setup (contestants + scoring rules + draft config)
   - Full draft session (picks, proxy pick, timer expiry)
   - Episode scoring and leaderboard update
@@ -747,7 +757,8 @@ Lightweight and pragmatic for MVP. The goal is basic visibility into usage — n
 The following are explicitly excluded from the MVP to prevent scope creep. Items marked "future consideration" are candidates for later iterations.
 
 ### 13.1 Features
-- **Public league discovery**: No browse/search for public leagues. Invite-only only. *(Future)*
+- **League search and filtering**: Every league is listed on the dashboard, but there is no search, filter, or pagination over that list. *(Future)*
+- **Direct invites**: An Admin cannot invite a specific user; membership starts with a request from that user. *(Future)*
 - **Native mobile apps**: Responsive web only. No iOS or Android app. *(Future)*
 - **Automated score ingestion**: No scraping, API integration, or data feeds from external sources. All scores are entered manually by an Admin.
 - **User-provided passwords**: PIN-only auth in MVP. *(Future)*

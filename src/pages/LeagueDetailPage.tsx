@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { doc, collection, query, where, addDoc, setDoc, updateDoc } from 'firebase/firestore'
+import {
+  doc,
+  collection,
+  collectionGroup,
+  query,
+  where,
+  addDoc,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
@@ -10,7 +19,16 @@ import { Badge } from '../components/Badge'
 import { Modal } from '../components/Modal'
 import { Input } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
-import type { LeagueDoc, LeagueMemberDoc, SeasonDoc, MemberRole, AccentColor } from '../lib/types'
+import { JoinLeagueButton } from '../components/JoinLeagueButton'
+import { approveJoinRequest, rejectJoinRequest, useMyJoinRequests } from '../lib/joinRequests'
+import type {
+  LeagueDoc,
+  LeagueJoinRequestDoc,
+  LeagueMemberDoc,
+  SeasonDoc,
+  MemberRole,
+  AccentColor,
+} from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
@@ -22,14 +40,19 @@ interface MemberWithName extends LeagueMemberDoc {
 
 export function LeagueDetailPage() {
   const { leagueId } = useParams<{ leagueId: string }>()
-  const { user } = useAuth()
+  const { user, isSuperadmin } = useAuth()
   const navigate = useNavigate()
 
   const [league, setLeague] = useState<LeagueDoc | null>(null)
   const [members, setMembers] = useState<MemberWithName[]>([])
   const [seasons, setSeasons] = useState<(SeasonDoc & { id: string })[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
-  const [inviteCopied, setInviteCopied] = useState(false)
+  const [joinRequests, setJoinRequests] = useState<LeagueJoinRequestDoc[]>([])
+  const [deciding, setDeciding] = useState<string | null>(null)
+  // Distinguishes "not a member" from "membership not loaded yet", so the page
+  // never flashes a Join button at someone who already belongs here.
+  const [membershipResolved, setMembershipResolved] = useState(false)
+  const joinRequestStatus = useMyJoinRequests(user?.uid)
   const [newSeasonOpen, setNewSeasonOpen] = useState(false)
   const [seasonForm, setSeasonForm] = useState({
     showName: '',
@@ -47,15 +70,39 @@ export function LeagueDetailPage() {
     return unsub
   }, [leagueId])
 
+  // Is this user a member, and in what role? Asked through the collection group
+  // rule that authorizes a user's own membership documents, not by reading the
+  // league's roster: that subcollection is closed to non-members, and this page
+  // is now reachable before joining, so reading it first would mean a denied
+  // read on every pre-join visit.
   useEffect(() => {
-    if (!leagueId) return
+    if (!leagueId || !user) return
+    const unsub = listenQuery(
+      query(collectionGroup(db, 'members'), where('uid', '==', user.uid)),
+      'my league membership',
+      (snap) => {
+        const mine = snap.docs.find(
+          (d) =>
+            d.ref.parent.parent?.id === leagueId && d.ref.parent.parent?.parent?.id === 'leagues'
+        )
+        setMyRole(mine ? (mine.data() as LeagueMemberDoc).role : null)
+        setMembershipResolved(true)
+      },
+      () => setMembershipResolved(true)
+    )
+    return unsub
+  }, [leagueId, user])
+
+  // The roster itself is members-only. A superadmin can read it without being a
+  // member, which is the point of the app-level role.
+  useEffect(() => {
+    if (!leagueId || !(myRole || isSuperadmin)) return
     const unsub = listenQuery(
       collection(db, 'leagues', leagueId, 'members'),
       'league members',
       (snap) => {
         const list: MemberWithName[] = snap.docs.map((d) => {
           const data = d.data() as LeagueMemberDoc
-          if (d.id === user?.uid) setMyRole(data.role)
           // displayName is stored on the member doc; reading users/{uid} for
           // anyone but yourself is denied, and that doc also holds their email.
           return { ...data, uid: d.id, displayName: data.displayName || d.id }
@@ -64,7 +111,7 @@ export function LeagueDetailPage() {
       }
     )
     return unsub
-  }, [leagueId, user])
+  }, [leagueId, myRole, isSuperadmin])
 
   useEffect(() => {
     if (!leagueId) return
@@ -82,17 +129,54 @@ export function LeagueDetailPage() {
     return unsub
   }, [leagueId])
 
+  const isMember = myRole !== null
   const isAdmin = myRole === 'owner' || myRole === 'admin'
   const isOwner = myRole === 'owner'
+  // Deciding requests is the owner's call. A superadmin qualifies too — the
+  // rules already treat them as an owner everywhere.
+  const canDecideRequests = isOwner || isSuperadmin
+  // Season data and the roster are gated on membership; a superadmin reaches
+  // both without joining.
+  const canOpenSeasons = isMember || isSuperadmin
+  // Derived rather than cleared in the listener: a demoted owner stops seeing
+  // the queue on the next render, without an extra state write.
+  const pendingRequests = canDecideRequests ? joinRequests : []
+  const myRequestStatus = leagueId ? (joinRequestStatus[leagueId] ?? null) : null
 
-  const inviteCode = leagueId?.slice(0, 6).toUpperCase() ?? ''
-  const inviteLink = `${window.location.origin}/invite/${inviteCode}`
-
-  async function copyInviteLink() {
-    await navigator.clipboard.writeText(inviteLink)
-    setInviteCopied(true)
-    setTimeout(() => setInviteCopied(false), 2000)
+  async function handleDecide(request: LeagueJoinRequestDoc, approve: boolean) {
+    if (!leagueId || !user) return
+    setDeciding(request.uid)
+    try {
+      if (approve) {
+        await approveJoinRequest(leagueId, request, user.uid)
+      } else {
+        await rejectJoinRequest(leagueId, request.uid, user.uid)
+      }
+    } catch (error) {
+      // A denied or partial write would otherwise leave the row looking decided.
+      console.error('Failed to decide join request', error)
+    } finally {
+      setDeciding(null)
+    }
   }
+
+  // The request queue, for whoever can act on it. Readable by the league's
+  // owner only, so the listener is not attached for anyone else.
+  useEffect(() => {
+    if (!leagueId || !canDecideRequests) return
+    const unsub = listenQuery(
+      query(collection(db, 'leagues', leagueId, 'joinRequests'), where('status', '==', 'pending')),
+      'league join requests',
+      (snap) => {
+        setJoinRequests(
+          snap.docs
+            .map((d) => d.data() as LeagueJoinRequestDoc)
+            .sort((a, b) => a.requestedAt - b.requestedAt)
+        )
+      }
+    )
+    return unsub
+  }, [leagueId, canDecideRequests])
 
   async function handleChangeRole(uid: string, newRole: MemberRole) {
     if (!leagueId || !user) return
@@ -109,10 +193,6 @@ export function LeagueDetailPage() {
     if (!leagueId || !user) return
     setCreating(true)
     try {
-      const inviteCode = Array.from(crypto.getRandomValues(new Uint8Array(6)))
-        .map((b) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32])
-        .join('')
-
       const seasonRef = await addDoc(collection(db, 'seasons'), {
         leagueId,
         showName: seasonForm.showName.trim(),
@@ -124,7 +204,6 @@ export function LeagueDetailPage() {
         timerSeconds: 60,
         timerExpiry: 'auto-pick',
         accentColor: seasonForm.accentColor,
-        inviteCode,
         createdAt: Date.now(),
         firstEpisodeScoredAt: null,
         teamTotals: {},
@@ -163,21 +242,65 @@ export function LeagueDetailPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{league.name}</h1>
         {league.description && <p className="mt-1 text-gray-500">{league.description}</p>}
+        <p className="mt-1 text-sm text-gray-400">
+          {league.memberCount === 1
+            ? t('league.memberCountOne')
+            : t('league.memberCount', { n: league.memberCount ?? 0 })}
+        </p>
       </div>
 
-      {/* Invite */}
-      <div className="mb-8 rounded-xl border border-gray-200 bg-white p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            {t('league.inviteCode')}
-          </p>
-          <p className="font-mono font-bold text-gray-900 tracking-widest">{inviteCode}</p>
-          <p className="text-xs text-gray-400 truncate">{inviteLink}</p>
+      {/* Not a member: explain, and offer to ask */}
+      {membershipResolved && !isMember && (
+        <div className="mb-8 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            {/* A superadmin is not a member but can still open everything, so
+                the "join to see the seasons" half does not apply to them. */}
+            <p className="text-sm text-gray-600">
+              {canOpenSeasons ? t('league.notAMemberSuperadmin') : t('league.notAMember')}
+            </p>
+            {myRequestStatus === 'rejected' && (
+              <p className="mt-1 text-sm text-amber-700">{t('league.requestRejected')}</p>
+            )}
+          </div>
+          {leagueId && <JoinLeagueButton leagueId={leagueId} status={myRequestStatus} />}
         </div>
-        <Button variant="secondary" onClick={copyInviteLink}>
-          {inviteCopied ? t('league.copied') : t('league.copyLink')}
-        </Button>
-      </div>
+      )}
+
+      {/* Pending requests, for the owner to decide */}
+      {canDecideRequests && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-lg font-semibold text-gray-900">{t('league.joinRequests')}</h2>
+          {pendingRequests.length === 0 ? (
+            <p className="text-sm text-gray-400">{t('league.noJoinRequests')}</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {pendingRequests.map((request) => (
+                <div
+                  key={request.uid}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
+                >
+                  <span className="text-sm font-medium text-gray-800">{request.displayName}</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      loading={deciding === request.uid}
+                      onClick={() => handleDecide(request, false)}
+                    >
+                      {t('league.reject')}
+                    </Button>
+                    <Button
+                      loading={deciding === request.uid}
+                      onClick={() => handleDecide(request, true)}
+                    >
+                      {t('league.approve')}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         {/* Seasons */}
@@ -199,51 +322,70 @@ export function LeagueDetailPage() {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {seasons.map((season) => (
-                <Link
-                  key={season.id}
-                  to={`/leagues/${leagueId}/seasons/${season.id}`}
-                  className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
-                >
-                  <div>
-                    <p className="font-semibold text-gray-900">{season.showName}</p>
-                    <p className="text-sm text-gray-500">{season.label}</p>
+              {seasons.map((season) => {
+                const summary = (
+                  <>
+                    <div>
+                      <p className="font-semibold text-gray-900">{season.showName}</p>
+                      <p className="text-sm text-gray-500">{season.label}</p>
+                    </div>
+                    <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
+                  </>
+                )
+                // Season pages are for members. A non-member sees which seasons
+                // exist — enough to judge whether to join — as plain cards, not
+                // links that would only land them on a refusal.
+                return canOpenSeasons ? (
+                  <Link
+                    key={season.id}
+                    to={`/leagues/${leagueId}/seasons/${season.id}`}
+                    className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
+                  >
+                    {summary}
+                  </Link>
+                ) : (
+                  <div
+                    key={season.id}
+                    className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4"
+                  >
+                    {summary}
                   </div>
-                  <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
-                </Link>
-              ))}
+                )
+              })}
             </div>
           )}
         </section>
 
-        {/* Members */}
-        <section>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('league.members')}</h2>
-          <div className="flex flex-col gap-2">
-            {members.map((m) => (
-              <div
-                key={m.uid}
-                className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-4 py-3"
-              >
-                <span className="text-sm font-medium text-gray-800">{m.displayName}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 capitalize">{m.role}</span>
-                  {isOwner && m.uid !== user?.uid && (
-                    <select
-                      value={m.role}
-                      onChange={(e) => handleChangeRole(m.uid, e.target.value as MemberRole)}
-                      className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      aria-label={`Role for ${m.displayName}`}
-                    >
-                      <option value="member">{t('league.roles.member')}</option>
-                      <option value="admin">{t('league.roles.admin')}</option>
-                    </select>
-                  )}
+        {/* Members — the roster is not readable before joining */}
+        {canOpenSeasons && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('league.members')}</h2>
+            <div className="flex flex-col gap-2">
+              {members.map((m) => (
+                <div
+                  key={m.uid}
+                  className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-4 py-3"
+                >
+                  <span className="text-sm font-medium text-gray-800">{m.displayName}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400 capitalize">{m.role}</span>
+                    {isOwner && m.uid !== user?.uid && (
+                      <select
+                        value={m.role}
+                        onChange={(e) => handleChangeRole(m.uid, e.target.value as MemberRole)}
+                        className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        aria-label={`Role for ${m.displayName}`}
+                      >
+                        <option value="member">{t('league.roles.member')}</option>
+                        <option value="admin">{t('league.roles.admin')}</option>
+                      </select>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
 
       {/* New Season Modal */}

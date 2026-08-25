@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { doc, getDoc, collection, updateDoc, addDoc } from 'firebase/firestore'
+import {
+  doc,
+  getDoc,
+  collection,
+  collectionGroup,
+  query,
+  where,
+  updateDoc,
+  addDoc,
+} from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
@@ -33,7 +42,7 @@ interface MemberDoc extends SeasonMemberDoc {
 
 export function SeasonDetailPage() {
   const { leagueId, seasonId } = useParams<{ leagueId: string; seasonId: string }>()
-  const { user } = useAuth()
+  const { user, isSuperadmin } = useAuth()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('leaderboard')
   const [season, setSeason] = useState<(SeasonDoc & { id: string }) | null>(null)
@@ -41,6 +50,11 @@ export function SeasonDetailPage() {
   const [contestants, setContestants] = useState<Contestant[]>([])
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
+  // Season data is gated on season membership, and league membership alone does
+  // not grant it — a member admitted after this season started is not in it. The
+  // page is reachable from a league page anyone can open, so it has to say so
+  // rather than render an empty shell of denied reads.
+  const [membership, setMembership] = useState<'loading' | 'member' | 'none'>('loading')
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
   // Setup form state
   const [contestantForm, setContestantForm] = useState({ name: '', photoUrl: '', bio: '' })
@@ -80,8 +94,30 @@ export function SeasonDetailPage() {
     return unsub
   }, [seasonId])
 
+  // Asked through the collection group rule for a user's own membership docs:
+  // the season's roster is closed to non-members, so testing membership by
+  // reading it would be a denied read on every visit by a non-member.
   useEffect(() => {
     if (!seasonId || !user) return
+    const unsub = listenQuery(
+      query(collectionGroup(db, 'members'), where('uid', '==', user.uid)),
+      'my season membership',
+      (snap) => {
+        const mine = snap.docs.some(
+          (d) =>
+            d.ref.parent.parent?.id === seasonId && d.ref.parent.parent?.parent?.id === 'seasons'
+        )
+        setMembership(mine ? 'member' : 'none')
+      },
+      () => setMembership('none')
+    )
+    return unsub
+  }, [seasonId, user])
+
+  const canView = membership === 'member' || isSuperadmin
+
+  useEffect(() => {
+    if (!seasonId || !user || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'members'),
       'season members',
@@ -101,10 +137,10 @@ export function SeasonDetailPage() {
       })
     )
     return unsub
-  }, [seasonId, user, leagueId])
+  }, [seasonId, user, leagueId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'contestants'),
       'season contestants',
@@ -113,10 +149,10 @@ export function SeasonDetailPage() {
       }
     )
     return unsub
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'scoringRules'),
       'season rules',
@@ -125,10 +161,10 @@ export function SeasonDetailPage() {
       }
     )
     return unsub
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'episodeScores'),
       'episode statuses',
@@ -141,7 +177,7 @@ export function SeasonDetailPage() {
       }
     )
     return unsub
-  }, [seasonId])
+  }, [seasonId, canView])
 
   const isAdmin = myRole === 'owner' || myRole === 'admin'
 
@@ -229,6 +265,24 @@ export function SeasonDetailPage() {
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
   const memberUidMap = Object.fromEntries(members.map((m) => [m.uid, m]))
   const episodeNumbers = Array.from({ length: season?.episodeCount ?? 0 }, (_, i) => i + 1)
+
+  if (membership === 'none' && !isSuperadmin) {
+    return (
+      <Layout>
+        <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
+          <p className="text-gray-500">{t('season.notAMember')}</p>
+          {leagueId && (
+            <Link
+              to={`/leagues/${leagueId}`}
+              className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline"
+            >
+              {t('season.backToLeague')}
+            </Link>
+          )}
+        </div>
+      </Layout>
+    )
+  }
 
   if (!season) {
     return (

@@ -4,7 +4,6 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { LandingPage } from './pages/LandingPage'
 import { LoginPage } from './pages/LoginPage'
 import { SignupPage } from './pages/SignupPage'
-import { InvitePage } from './pages/InvitePage'
 import { DashboardPage } from './pages/DashboardPage'
 import { LeagueDetailPage } from './pages/LeagueDetailPage'
 import { SeasonDetailPage } from './pages/SeasonDetailPage'
@@ -21,7 +20,6 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
-          <Route path="/invite/:code" element={<InvitePage />} />
 
           <Route
             path="/dashboard"

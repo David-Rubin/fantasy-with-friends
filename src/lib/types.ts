@@ -65,6 +65,13 @@ export interface LeagueDoc {
   ownerId: string
   createdAt: number
   accentColor: AccentColor
+  /**
+   * Denormalized count of `leagues/{id}/members`, maintained by the
+   * onLeagueMemberWritten trigger. The dashboard lists every league to every
+   * signed-in user, but member documents stay readable to members only — so a
+   * prospective member has no way to count the roster itself.
+   */
+  memberCount: number
 }
 
 export interface LeagueMemberDoc {
@@ -85,6 +92,34 @@ export interface LeagueMemberDoc {
   joinedAt: number
 }
 
+export type JoinRequestStatus = 'pending' | 'approved' | 'rejected'
+
+/**
+ * A user's request to join a league, at `leagues/{leagueId}/joinRequests/{uid}`.
+ *
+ * Keyed by the requester's uid so a user cannot stack up duplicate requests for
+ * the same league — a second request overwrites the first document rather than
+ * creating another one. Decided requests are kept, not deleted: the owner keeps
+ * the history, and a rejected user can ask again by rewriting their own doc.
+ */
+export interface LeagueJoinRequestDoc {
+  /**
+   * Denormalized copy of the document ID. The dashboard needs every request the
+   * signed-in user has open, across all leagues, to decide whether each league's
+   * button reads "Join" or "Request pending" — and a collectionGroup query can
+   * only be authorized by a rule filtering on a field. See LeagueMemberDoc.uid.
+   */
+  uid: string
+  /** Denormalized display name — see LeagueMemberDoc.displayName */
+  displayName: string
+  status: JoinRequestStatus
+  requestedAt: number
+  /** Set when an owner approves or rejects; null while pending */
+  decidedAt: number | null
+  /** uid of the owner who decided — null while pending */
+  decidedBy: string | null
+}
+
 export interface SeasonDoc {
   leagueId: string
   showName: string
@@ -96,7 +131,6 @@ export interface SeasonDoc {
   timerSeconds: number
   timerExpiry: TimerExpiry
   accentColor: AccentColor
-  inviteCode: string
   createdAt: number
   firstEpisodeScoredAt: number | null
   /** Written by Cloud Function after each episode score submission */
@@ -206,6 +240,9 @@ export interface League extends LeagueDoc {
   id: string
 }
 export interface LeagueMember extends LeagueMemberDoc {
+  uid: string
+}
+export interface LeagueJoinRequest extends LeagueJoinRequestDoc {
   uid: string
 }
 export interface Season extends SeasonDoc {

@@ -32,9 +32,10 @@ test.describe('Auth flow', () => {
     await expect(page).toHaveURL(/\/login/)
   })
 
-  test('invalid invite code shows error', async ({ page }) => {
-    await page.goto('/invite/BADCODE')
-    // Redirects to signup (not logged in)
-    await expect(page).toHaveURL(/\/signup/)
+  // Leagues are browsable by any signed-in user, which is not the same as
+  // public: without an account there is nothing to see.
+  test('unauthenticated access to a league page redirects to login', async ({ page }) => {
+    await page.goto('/leagues/test-league')
+    await expect(page).toHaveURL(/\/login/)
   })
 })
