@@ -1,6 +1,6 @@
 # Product Requirements Document: Fantasy With Friends
 
-**Version**: 1.4
+**Version**: 1.5
 **Date**: 2026-08-25
 **Status**: Draft
 
@@ -8,6 +8,7 @@
 *1.2 — app-level Superadmin role and user directory added (3.1.4, 3.1.5, 4.1, 7.2); admin-controlled clock pause added (3.3.1, 4.6).*
 *1.3 — invite codes replaced with request-to-join leagues (1.4, 3.1.1, 3.1.2, 3.2.2, 4.1–4.5, 7.2–7.5, 10.1, 12.7, 13.1).*
 *1.4 — league owners can rename a league, edit its description, and remove members (3.1.3, 4.9, 7.2, 10.1).*
+*1.5 — season details editable in any state by owners, admins and superadmins (3.2.3, 10.1).*
 
 ---
 
@@ -116,13 +117,20 @@ A single role that spans the whole app, separate from the per-league roles above
 - A user admitted to the league later is enrolled in any season still in `setup` at that moment.
 - *(Known limitation)* There is no way to add a member to a season once it has left `setup`, and no UI for an Admin to invite a specific user directly. Both are deferred: direct invites are a planned future iteration, and admitting a late member to a season in progress depends on being able to restart a draft.
 
-**3.2.3 Add Contestants**
+**3.2.3 Edit Season Details**
+
+- A season's show name, season label, episode count, and accent colour can be edited by the league's Owner, any league Admin, or a Superadmin.
+- **Editing is available in every season state** — `setup`, `draft`, `active`, and `complete` alike. A show name typo or a season that turns out to run longer than announced needs correcting whether or not the draft has opened.
+- Draft settings (pick order method, timer duration, timer expiry behaviour) are not part of this. They belong to the draft and are set from the setup panel while the season is still in `setup`.
+- The one restriction is not about state: the episode count cannot be lowered below the highest episode that already has scores. The season page lists episodes by counting up to the episode count, so those scores would disappear from the UI while still counting toward every team's total. The message names the episode in the way.
+
+**3.2.4 Add Contestants**
 - Admins add contestants to a season before the draft opens.
 - Each contestant record includes: name, photo (URL or upload), and a free-text bio.
 - Contestants can be added/edited while the season is in `setup` state.
 - Once the draft begins, the contestant list is locked.
 
-**3.2.4 Define Scoring Rules**
+**3.2.5 Define Scoring Rules**
 - Admins define a set of scoring rules per season. Three rule types are supported:
 
   | Rule Type       | Description                                               | Example                           |
@@ -679,6 +687,7 @@ The following actions are recorded with a timestamp and the acting user's ID:
 | Join request rejected            | League ID, deciding user ID, target user ID         |
 | League details updated           | League ID, editing user ID, old and new name/description |
 | League member removed            | League ID, removing user ID, target user ID, seasons left and kept |
+| Season details updated           | Season ID, league ID, editing user ID, old and new details |
 
 ### 10.2 Storage
 - Audit logs are stored as a subcollection in Firestore (`/auditLogs`), append-only.
