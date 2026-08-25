@@ -17,11 +17,16 @@ const mocks = vi.hoisted(() => ({
   logAuditEvent: vi.fn(),
 }))
 
-vi.mock('./firebase', () => ({ db: {} }))
-vi.mock('./listen', () => ({ listenQuery: vi.fn(() => () => {}) }))
+// Only what the assertions need: the audit call is spied on, and every
+// Firestore write is captured below. ./firebase is deliberately NOT mocked —
+// the test env in vite.config.ts makes importing it safe.
 vi.mock('./audit', () => ({ logAuditEvent: mocks.logAuditEvent }))
 
-vi.mock('firebase/firestore', () => ({
+// A partial mock: only the calls these tests assert on are replaced, so
+// firebase.ts keeps its real getFirestore and cannot break this test by
+// importing something new from the module later.
+vi.mock('firebase/firestore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('firebase/firestore')>()),
   collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
   collectionGroup: (_db: unknown, id: string) => ({ path: id }),
   doc: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),

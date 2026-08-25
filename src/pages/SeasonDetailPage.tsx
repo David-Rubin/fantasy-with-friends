@@ -18,12 +18,16 @@ import type {
   MemberRole,
   Contestant,
   ScoringRule,
+  AccentColor,
 } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
+import { AccentColorPicker } from '../components/AccentColorPicker'
+import { episodeCountProblem, highestScoredEpisode } from '../lib/seasonDetails'
+import { updateSeasonDetails } from '../lib/seasonApi'
 
 type Tab = 'leaderboard' | 'roster' | 'freeAgents' | 'episodes' | 'awards'
 
@@ -34,7 +38,7 @@ interface MemberDoc extends SeasonMemberDoc {
 
 export function SeasonDetailPage() {
   const { leagueId, seasonId } = useParams<{ leagueId: string; seasonId: string }>()
-  const { user } = useAuth()
+  const { user, isSuperadmin } = useAuth()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('leaderboard')
   const [season, setSeason] = useState<(SeasonDoc & { id: string }) | null>(null)
@@ -58,6 +62,15 @@ export function SeasonDetailPage() {
   const [savingSetup, setSavingSetup] = useState(false)
   const [openingDraft, setOpeningDraft] = useState(false)
   const [assignFreeAgentOpen, setAssignFreeAgentOpen] = useState<string | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState({
+    showName: '',
+    label: '',
+    episodeCount: '',
+    accentColor: 'blue' as AccentColor,
+  })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editError, setEditError] = useState('')
 
   // Draft settings form
   const [draftSettings, setDraftSettings] = useState({
@@ -145,7 +158,11 @@ export function SeasonDetailPage() {
     return unsub
   }, [seasonId, canView])
 
-  const isAdmin = myRole === 'owner' || myRole === 'admin'
+  // Superadmins are folded in here because the security rules already treat
+  // them as an admin of every season (isSeasonAdmin resolves through
+  // isLeagueAdmin, which is true for them). Leaving them out only meant the
+  // client hid controls the server would have accepted.
+  const isAdmin = myRole === 'owner' || myRole === 'admin' || isSuperadmin
 
   async function handleAddContestant(e: React.FormEvent) {
     e.preventDefault()
@@ -231,6 +248,68 @@ export function SeasonDetailPage() {
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
   const memberUidMap = Object.fromEntries(members.map((m) => [m.uid, m]))
   const episodeNumbers = Array.from({ length: season?.episodeCount ?? 0 }, (_, i) => i + 1)
+  // Episode numbers that already have a scores document, whatever the season's
+  // state — the one thing that constrains an edit.
+  const scoredEpisodeNumbers = Object.keys(episodeStatuses)
+
+  function openEditSeason() {
+    if (!season) return
+    setEditForm({
+      showName: season.showName,
+      label: season.label,
+      episodeCount: String(season.episodeCount),
+      accentColor: season.accentColor,
+    })
+    setEditError('')
+    setEditOpen(true)
+  }
+
+  async function handleSaveSeasonDetails(e: React.FormEvent) {
+    e.preventDefault()
+    if (!season || !seasonId || !leagueId) return
+
+    const episodeCount = parseInt(editForm.episodeCount, 10)
+    const problem = episodeCountProblem(episodeCount, scoredEpisodeNumbers)
+    if (problem) {
+      setEditError(
+        problem === 'below-scored'
+          ? t('season.episodeCountBelowScored', {
+              n: highestScoredEpisode(scoredEpisodeNumbers),
+            })
+          : problem === 'too-few'
+            ? t('season.episodeCountTooFew')
+            : t('season.episodeCountInvalid')
+      )
+      return
+    }
+
+    setSavingEdit(true)
+    setEditError('')
+    try {
+      await updateSeasonDetails(
+        seasonId,
+        leagueId,
+        {
+          showName: season.showName,
+          label: season.label,
+          episodeCount: season.episodeCount,
+          accentColor: season.accentColor,
+        },
+        {
+          showName: editForm.showName.trim(),
+          label: editForm.label.trim(),
+          episodeCount,
+          accentColor: editForm.accentColor,
+        }
+      )
+      setEditOpen(false)
+    } catch (error) {
+      console.error('Failed to update season details', error)
+      setEditError(t('common.error'))
+    } finally {
+      setSavingEdit(false)
+    }
+  }
 
   if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
@@ -265,7 +344,16 @@ export function SeasonDetailPage() {
           <h1 className="text-2xl font-bold text-gray-900">{season.showName}</h1>
           <p className="text-gray-500">{season.label}</p>
         </div>
-        <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
+        <div className="flex items-center gap-3">
+          <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
+          {/* Deliberately not gated on season.state — a name or episode count
+              can need correcting long after the draft has opened. */}
+          {isAdmin && (
+            <Button variant="secondary" onClick={openEditSeason}>
+              {t('season.editDetails')}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Setup panel */}
@@ -647,6 +735,56 @@ export function SeasonDetailPage() {
       )}
 
       {/* Assign free agent modal */}
+      {/* Edit season details */}
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={t('season.editDetails')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button form="edit-season-form" type="submit" loading={savingEdit}>
+              {savingEdit ? t('season.saving') : t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="edit-season-form"
+          onSubmit={handleSaveSeasonDetails}
+          className="flex flex-col gap-4"
+        >
+          <Input
+            label={t('season.showName')}
+            value={editForm.showName}
+            onChange={(e) => setEditForm((f) => ({ ...f, showName: e.target.value }))}
+            required
+            autoFocus
+          />
+          <Input
+            label={t('season.label')}
+            value={editForm.label}
+            onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
+            required
+          />
+          <Input
+            label={t('season.episodeCount')}
+            type="number"
+            min={1}
+            value={editForm.episodeCount}
+            onChange={(e) => setEditForm((f) => ({ ...f, episodeCount: e.target.value }))}
+            required
+          />
+          <AccentColorPicker
+            value={editForm.accentColor}
+            onChange={(c) => setEditForm((f) => ({ ...f, accentColor: c }))}
+          />
+          {editError && <p className="text-sm text-red-600">{editError}</p>}
+        </form>
+      </Modal>
+
       <Modal
         open={!!assignFreeAgentOpen}
         onClose={() => setAssignFreeAgentOpen(null)}

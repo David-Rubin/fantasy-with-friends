@@ -130,7 +130,15 @@ service cloud.firestore {
         // Role changes (promote/demote) are owner-only, as is admitting a new
         // member — approveJoinRequest writes this document and the request's
         // status in one batch.
-        allow write: if isLeagueOwner(leagueId);
+        allow create, update: if isLeagueOwner(leagueId);
+        // Removal goes through the removeLeagueMember Cloud Function, never the
+        // client. Whether a member may be removed depends on whether they are
+        // sitting in a season that is drafting or active — a query across the
+        // seasons collection plus a document read in each, neither of which a
+        // rule can do. Allowing the delete here would make that check advice
+        // rather than a constraint, and a member deleted mid-draft leaves a
+        // pick order pointing at nobody.
+        allow delete: if false;
       }
 
       // ── Join requests ───────────────────────────────────────────────────────
