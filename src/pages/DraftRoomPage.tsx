@@ -5,6 +5,7 @@ import { db } from '../lib/firebase'
 import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
+import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
 import { Button } from '../components/Button'
 import { ContestantCard } from '../components/ContestantCard'
 import { TimerBanner } from '../components/TimerBanner'
@@ -51,16 +52,17 @@ export function DraftRoomPage() {
   const [assigning, setAssigning] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [togglingTimer, setTogglingTimer] = useState(false)
+  const { canView, blocked } = useSeasonMembership(seasonId)
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenDoc(doc(db, 'seasons', seasonId), 'draft season', (snap) => {
       if (snap.exists()) setSeason(snap.data() as SeasonDoc)
     })
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId || !user) return
+    if (!seasonId || !user || !canView) return
     return listenQuery(
       collection(db, 'seasons', seasonId, 'members'),
       'draft members',
@@ -78,10 +80,10 @@ export function DraftRoomPage() {
         }
       })
     )
-  }, [seasonId, user, leagueId])
+  }, [seasonId, user, leagueId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenQuery(
       collection(db, 'seasons', seasonId, 'contestants'),
       'draft contestants',
@@ -89,16 +91,16 @@ export function DraftRoomPage() {
         setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
       }
     )
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenQuery(collection(db, 'seasons', seasonId, 'draft'), 'draft state', (snap) => {
       if (!snap.empty) {
         setDraft(snap.docs[0].data() as DraftDoc)
       }
     })
-  }, [seasonId])
+  }, [seasonId, canView])
 
   const isAdmin = myRole === 'owner' || myRole === 'admin'
   const isPaused = draft?.status === 'paused'
@@ -274,6 +276,8 @@ export function DraftRoomPage() {
     : ''
 
   const myMember = members.find((m) => m.uid === user?.uid)
+
+  if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
   if (!season) {
     return (
