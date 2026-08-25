@@ -53,3 +53,17 @@ export const resolveExpiredTurn = httpsCallable<
   { seasonId: string; round: number; pickNumber: number },
   { outcome: 'auto-picked' | 'skipped' | 'halted' | 'paused' | 'no-op'; status?: string }
 >(functions, 'resolveExpiredTurn')
+
+/**
+ * Put a drafting season back into setup so its settings can be changed.
+ *
+ * Destructive by design: the draft document and every pick are deleted, each
+ * contestant is returned to the pool and pick positions are cleared, so the
+ * caller must confirm first. Admin only, and refused unless the season is
+ * currently `draft` — undoing the draft of a season that has been scored would
+ * leave a leaderboard describing rosters that no longer exist.
+ */
+export const reopenSeasonSetup = httpsCallable<
+  { seasonId: string },
+  { clearedPicks: number; clearedContestants: number }
+>(functions, 'reopenSeasonSetup')
