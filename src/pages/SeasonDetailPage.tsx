@@ -528,6 +528,19 @@ export function SeasonDetailPage() {
         </div>
       )}
 
+      {/* A member who arrives before the season is ready — from a bookmark, or
+          a link shared before the draft opened. The admin panel above is not
+          theirs to see, and everything else on this page only exists once the
+          season is scoring, so without this the page is simply blank. */}
+      {season.state === 'setup' && !isAdmin && (
+        <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
+          <p className="font-medium text-gray-700">{t('season.setupNoticeTitle')}</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
+            {t('season.setupNoticeBody')}
+          </p>
+        </div>
+      )}
+
       {/* Draft lobby link */}
       {season.state === 'draft' && (
         <div className="mb-6">

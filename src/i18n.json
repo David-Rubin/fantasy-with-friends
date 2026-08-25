@@ -82,6 +82,8 @@
   "season.states.draft": "Draft",
   "season.states.active": "Active",
   "season.states.complete": "Complete",
+  "season.setupNoticeTitle": "This season is still being set up",
+  "season.setupNoticeBody": "An admin is adding the contestants and scoring rules. Check back soon — the draft will open once the season is ready.",
   "season.tabs.leaderboard": "Leaderboard",
   "season.tabs.roster": "Roster",
   "season.tabs.freeAgents": "Free Agents",
