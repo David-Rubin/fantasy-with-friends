@@ -458,6 +458,17 @@ export function SeasonDetailPage() {
           <section className="mb-6">
             <h3 className="font-medium text-gray-700 mb-3">{t('draft.settings')}</h3>
             <div className="flex flex-wrap gap-4">
+              {/* Read-only on purpose: `draftFormat` is 'snake' and nothing else
+                  yet, and a select with one option would imply a choice that is
+                  not there. Shown rather than hidden because how the order runs
+                  is the thing people most want to know before a draft. */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-gray-600">{t('draft.format')}</span>
+                <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  {t('draft.format.snake')}
+                </p>
+                <span className="text-xs text-gray-400">{t('draft.formatComingSoon')}</span>
+              </div>
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-gray-600">{t('draft.pickOrder')}</span>
                 <select
