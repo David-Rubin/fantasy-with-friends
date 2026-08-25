@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { highestScoredEpisode, episodeCountProblem } from './seasonApi'
+import { highestScoredEpisode, episodeCountProblem } from './seasonDetails'
 
 /**
  * Season details are editable in every state, so the only thing standing
  * between an admin and a broken leaderboard is this check.
+ *
+ * These import ./seasonDetails rather than ./seasonApi on purpose — the latter
+ * reaches ./firebase, which builds a Firebase app at import time and throws
+ * without the VITE_FIREBASE_* variables that CI does not have.
  */
 
 describe('highestScoredEpisode', () => {

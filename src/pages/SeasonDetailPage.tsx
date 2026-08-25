@@ -26,7 +26,8 @@ import { logAuditEvent } from '../lib/audit'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { AccentColorPicker } from '../components/AccentColorPicker'
-import { episodeCountProblem, highestScoredEpisode, updateSeasonDetails } from '../lib/seasonApi'
+import { episodeCountProblem, highestScoredEpisode } from '../lib/seasonDetails'
+import { updateSeasonDetails } from '../lib/seasonApi'
 
 type Tab = 'leaderboard' | 'roster' | 'freeAgents' | 'episodes' | 'awards'
 
