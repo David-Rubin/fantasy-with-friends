@@ -6,6 +6,8 @@ import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
+import { seasonTrail } from '../lib/breadcrumbs'
+import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { LeaderboardRow } from '../components/LeaderboardRow'
@@ -47,6 +49,7 @@ export function SeasonDetailPage() {
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const { leagueName } = useTrailNames(leagueId)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
   // Setup form state
   const [contestantForm, setContestantForm] = useState({ name: '', photoUrl: '', bio: '' })
@@ -315,7 +318,7 @@ export function SeasonDetailPage() {
 
   if (!season) {
     return (
-      <Layout>
+      <Layout breadcrumbs={seasonTrail(leagueId, leagueName, undefined)}>
         <p className="text-gray-400">{t('common.loading')}</p>
       </Layout>
     )
@@ -330,17 +333,10 @@ export function SeasonDetailPage() {
   ]
 
   return (
-    <Layout>
+    <Layout breadcrumbs={seasonTrail(leagueId, leagueName, season.showName)}>
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
-          <nav className="text-sm text-gray-400 mb-1">
-            <Link to={`/leagues/${leagueId}`} className="hover:text-gray-600">
-              {t('nav.dashboard')}
-            </Link>
-            {' / '}
-            <span className="text-gray-700">{season.showName}</span>
-          </nav>
           <h1 className="text-2xl font-bold text-gray-900">{season.showName}</h1>
           <p className="text-gray-500">{season.label}</p>
         </div>

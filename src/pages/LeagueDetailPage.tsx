@@ -20,6 +20,7 @@ import { Modal } from '../components/Modal'
 import { Input, Textarea } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
+import { leagueTrail } from '../lib/breadcrumbs'
 import { updateLeagueDetails, removeLeagueMember } from '../lib/leagueApi'
 import { approveJoinRequest, rejectJoinRequest, useMyJoinRequests } from '../lib/joinRequests'
 import type {
@@ -284,14 +285,14 @@ export function LeagueDetailPage() {
 
   if (!league) {
     return (
-      <Layout>
+      <Layout breadcrumbs={leagueTrail(undefined)}>
         <p className="text-gray-400">{t('common.loading')}</p>
       </Layout>
     )
   }
 
   return (
-    <Layout>
+    <Layout breadcrumbs={leagueTrail(league.name)}>
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{league.name}</h1>

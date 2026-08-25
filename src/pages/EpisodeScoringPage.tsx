@@ -6,6 +6,8 @@ import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
+import { seasonChildTrail } from '../lib/breadcrumbs'
+import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import type {
@@ -47,6 +49,7 @@ export function EpisodeScoringPage() {
   const [submitConfirm, setSubmitConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const { leagueName, seasonName } = useTrailNames(leagueId, seasonId)
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -196,7 +199,15 @@ export function EpisodeScoringPage() {
   if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
   return (
-    <Layout>
+    <Layout
+      breadcrumbs={seasonChildTrail(
+        leagueId,
+        leagueName,
+        seasonId,
+        seasonName,
+        t('nav.episode', { n: epNum })
+      )}
+    >
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">
           {t('scoring.scoreEpisode', { n: epNum })}

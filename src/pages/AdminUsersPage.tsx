@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Layout } from '../components/Layout'
+import { adminUsersTrail } from '../lib/breadcrumbs'
 import { listAllUsers } from '../lib/adminApi'
 import type { AppUser } from '../lib/types'
 import { t } from '../lib/i18n'
@@ -34,7 +35,7 @@ export function AdminUsersPage() {
     : users
 
   return (
-    <Layout>
+    <Layout breadcrumbs={adminUsersTrail()}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{t('admin.users.title')}</h1>

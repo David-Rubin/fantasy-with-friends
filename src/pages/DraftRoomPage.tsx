@@ -6,6 +6,8 @@ import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
+import { seasonChildTrail } from '../lib/breadcrumbs'
+import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { ContestantCard } from '../components/ContestantCard'
 import { TimerBanner } from '../components/TimerBanner'
@@ -53,6 +55,7 @@ export function DraftRoomPage() {
   const [confirmClose, setConfirmClose] = useState(false)
   const [togglingTimer, setTogglingTimer] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const { leagueName, seasonName } = useTrailNames(leagueId, seasonId)
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -281,14 +284,18 @@ export function DraftRoomPage() {
 
   if (!season) {
     return (
-      <Layout>
+      <Layout
+        breadcrumbs={seasonChildTrail(leagueId, leagueName, seasonId, seasonName, t('nav.draft'))}
+      >
         <p className="text-gray-400">{t('common.loading')}</p>
       </Layout>
     )
   }
 
   return (
-    <Layout>
+    <Layout
+      breadcrumbs={seasonChildTrail(leagueId, leagueName, seasonId, seasonName, t('nav.draft'))}
+    >
       <div className="mb-4">
         <h1 className="text-xl font-bold text-gray-900">
           {season.showName} — {t('dashboard.joinDraft')}

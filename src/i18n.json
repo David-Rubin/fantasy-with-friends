@@ -1,6 +1,10 @@
 {
   "nav.appName": "Fantasy With Friends",
   "nav.dashboard": "Dashboard",
+  "nav.league": "League",
+  "nav.season": "Season",
+  "nav.draft": "Draft",
+  "nav.episode": "Episode {n}",
   "nav.signOut": "Sign out",
   "auth.signUp": "Sign up",
   "auth.logIn": "Log in",

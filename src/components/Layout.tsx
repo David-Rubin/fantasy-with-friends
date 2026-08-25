@@ -3,12 +3,20 @@ import type { ReactNode } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { signOut } from '../lib/auth'
 import { t } from '../lib/i18n'
+import { Breadcrumbs } from './Breadcrumbs'
+import type { BreadcrumbItem } from '../lib/breadcrumbs'
 
 interface LayoutProps {
   children: ReactNode
+  /**
+   * The trail for this page. Rendered here rather than by each page so every
+   * page puts it in the same place with the same spacing — the one thing a
+   * breadcrumb has to do is be where the reader expects it.
+   */
+  breadcrumbs?: BreadcrumbItem[]
 }
 
-export function Layout({ children }: LayoutProps) {
+export function Layout({ children, breadcrumbs }: LayoutProps) {
   const { userDoc, isSuperadmin } = useAuth()
   const navigate = useNavigate()
 
@@ -49,7 +57,10 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </div>
       </nav>
-      <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
+      <main className="mx-auto max-w-5xl px-4 py-8">
+        {breadcrumbs && <Breadcrumbs items={breadcrumbs} />}
+        {children}
+      </main>
     </div>
   )
 }
