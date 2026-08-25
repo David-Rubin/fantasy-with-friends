@@ -9,6 +9,30 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // src/lib/firebase.ts builds a Firebase app at import time and throws
+    // without these, so any test importing a module that reaches it would fail
+    // to load — which is what happened in CI, where no .env exists. Tests then
+    // needed a vi.mock('./firebase') purely to survive the import, a second way
+    // of solving a problem that is better solved once, here.
+    //
+    // These values are never used to reach anything: they only have to be
+    // well-formed enough for initializeApp and getAuth. Mocks in tests are for
+    // observing behaviour, not for getting a module to load.
+    //
+    // VITE_USE_EMULATOR is pinned off deliberately. Vite loads .env.local in
+    // test mode too, so a developer running the emulator locally would
+    // otherwise have their test run try to connect to it, and behave
+    // differently from CI.
+    env: {
+      VITE_FIREBASE_API_KEY: 'test-api-key',
+      VITE_FIREBASE_AUTH_DOMAIN: 'demo-project.firebaseapp.com',
+      VITE_FIREBASE_PROJECT_ID: 'demo-project',
+      VITE_FIREBASE_STORAGE_BUCKET: 'demo-project.appspot.com',
+      VITE_FIREBASE_MESSAGING_SENDER_ID: '000000000000',
+      VITE_FIREBASE_APP_ID: '1:000000000000:web:test',
+      VITE_FIREBASE_MEASUREMENT_ID: 'G-TEST',
+      VITE_USE_EMULATOR: 'false',
+    },
     // Cloud Function logic is covered here too — the draft rules that decide
     // turn order and completion live server-side and are worth testing directly.
     include: ['src/**/*.test.{ts,tsx}', 'functions/src/**/*.test.ts'],
