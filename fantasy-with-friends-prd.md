@@ -1,11 +1,13 @@
 # Product Requirements Document: Fantasy With Friends
 
-**Version**: 1.2
-**Date**: 2026-08-24
+**Version**: 1.4
+**Date**: 2026-08-25
 **Status**: Draft
 
 *1.1 — draft completion, timer expiry, and bench settlement revised to match the implemented behavior (3.3.1, 3.3.4, 3.3.5, 4.6, 4.9, 7.2, 8.2).*
-*1.2 — app-level Superadmin role and user directory added (3.1.3, 3.1.4, 4.1, 7.2); admin-controlled clock pause added (3.3.1, 4.6).*
+*1.2 — app-level Superadmin role and user directory added (3.1.4, 3.1.5, 4.1, 7.2); admin-controlled clock pause added (3.3.1, 4.6).*
+*1.3 — invite codes replaced with request-to-join leagues (1.4, 3.1.1, 3.1.2, 3.2.2, 4.1–4.5, 7.2–7.5, 10.1, 12.7, 13.1).*
+*1.4 — league owners can rename a league, edit its description, and remove members (3.1.3, 4.9, 7.2, 10.1).*
 
 ---
 
@@ -69,7 +71,17 @@ The existing codebase is a basic React scaffold with no implemented features. Th
 - A user must have an account to request to join anything.
 - Superadmins can view and edit every league without belonging to one. Participating is a separate, deliberate act: to play, a superadmin requests to join like any other user.
 
-**3.1.3 Admin Roles**
+**3.1.3 Managing a League (Owner)**
+
+- The Owner can rename a league and change its description at any time, from the league page.
+- The Owner can remove a member from the league.
+- **A member can only be removed if they are not in any season that is `draft` or `active`.** Pick order is fixed to a list of uids when a draft is randomized, and episode scores are keyed by uid, so removing a player mid-season would leave a draft that cannot complete or a leaderboard with a hole in it. The refusal names the seasons standing in the way; the Owner waits for them to finish.
+- Removal drops the member from the league and from any season still in `setup` — the mirror of approval, which enrolls a new member in exactly those seasons.
+- **Completed seasons are left untouched.** The member keeps their team and scores there: those are part of a result other people played for, and leaving a league should not rewrite a past standing.
+- The Owner cannot be removed, by themselves or anyone else. There is no route back to having an Owner once one is gone.
+- A removed user can ask to join again; their old request is replaced by the new one.
+
+**3.1.4 Admin Roles**
 
 These three are **per league**. A user's role in one league says nothing about another, and "season admin" is not a separate thing — it resolves to admin of the league the season belongs to.
 
@@ -78,7 +90,7 @@ These three are **per league**. A user's role in one league says nothing about a
 - **Member**: Read-only access to league data; participates in drafts.
 - The Owner can promote any Member to Admin (and demote Admins back to Member).
 
-**3.1.4 Superadmin (app level)**
+**3.1.5 Superadmin (app level)**
 
 A single role that spans the whole app, separate from the per-league roles above — deliberately not called "Owner", which is already taken at the league level.
 
@@ -383,6 +395,7 @@ A single role that spans the whole app, separate from the per-league roles above
 | Draft ends with a roster short     | Draft holds at `awaiting-close` for an Admin to settle from the bench (3.3.5) |
 | Non-member opens a season page     | "You're not a member of this season." with a link back to the league |
 | Join request rejected              | League page says the request was declined; the button returns to "Join" |
+| Removing a member mid-season       | Refused, naming the seasons that are drafting or active |
 | Episode already scored             | "Score Episode" replaced with "View Scores" + "Unlock"       |
 | All contestants eliminated         | Season can still be marked `complete` manually by Admin      |
 
@@ -551,6 +564,7 @@ WCAG 2.1 AA as a guiding reference, applied pragmatically. The goal is a solid, 
 - **League discovery**: Every signed-in user can read any league document and any season document — that is what makes browsing and the pre-join league page possible. Season documents expose point totals keyed by uid; the display names that would make them meaningful live in the members subcollection, which is not readable. `memberCount` is denormalized onto the league precisely so a prospective member can size up a league without reading its roster.
 - **League data**: Only league members (any role) can read a league's roster and its seasons' contestant, draft, and scoring data.
 - **Season membership**: Only users who have joined a specific season can read that season's data. League membership alone does not grant it.
+- **Member removal**: Deleting `leagues/{id}/members/{uid}` is closed to clients entirely; removal goes through a Cloud Function. Whether a member may be removed depends on whether they are in a season that is drafting or active, which means a query across the seasons collection plus a document read in each — neither of which a security rule can do. Leaving the check in the client would make it advice rather than a constraint. The function re-checks that the caller is the Owner.
 - **Join requests**: A user may write only their own request, only as `pending`, and only for a league they are not already in — the decision fields are not theirs to set. The league's Owner is the only one who can approve or reject, and approval writes the request's status and the new membership in a single atomic batch.
 - **Write access**: Only Admins and Owners can create/edit seasons, contestants, scoring rules, and episode scores. Members are read-only.
 - **Role elevation**: Only the Owner can promote/demote Admin roles. Admins cannot modify other Admins' roles or the Owner's role.
@@ -663,6 +677,8 @@ The following actions are recorded with a timestamp and the acting user's ID:
 | Join requested                   | League ID, requesting user ID                       |
 | Join request approved            | League ID, deciding user ID, target user ID, seasons joined |
 | Join request rejected            | League ID, deciding user ID, target user ID         |
+| League details updated           | League ID, editing user ID, old and new name/description |
+| League member removed            | League ID, removing user ID, target user ID, seasons left and kept |
 
 ### 10.2 Storage
 - Audit logs are stored as a subcollection in Firestore (`/auditLogs`), append-only.

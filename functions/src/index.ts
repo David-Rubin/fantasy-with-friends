@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
 import { nextSlot, pickerAt, draftOutcome, openSlots, skipLimitReached } from './draft'
+import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
 import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
 
 admin.initializeApp()
@@ -107,6 +108,113 @@ export const onLeagueMemberWritten = functions.firestore
     const membersSnap = await db.collection(`leagues/${leagueId}/members`).get()
     await db.doc(`leagues/${leagueId}`).update({ memberCount: membersSnap.size })
   })
+
+// ── Leagues: remove a member ─────────────────────────────────────────────────
+
+/**
+ * Remove someone from a league, and from any season of it that has not started.
+ *
+ * A Cloud Function rather than a client delete, for the same reason picks are:
+ * the rule that matters here cannot be written as a security rule. Deciding
+ * whether this member is sitting in a season that is drafting or active means
+ * querying the seasons collection and checking a document in each one, and
+ * rules can do neither. Leaving the check in the client would make it advice
+ * rather than a constraint — so `leagues/{id}/members/{uid}` is delete-denied to
+ * clients and this is the only way through.
+ *
+ * What each season state means for the member is decided in ./membership.
+ */
+export const removeLeagueMember = functions.https.onCall(
+  async (
+    data: { leagueId: string; uid: string },
+    context
+  ): Promise<{ leftSeasons: string[]; keptSeasons: string[] }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+
+    const { leagueId, uid } = data
+    if (!leagueId || !uid) {
+      throw new functions.https.HttpsError('invalid-argument', 'leagueId and uid are required')
+    }
+
+    const leagueRef = db.doc(`leagues/${leagueId}`)
+    const leagueSnap = await leagueRef.get()
+    if (!leagueSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'League not found')
+    }
+
+    const ownerId = leagueSnap.data()?.ownerId as string
+    const actingUid = context.auth.uid
+    if (actingUid !== ownerId && !(await isSuperadmin(actingUid))) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only the league owner can remove members'
+      )
+    }
+
+    // The owner is the one member with nobody above them to be removed by, and
+    // a league without an owner has no route back to having one.
+    if (uid === ownerId) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'The league owner cannot be removed'
+      )
+    }
+
+    const memberRef = db.doc(`leagues/${leagueId}/members/${uid}`)
+    if (!(await memberRef.get()).exists) {
+      throw new functions.https.HttpsError('not-found', 'That user is not a member of this league')
+    }
+
+    const seasonsSnap = await db.collection('seasons').where('leagueId', '==', leagueId).get()
+    const memberships = await Promise.all(
+      seasonsSnap.docs.map(async (d): Promise<MemberSeason | null> => {
+        const inSeason = (await db.doc(`seasons/${d.id}/members/${uid}`).get()).exists
+        if (!inSeason) return null
+        const season = d.data()
+        return {
+          id: d.id,
+          state: season.state,
+          label: `${season.showName} — ${season.label}`,
+        }
+      })
+    )
+
+    const plan = planRemoval(memberships.filter((m): m is MemberSeason => m !== null))
+
+    if (!canRemove(plan)) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `They are playing in ${blockingReason(plan)}. Members can only be removed once a season has finished.`
+      )
+    }
+
+    const batch = db.batch()
+    batch.delete(memberRef)
+    for (const season of plan.leaving) {
+      batch.delete(db.doc(`seasons/${season.id}/members/${uid}`))
+    }
+    await batch.commit()
+
+    await db.collection('auditLogs').add({
+      action: 'league_member_removed',
+      actorUid: actingUid,
+      targetUid: uid,
+      leagueId,
+      newValue: {
+        leftSeasons: plan.leaving.map((s) => s.id),
+        keptSeasons: plan.keeping.map((s) => s.id),
+      },
+      timestamp: Date.now(),
+    })
+
+    return {
+      leftSeasons: plan.leaving.map((s) => s.id),
+      keptSeasons: plan.keeping.map((s) => s.id),
+    }
+  }
+)
 
 // ── Draft: submit a pick ──────────────────────────────────────────────────────
 

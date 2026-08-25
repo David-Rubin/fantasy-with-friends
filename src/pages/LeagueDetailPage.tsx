@@ -17,9 +17,10 @@ import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { Modal } from '../components/Modal'
-import { Input } from '../components/Input'
+import { Input, Textarea } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
+import { updateLeagueDetails, removeLeagueMember } from '../lib/leagueApi'
 import { approveJoinRequest, rejectJoinRequest, useMyJoinRequests } from '../lib/joinRequests'
 import type {
   LeagueDoc,
@@ -61,6 +62,13 @@ export function LeagueDetailPage() {
     accentColor: 'blue' as AccentColor,
   })
   const [creating, setCreating] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState({ name: '', description: '' })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState<MemberWithName | null>(null)
+  const [removing, setRemoving] = useState(false)
+  // The refusal from removeLeagueMember, which names the seasons in the way.
+  const [removeError, setRemoveError] = useState('')
 
   useEffect(() => {
     if (!leagueId) return
@@ -132,15 +140,16 @@ export function LeagueDetailPage() {
   const isMember = myRole !== null
   const isAdmin = myRole === 'owner' || myRole === 'admin'
   const isOwner = myRole === 'owner'
-  // Deciding requests is the owner's call. A superadmin qualifies too — the
-  // rules already treat them as an owner everywhere.
-  const canDecideRequests = isOwner || isSuperadmin
+  // Editing the league, deciding requests and removing members are all the
+  // owner's call. A superadmin qualifies too — the rules already treat them as
+  // an owner everywhere, and the remove callable checks for the same pair.
+  const canManageLeague = isOwner || isSuperadmin
   // Season data and the roster are gated on membership; a superadmin reaches
   // both without joining.
   const canOpenSeasons = isMember || isSuperadmin
   // Derived rather than cleared in the listener: a demoted owner stops seeing
   // the queue on the next render, without an extra state write.
-  const pendingRequests = canDecideRequests ? joinRequests : []
+  const pendingRequests = canManageLeague ? joinRequests : []
   const myRequestStatus = leagueId ? (joinRequestStatus[leagueId] ?? null) : null
 
   async function handleDecide(request: LeagueJoinRequestDoc, approve: boolean) {
@@ -163,7 +172,7 @@ export function LeagueDetailPage() {
   // The request queue, for whoever can act on it. Readable by the league's
   // owner only, so the listener is not attached for anyone else.
   useEffect(() => {
-    if (!leagueId || !canDecideRequests) return
+    if (!leagueId || !canManageLeague) return
     const unsub = listenQuery(
       query(collection(db, 'leagues', leagueId, 'joinRequests'), where('status', '==', 'pending')),
       'league join requests',
@@ -176,7 +185,51 @@ export function LeagueDetailPage() {
       }
     )
     return unsub
-  }, [leagueId, canDecideRequests])
+  }, [leagueId, canManageLeague])
+
+  function openEdit() {
+    if (!league) return
+    setEditForm({ name: league.name, description: league.description })
+    setEditOpen(true)
+  }
+
+  async function handleSaveDetails(e: React.FormEvent) {
+    e.preventDefault()
+    if (!leagueId || !league) return
+    setSavingEdit(true)
+    try {
+      await updateLeagueDetails(
+        leagueId,
+        { name: league.name, description: league.description },
+        { name: editForm.name.trim(), description: editForm.description.trim() }
+      )
+      setEditOpen(false)
+    } catch (error) {
+      // Silence here would look like a save that worked.
+      console.error('Failed to update league details', error)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  async function handleRemoveMember() {
+    if (!leagueId || !removeTarget) return
+    setRemoving(true)
+    setRemoveError('')
+    try {
+      await removeLeagueMember({ leagueId, uid: removeTarget.uid })
+      setRemoveTarget(null)
+    } catch (error) {
+      // A season in progress is the expected refusal, and the function's
+      // message names it — show that rather than a generic failure.
+      const message = error instanceof Error ? error.message : ''
+      setRemoveError(
+        t('league.removeBlocked', { name: removeTarget.displayName, reason: message }).trim()
+      )
+    } finally {
+      setRemoving(false)
+    }
+  }
 
   async function handleChangeRole(uid: string, newRole: MemberRole) {
     if (!leagueId || !user) return
@@ -239,14 +292,21 @@ export function LeagueDetailPage() {
 
   return (
     <Layout>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">{league.name}</h1>
-        {league.description && <p className="mt-1 text-gray-500">{league.description}</p>}
-        <p className="mt-1 text-sm text-gray-400">
-          {league.memberCount === 1
-            ? t('league.memberCountOne')
-            : t('league.memberCount', { n: league.memberCount ?? 0 })}
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">{league.name}</h1>
+          {league.description && <p className="mt-1 text-gray-500">{league.description}</p>}
+          <p className="mt-1 text-sm text-gray-400">
+            {league.memberCount === 1
+              ? t('league.memberCountOne')
+              : t('league.memberCount', { n: league.memberCount ?? 0 })}
+          </p>
+        </div>
+        {canManageLeague && (
+          <Button variant="secondary" onClick={openEdit}>
+            {t('league.editDetails')}
+          </Button>
+        )}
       </div>
 
       {/* Not a member: explain, and offer to ask */}
@@ -267,7 +327,7 @@ export function LeagueDetailPage() {
       )}
 
       {/* Pending requests, for the owner to decide */}
-      {canDecideRequests && (
+      {canManageLeague && (
         <section className="mb-8">
           <h2 className="mb-3 text-lg font-semibold text-gray-900">{t('league.joinRequests')}</h2>
           {pendingRequests.length === 0 ? (
@@ -380,6 +440,20 @@ export function LeagueDetailPage() {
                         <option value="admin">{t('league.roles.admin')}</option>
                       </select>
                     )}
+                    {/* The owner has nobody above them to be removed by, and a
+                        league with no owner cannot get one back. */}
+                    {canManageLeague && m.role !== 'owner' && m.uid !== user?.uid && (
+                      <Button
+                        variant="ghost"
+                        className="!min-h-0 !px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50"
+                        onClick={() => {
+                          setRemoveError('')
+                          setRemoveTarget(m)
+                        }}
+                      >
+                        {t('league.removeMember')}
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -387,6 +461,58 @@ export function LeagueDetailPage() {
           </section>
         )}
       </div>
+
+      {/* Edit league details */}
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={t('league.editDetails')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button form="edit-league-form" type="submit" loading={savingEdit}>
+              {savingEdit ? t('league.saving') : t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <form id="edit-league-form" onSubmit={handleSaveDetails} className="flex flex-col gap-4">
+          <Input
+            label={t('league.name')}
+            value={editForm.name}
+            onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+            required
+            autoFocus
+          />
+          <Textarea
+            label={t('league.description')}
+            value={editForm.description}
+            onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+          />
+        </form>
+      </Modal>
+
+      {/* Remove a member */}
+      <Modal
+        open={removeTarget !== null}
+        onClose={() => setRemoveTarget(null)}
+        title={t('league.removeMemberTitle', { name: removeTarget?.displayName ?? '' })}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRemoveTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" loading={removing} onClick={handleRemoveMember}>
+              {removing ? t('league.removing') : t('league.removeMember')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">{t('league.removeMemberExplain')}</p>
+        {removeError && <p className="mt-3 text-sm text-red-600">{removeError}</p>}
+      </Modal>
 
       {/* New Season Modal */}
       <Modal
