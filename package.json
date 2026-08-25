@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "emulators": "mkdir -p .emulator-data && firebase emulators:start --project demo-project --only auth,firestore,storage,functions --import=.emulator-data --export-on-exit",
+    "emulators": "npm run functions:build && mkdir -p .emulator-data && firebase emulators:start --project demo-project --only auth,firestore,storage,functions --import=.emulator-data --export-on-exit",
+    "functions:build": "[ -d functions/node_modules ] || npm ci --prefix functions && npm run build --prefix functions",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
