@@ -23,20 +23,16 @@ const IS_EMULATOR = import.meta.env.VITE_USE_EMULATOR === 'true'
 // verification entirely — see functions/src/index.ts for the real logic and a note
 // on re-enabling loginWithPin below.
 
-const signUpFn = httpsCallable<
-  { displayName: string; email: string; inviteCode?: string },
-  { uid: string }
->(functions, 'signUpUser')
+const signUpFn = httpsCallable<{ displayName: string; email: string }, { uid: string }>(
+  functions,
+  'signUpUser'
+)
 
 const loginAsUserFn = httpsCallable<{ email: string }, { token: string }>(functions, 'loginAsUser')
 
 const resendPinFn = httpsCallable<{ email: string }, void>(functions, 'resendPin')
 
-export async function signUp(
-  displayName: string,
-  email: string,
-  inviteCode?: string
-): Promise<{ devPin?: string }> {
+export async function signUp(displayName: string, email: string): Promise<{ devPin?: string }> {
   if (IS_EMULATOR) {
     // Dev-only: create user directly, skip Cloud Function + email
     const pin = String(Math.floor(100000 + Math.random() * 900000))
@@ -50,7 +46,7 @@ export async function signUp(
     })
     return { devPin: pin }
   }
-  await signUpFn({ displayName, email, inviteCode })
+  await signUpFn({ displayName, email })
   return {}
 }
 

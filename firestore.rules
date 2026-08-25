@@ -91,11 +91,30 @@ service cloud.firestore {
       allow read: if isSignedIn() && request.auth.uid == resource.data.uid;
     }
 
+    // ── Collection group: a user's own join requests ──────────────────────────
+    // The dashboard lists every league, and each row's button depends on whether
+    // this user already has a request open for it. One collectionGroup query
+    // answers that for all leagues at once; like the members rule above it needs
+    // a {path=**} match and a filter on the caller's own uid.
+    match /{path=**}/joinRequests/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.uid;
+    }
+
     // ── Leagues ───────────────────────────────────────────────────────────────
     match /leagues/{leagueId} {
-      allow read: if isLeagueMember(leagueId);
-      allow create: if isSignedIn();
-      allow update: if isLeagueAdmin(leagueId);
+      // Every signed-in user browses every league from the dashboard and can
+      // open a league page before joining, so the league document itself is
+      // public to signed-in users. What stays closed is everything under it:
+      // the roster, and all season data. `memberCount` exists precisely so a
+      // non-member can size up a league without reading its members.
+      allow read: if isSignedIn();
+      // memberCount is derived state, owned by the onLeagueMemberWritten
+      // trigger. A client that could seed or edit it could inflate a league's
+      // apparent size, so it starts at 0 and is immutable to clients — the
+      // trigger writes through the Admin SDK and is not bound by these rules.
+      allow create: if isSignedIn() && request.resource.data.memberCount == 0;
+      allow update: if isLeagueAdmin(leagueId)
+        && request.resource.data.memberCount == resource.data.memberCount;
       allow delete: if isLeagueOwner(leagueId);
 
       match /members/{uid} {
@@ -108,19 +127,54 @@ service cloud.firestore {
           && request.auth.uid == uid
           && request.resource.data.uid == uid
           && get(/databases/$(database)/documents/leagues/$(leagueId)).data.ownerId == request.auth.uid;
-        // Role changes (promote/demote) are owner-only
+        // Role changes (promote/demote) are owner-only, as is admitting a new
+        // member — approveJoinRequest writes this document and the request's
+        // status in one batch.
         allow write: if isLeagueOwner(leagueId);
-        // Members can join via invite (Cloud Function writes via Admin SDK)
+      }
+
+      // ── Join requests ───────────────────────────────────────────────────────
+      // Keyed by the requester's uid, so a user cannot queue up duplicates.
+      match /joinRequests/{uid} {
+        allow read: if isLeagueOwner(leagueId) || (isSignedIn() && request.auth.uid == uid);
+
+        // A requester writes only their own document, and only as a fresh
+        // pending request — the decision fields are not theirs to set. Update is
+        // allowed on the same terms so someone who was rejected can ask again by
+        // overwriting their old request.
+        //
+        // Membership is tested with exists() rather than isLeagueMember(): a
+        // superadmin has effective access to every league without belonging to
+        // any, and must still be able to ask to join one as an ordinary player.
+        allow create, update: if isSignedIn()
+          && request.auth.uid == uid
+          && request.resource.data.uid == uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.decidedAt == null
+          && request.resource.data.decidedBy == null
+          && !exists(/databases/$(database)/documents/leagues/$(leagueId)/members/$(uid));
+
+        // The owner decides. Rejected requests are kept rather than deleted so
+        // the queue keeps its history.
+        allow update: if isLeagueOwner(leagueId)
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.status in ['approved', 'rejected'];
+        allow delete: if isLeagueOwner(leagueId);
       }
     }
 
     // ── Seasons ───────────────────────────────────────────────────────────────
     match /seasons/{seasonId} {
-      // `get` can use the bound {seasonId}; `list` cannot — during a query the
-      // wildcard is unbound, so any rule dereferencing it throws a null error.
-      // Queries are authorized off the leagueId field they already filter on.
-      allow get: if isSeasonMember(seasonId) || isLeagueMember(seasonLeagueId(seasonId));
-      allow list: if isSignedIn() && isLeagueMember(resource.data.leagueId);
+      // A league page is readable before joining and lists that league's
+      // seasons, so the season document is open to any signed-in user. Only this
+      // document — every subcollection below (roster, contestants, picks,
+      // scores, draft) stays gated on season membership, and the season page
+      // itself refuses to render for a non-member.
+      //
+      // Note this exposes teamTotals / teamEpisodeTotals, which are point totals
+      // keyed by uid. No names are attached, and the display names that would
+      // make them meaningful live in the members subcollection, which is closed.
+      allow get, list: if isSignedIn();
       allow create: if isSignedIn() &&
         isLeagueAdmin(request.resource.data.leagueId);
       // teamTotals / teamEpisodeTotals are written only by Cloud Functions (Admin SDK)

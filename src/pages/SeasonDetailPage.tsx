@@ -5,6 +5,7 @@ import { db } from '../lib/firebase'
 import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
+import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { LeaderboardRow } from '../components/LeaderboardRow'
@@ -41,6 +42,7 @@ export function SeasonDetailPage() {
   const [contestants, setContestants] = useState<Contestant[]>([])
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
+  const { canView, blocked } = useSeasonMembership(seasonId)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
   // Setup form state
   const [contestantForm, setContestantForm] = useState({ name: '', photoUrl: '', bio: '' })
@@ -81,7 +83,7 @@ export function SeasonDetailPage() {
   }, [seasonId])
 
   useEffect(() => {
-    if (!seasonId || !user) return
+    if (!seasonId || !user || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'members'),
       'season members',
@@ -101,10 +103,10 @@ export function SeasonDetailPage() {
       })
     )
     return unsub
-  }, [seasonId, user, leagueId])
+  }, [seasonId, user, leagueId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'contestants'),
       'season contestants',
@@ -113,10 +115,10 @@ export function SeasonDetailPage() {
       }
     )
     return unsub
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'scoringRules'),
       'season rules',
@@ -125,10 +127,10 @@ export function SeasonDetailPage() {
       }
     )
     return unsub
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'episodeScores'),
       'episode statuses',
@@ -141,7 +143,7 @@ export function SeasonDetailPage() {
       }
     )
     return unsub
-  }, [seasonId])
+  }, [seasonId, canView])
 
   const isAdmin = myRole === 'owner' || myRole === 'admin'
 
@@ -229,6 +231,8 @@ export function SeasonDetailPage() {
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
   const memberUidMap = Object.fromEntries(members.map((m) => [m.uid, m]))
   const episodeNumbers = Array.from({ length: season?.episodeCount ?? 0 }, (_, i) => i + 1)
+
+  if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
   if (!season) {
     return (

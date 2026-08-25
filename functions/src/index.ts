@@ -10,8 +10,8 @@ const db = admin.firestore()
 // ── Auth: sign up ─────────────────────────────────────────────────────────────
 
 export const signUpUser = functions.https.onCall(
-  async (data: { displayName: string; email: string; inviteCode?: string }) => {
-    const { displayName, email, inviteCode } = data
+  async (data: { displayName: string; email: string }) => {
+    const { displayName, email } = data
 
     // Generate 6-digit PIN
     const pin = String(Math.floor(100000 + Math.random() * 900000))
@@ -36,16 +36,6 @@ export const signUpUser = functions.https.onCall(
     // TODO: Send PIN via email (use Firebase Extension: Trigger Email)
     // For now, log it for emulator development
     functions.logger.info(`PIN for ${email}: ${pin}`)
-
-    // Redeem invite code if provided
-    if (inviteCode) {
-      try {
-        await redeemInviteCode(inviteCode, userRecord.uid)
-      } catch {
-        // Non-fatal — user is created even if invite code fails
-        functions.logger.warn('Failed to redeem invite code during signup', { inviteCode })
-      }
-    }
 
     return { uid: userRecord.uid }
   }
@@ -92,87 +82,31 @@ export const resendPin = functions.https.onCall(async (data: { email: string }) 
   functions.logger.info(`New PIN for ${email}: ${pin}`)
 })
 
-// ── Invite: validate and redeem ───────────────────────────────────────────────
+// ── Leagues: keep memberCount in step with the roster ────────────────────────
 
-export const validateInviteCode = functions.https.onCall(
-  async (data: { code: string }, context) => {
-    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+/**
+ * Recompute `leagues/{leagueId}.memberCount` whenever the roster changes.
+ *
+ * The dashboard shows every league to every signed-in user, including ones they
+ * have never joined, and each row reports how many members it has. Member
+ * documents stay readable to members only, so a prospective member cannot count
+ * them — hence the denormalized field.
+ *
+ * It is derived here rather than incremented by the client that admits a member
+ * because a count maintained from the client drifts permanently the first time a
+ * write is interrupted; recounting on every membership change is self-healing,
+ * and rosters here are a few dozen documents at most.
+ */
+export const onLeagueMemberWritten = functions.firestore
+  .document('leagues/{leagueId}/members/{uid}')
+  .onWrite(async (change, context) => {
+    // Role edits leave the roster size alone.
+    if (change.before.exists && change.after.exists) return
 
-    const { code } = data
-    const uid = context.auth.uid
-
-    // Rate limiting: simple Firestore counter per IP
-    // (Production would use a more robust solution)
-
-    // Find season with this invite code
-    const seasonsSnap = await db
-      .collection('seasons')
-      .where('inviteCode', '==', code.toUpperCase())
-      .limit(1)
-      .get()
-
-    if (seasonsSnap.empty) {
-      throw new functions.https.HttpsError('not-found', 'Invalid invite code')
-    }
-
-    const seasonDoc = seasonsSnap.docs[0]
-    const seasonId = seasonDoc.id
-    const leagueId = seasonDoc.data().leagueId as string
-
-    // Check if already a member
-    const memberSnap = await db.doc(`seasons/${seasonId}/members/${uid}`).get()
-    if (memberSnap.exists) {
-      return { seasonId, leagueId, alreadyMember: true }
-    }
-
-    await redeemInviteCode(code, uid, seasonId, leagueId)
-    return { seasonId, leagueId, alreadyMember: false }
-  }
-)
-
-async function redeemInviteCode(code: string, uid: string, seasonId?: string, leagueId?: string) {
-  if (!seasonId || !leagueId) {
-    const snap = await db
-      .collection('seasons')
-      .where('inviteCode', '==', code.toUpperCase())
-      .limit(1)
-      .get()
-    if (snap.empty) throw new Error('Invalid code')
-    seasonId = snap.docs[0].id
-    leagueId = snap.docs[0].data().leagueId
-  }
-
-  const userDoc = await db.doc(`users/${uid}`).get()
-  const displayName = userDoc.exists ? (userDoc.data()?.displayName as string) : uid
-
-  const batch = db.batch()
-
-  // Add to league (as member)
-  batch.set(
-    db.doc(`leagues/${leagueId}/members/${uid}`),
-    {
-      // Denormalized doc ID — the dashboard's collectionGroup query filters on it,
-      // and the security rule authorizes off it. A member doc without `uid` is
-      // invisible to its own owner. See LeagueMemberDoc in src/lib/types.ts.
-      uid,
-      displayName,
-      role: 'member',
-      joinedAt: Date.now(),
-    },
-    { merge: true }
-  )
-
-  // Add to season
-  batch.set(db.doc(`seasons/${seasonId}/members/${uid}`), {
-    uid,
-    displayName,
-    teamName: `${displayName}'s Team`,
-    pickPosition: null,
-    joinedAt: Date.now(),
+    const { leagueId } = context.params
+    const membersSnap = await db.collection(`leagues/${leagueId}/members`).get()
+    await db.doc(`leagues/${leagueId}`).update({ memberCount: membersSnap.size })
   })
-
-  await batch.commit()
-}
 
 // ── Draft: submit a pick ──────────────────────────────────────────────────────
 

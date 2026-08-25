@@ -20,9 +20,7 @@ export function SignupPage() {
     setDevPin('')
     setLoading(true)
     try {
-      const inviteCode = sessionStorage.getItem('pendingInviteCode') ?? undefined
-      const result = await signUp(displayName.trim(), email.trim().toLowerCase(), inviteCode)
-      if (inviteCode) sessionStorage.removeItem('pendingInviteCode')
+      const result = await signUp(displayName.trim(), email.trim().toLowerCase())
       trackEvent('sign_up')
       if (result.devPin) {
         setDevPin(result.devPin)

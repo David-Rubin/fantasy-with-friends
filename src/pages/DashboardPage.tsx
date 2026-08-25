@@ -22,6 +22,8 @@ import { Modal } from '../components/Modal'
 import { Input, Textarea } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { Badge } from '../components/Badge'
+import { JoinLeagueButton } from '../components/JoinLeagueButton'
+import { useMyJoinRequests } from '../lib/joinRequests'
 import type { LeagueDoc, LeagueMemberDoc, SeasonDoc } from '../lib/types'
 import type { AccentColor } from '../lib/types'
 import { t } from '../lib/i18n'
@@ -33,11 +35,17 @@ interface LeagueWithSeason {
   latestSeason: (SeasonDoc & { id: string }) | null
 }
 
+function memberCountLabel(count: number): string {
+  return count === 1 ? t('league.memberCountOne') : t('league.memberCount', { n: count })
+}
+
 export function DashboardPage() {
   const { user, userDoc } = useAuth()
   const navigate = useNavigate()
   const [leagues, setLeagues] = useState<LeagueWithSeason[]>([])
+  const [allLeagues, setAllLeagues] = useState<(LeagueDoc & { id: string })[]>([])
   const [loading, setLoading] = useState(true)
+  const joinRequestStatus = useMyJoinRequests(user?.uid)
   const [createOpen, setCreateOpen] = useState(false)
   const [leagueName, setLeagueName] = useState('')
   const [leagueDesc, setLeagueDesc] = useState('')
@@ -103,6 +111,19 @@ export function DashboardPage() {
     return unsubscribe
   }, [user])
 
+  // Every league in the app, member or not — the browse list below. Only the
+  // league documents are read here: seasons are fetched per league above, and
+  // only for leagues this user actually belongs to, so browsing stays one query
+  // however many leagues exist.
+  useEffect(() => {
+    if (!user) return
+    return listenQuery(
+      query(collection(db, 'leagues'), orderBy('createdAt', 'desc')),
+      'all leagues',
+      (snap) => setAllLeagues(snap.docs.map((d) => ({ id: d.id, ...(d.data() as LeagueDoc) })))
+    )
+  }, [user])
+
   async function handleCreateLeague(e: React.FormEvent) {
     e.preventDefault()
     if (!user || !userDoc) return
@@ -114,6 +135,10 @@ export function DashboardPage() {
         ownerId: user.uid,
         createdAt: Date.now(),
         accentColor,
+        // Derived state owned by the onLeagueMemberWritten trigger, which sets
+        // it to 1 as soon as the owner's member document lands below. The rules
+        // require it to start at 0 so a client cannot inflate a league's size.
+        memberCount: 0,
       } satisfies LeagueDoc)
 
       await setDoc(doc(db, 'leagues', leagueRef.id, 'members', user.uid), {
@@ -135,6 +160,12 @@ export function DashboardPage() {
       setCreating(false)
     }
   }
+
+  // Leagues to browse: everything this user is not already in. Derived rather
+  // than filtered in the listener so it re-settles as soon as a membership
+  // arrives — an approved league moves from one section to the other on its own.
+  const myLeagueIds = new Set(leagues.map((l) => l.id))
+  const otherLeagues = allLeagues.filter((l) => !myLeagueIds.has(l.id))
 
   // Find the most recently updated active/draft season across all leagues
   const featuredSeason = leagues
@@ -181,41 +212,85 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* League list */}
+      {/* Leagues this user belongs to */}
       {loading ? (
         <p className="text-gray-400">{t('common.loading')}</p>
-      ) : leagues.length === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
-          <p className="text-gray-500">{t('dashboard.noLeagues')}</p>
-          <p className="mt-1 text-sm text-gray-400">{t('dashboard.noLeaguesSubtext')}</p>
-          <div className="mt-4 flex justify-center gap-3">
-            <Button onClick={() => setCreateOpen(true)}>{t('dashboard.createLeague')}</Button>
-          </div>
-        </div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {leagues.map(({ id, league, latestSeason }) => (
-            <Link
-              key={id}
-              to={`/leagues/${id}`}
-              className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
-            >
-              <div>
-                <p className="font-semibold text-gray-900">{league.name}</p>
-                {latestSeason && (
-                  <p className="text-sm text-gray-500">
-                    {latestSeason.showName} · {latestSeason.label}
-                  </p>
-                )}
+        <>
+          <h2 className="mb-3 text-lg font-semibold text-gray-900">{t('dashboard.myLeagues')}</h2>
+          {leagues.length === 0 ? (
+            <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
+              <p className="text-gray-500">{t('dashboard.noLeagues')}</p>
+              <p className="mt-1 text-sm text-gray-400">{t('dashboard.noLeaguesSubtext')}</p>
+              <div className="mt-4 flex justify-center gap-3">
+                <Button onClick={() => setCreateOpen(true)}>{t('dashboard.createLeague')}</Button>
               </div>
-              {latestSeason && (
-                <Badge accent={latestSeason.accentColor}>
-                  {t(`season.states.${latestSeason.state}`)}
-                </Badge>
-              )}
-            </Link>
-          ))}
-        </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {leagues.map(({ id, league, latestSeason }) => (
+                <Link
+                  key={id}
+                  to={`/leagues/${id}`}
+                  className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
+                >
+                  <div>
+                    <p className="font-semibold text-gray-900">{league.name}</p>
+                    {latestSeason && (
+                      <p className="text-sm text-gray-500">
+                        {latestSeason.showName} · {latestSeason.label}
+                      </p>
+                    )}
+                  </div>
+                  {latestSeason && (
+                    <Badge accent={latestSeason.accentColor}>
+                      {t(`season.states.${latestSeason.state}`)}
+                    </Badge>
+                  )}
+                </Link>
+              ))}
+            </div>
+          )}
+
+          {/* Every other league, open to browse and to ask to join */}
+          <h2 className="mb-3 mt-8 text-lg font-semibold text-gray-900">
+            {t('dashboard.otherLeagues')}
+          </h2>
+          {otherLeagues.length === 0 ? (
+            <p className="text-sm text-gray-400">{t('dashboard.noOtherLeagues')}</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {otherLeagues.map((league) => (
+                // Not a single big Link like the cards above: the row holds its
+                // own button, and a button nested inside a link is neither valid
+                // markup nor operable by keyboard.
+                <div
+                  key={league.id}
+                  className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
+                >
+                  <div className="min-w-0">
+                    <Link
+                      to={`/leagues/${league.id}`}
+                      className="font-semibold text-gray-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                    >
+                      {league.name}
+                    </Link>
+                    {league.description && (
+                      <p className="truncate text-sm text-gray-500">{league.description}</p>
+                    )}
+                    <p className="text-xs text-gray-400">
+                      {memberCountLabel(league.memberCount ?? 0)}
+                    </p>
+                  </div>
+                  <JoinLeagueButton
+                    leagueId={league.id}
+                    status={joinRequestStatus[league.id] ?? null}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Create League Modal */}

@@ -5,6 +5,7 @@ import { db } from '../lib/firebase'
 import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
+import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import type {
@@ -45,16 +46,17 @@ export function EpisodeScoringPage() {
   const [unlockConfirm, setUnlockConfirm] = useState(false)
   const [submitConfirm, setSubmitConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const { canView, blocked } = useSeasonMembership(seasonId)
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenDoc(doc(db, 'seasons', seasonId), 'scoring season', (snap) => {
       if (snap.exists()) setSeason(snap.data() as SeasonDoc)
     })
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenQuery(
       collection(db, 'seasons', seasonId, 'contestants'),
       'scoring contestants',
@@ -62,10 +64,10 @@ export function EpisodeScoringPage() {
         setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
       }
     )
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenQuery(
       collection(db, 'seasons', seasonId, 'scoringRules'),
       'scoring rules',
@@ -73,10 +75,10 @@ export function EpisodeScoringPage() {
         setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
       }
     )
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId || !episodeNumber) return
+    if (!seasonId || !episodeNumber || !canView) return
     const epDoc = doc(db, 'seasons', seasonId, 'episodeScores', episodeNumber)
     const unsubEp = listenDoc(epDoc, 'episode score', (snap) => {
       setExistingScore(snap.exists() ? (snap.data() as EpisodeScoreDoc) : null)
@@ -98,7 +100,7 @@ export function EpisodeScoringPage() {
       unsubEp()
       unsubScores()
     }
-  }, [seasonId, episodeNumber])
+  }, [seasonId, episodeNumber, canView])
 
   // Active contestants for this episode (not eliminated before this episode)
   const activeContestants = contestants.filter(
@@ -190,6 +192,8 @@ export function EpisodeScoringPage() {
   }
 
   const isLocked = existingScore?.locked ?? false
+
+  if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
   return (
     <Layout>

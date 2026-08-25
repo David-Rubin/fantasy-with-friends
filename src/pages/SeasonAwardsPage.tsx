@@ -5,6 +5,7 @@ import { db } from '../lib/firebase'
 import { listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
+import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
 import { Button } from '../components/Button'
 import type {
   ContestantDoc,
@@ -27,9 +28,10 @@ export function SeasonAwardsPage() {
   const [awards, setAwards] = useState<SeasonAwardDoc[]>([])
   const [selections, setSelections] = useState<Record<string, string>>({}) // ruleId -> contestantId
   const [saving, setSaving] = useState(false)
+  const { canView, blocked } = useSeasonMembership(seasonId)
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenQuery(
       collection(db, 'seasons', seasonId, 'contestants'),
       'awards contestants',
@@ -37,10 +39,10 @@ export function SeasonAwardsPage() {
         setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
       }
     )
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenQuery(
       collection(db, 'seasons', seasonId, 'scoringRules'),
       'awards rules',
@@ -49,10 +51,10 @@ export function SeasonAwardsPage() {
         setRules(all.filter((r) => r.type === 'bonus_challenge' && r.scope === 'season_level'))
       }
     )
-  }, [seasonId])
+  }, [seasonId, canView])
 
   useEffect(() => {
-    if (!seasonId) return
+    if (!seasonId || !canView) return
     return listenQuery(
       collection(db, 'seasons', seasonId, 'seasonAwards'),
       'season awards',
@@ -67,7 +69,7 @@ export function SeasonAwardsPage() {
         setSelections(sel)
       }
     )
-  }, [seasonId])
+  }, [seasonId, canView])
 
   async function handleSave() {
     if (!seasonId || !user) return
@@ -89,6 +91,8 @@ export function SeasonAwardsPage() {
       setSaving(false)
     }
   }
+
+  if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
   return (
     <Layout>
