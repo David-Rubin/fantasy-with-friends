@@ -16,12 +16,41 @@ import { t } from '../lib/i18n'
  * The scoring rules for a season: what they are, and — until the first episode
  * is scored — the forms to change them.
  *
- * One component for both places it appears. It sits inside the setup panel
- * while a season is being built, and stands on its own once the draft has
- * opened, where an admin can still correct a point value nobody has scored
- * against yet. Reading it is always allowed, so after the cutoff it keeps
- * showing the rules and explains why they can no longer be edited.
+ * Editing only: it lives in the season's Edit dialog, and is rendered there
+ * solely while the rules are still open to change. Once the first episode is
+ * scored the dialog drops it entirely rather than showing dead forms.
+ *
+ * Everyone reads the rules elsewhere — ScoringRulesDisclosure on the season
+ * page — which is why the read-only rendering of a rule lives in RuleSummary
+ * below and is shared between the two.
  */
+
+/**
+ * One rule, as a reader sees it. Shared with ScoringRulesDisclosure so the
+ * rules read identically whether an admin is editing them or a player is
+ * looking them up mid-season.
+ */
+export function RuleSummary({ rule }: { rule: ScoringRule }) {
+  const typeKey = rule.type === 'bonus_challenge' ? 'bonusChallenge' : rule.type
+  const scopeKey =
+    rule.scope === 'per_episode'
+      ? 'perEpisode'
+      : rule.scope === 'specific_episodes'
+        ? 'specificEpisode'
+        : 'seasonLevel'
+  return (
+    <div className="text-sm text-gray-700">
+      <span className="font-medium text-gray-900">{rule.name}</span>
+      {' · '}
+      {rule.points > 0 ? '+' : ''}
+      {rule.points} {t('rules.pts')}
+      {' · '}
+      {t(`rules.type.${typeKey}`)}
+      {rule.scope && ` · ${t(`rules.scope.${scopeKey}`)}`}
+      {rule.episodeNumbers?.length ? ` (${rule.episodeNumbers.join(', ')})` : ''}
+    </div>
+  )
+}
 
 /** The stored shape of a rule, for the audit trail's "before" value. */
 function withoutId({ type, name, points, scope, episodeNumbers }: ScoringRule): ScoringRuleDoc {
@@ -41,8 +70,6 @@ interface ScoringRulesPanelProps {
   leagueId: string
   rules: ScoringRule[]
   episodeCount: number
-  /** False once the first episode is scored — the rules become read-only. */
-  editable: boolean
 }
 
 function RuleFields({
@@ -113,7 +140,6 @@ export function ScoringRulesPanel({
   leagueId,
   rules,
   episodeCount,
-  editable,
 }: ScoringRulesPanelProps) {
   const [addDraft, setAddDraft] = useState<RuleDraft>(emptyRuleDraft)
   const [adding, setAdding] = useState(false)
@@ -175,8 +201,6 @@ export function ScoringRulesPanel({
     <section>
       <h3 className="mb-3 font-medium text-gray-700">{t('rules.heading', { n: rules.length })}</h3>
 
-      {!editable && <p className="mb-3 text-sm text-gray-500">{t('rules.lockedAfterScoring')}</p>}
-
       {rules.length === 0 ? (
         <p className="mb-3 text-sm text-gray-400">{t('rules.none')}</p>
       ) : (
@@ -206,61 +230,48 @@ export function ScoringRulesPanel({
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm text-gray-700">
-                    <span className="font-medium text-gray-900">{rule.name}</span>
-                    {' · '}
-                    {rule.points > 0 ? '+' : ''}
-                    {rule.points} {t('rules.pts')}
-                    {' · '}
-                    {t(
-                      `rules.type.${rule.type === 'bonus_challenge' ? 'bonusChallenge' : rule.type}`
-                    )}
-                    {rule.scope &&
-                      ` · ${t(`rules.scope.${rule.scope === 'per_episode' ? 'perEpisode' : rule.scope === 'specific_episodes' ? 'specificEpisode' : 'seasonLevel'}`)}`}
-                    {rule.episodeNumbers?.length ? ` (${rule.episodeNumbers.join(', ')})` : ''}
-                  </div>
-                  {editable &&
-                    (confirmDelete === rule.id ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-600">{t('rules.deleteConfirm')}</span>
-                        <Button
-                          variant="danger"
-                          loading={deleting}
-                          className="!min-h-0 !px-3 !py-1 text-xs"
-                          onClick={() => handleDelete(rule)}
-                        >
-                          {t('common.delete')}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          className="!min-h-0 !px-3 !py-1 text-xs"
-                          onClick={() => setConfirmDelete(null)}
-                        >
-                          {t('common.cancel')}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="secondary"
-                          className="!min-h-0 !px-3 !py-1 text-xs"
-                          onClick={() => {
-                            setEditProblem(null)
-                            setEditDraft(ruleToDraft(rule))
-                            setEditingId(rule.id)
-                          }}
-                        >
-                          {t('common.edit')}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          className="!min-h-0 !px-3 !py-1 text-xs !text-red-600 hover:!bg-red-50"
-                          onClick={() => setConfirmDelete(rule.id)}
-                        >
-                          {t('common.delete')}
-                        </Button>
-                      </div>
-                    ))}
+                  <RuleSummary rule={rule} />
+                  {confirmDelete === rule.id ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">{t('rules.deleteConfirm')}</span>
+                      <Button
+                        variant="danger"
+                        loading={deleting}
+                        className="!min-h-0 !px-3 !py-1 text-xs"
+                        onClick={() => handleDelete(rule)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="!min-h-0 !px-3 !py-1 text-xs"
+                        onClick={() => setConfirmDelete(null)}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        className="!min-h-0 !px-3 !py-1 text-xs"
+                        onClick={() => {
+                          setEditProblem(null)
+                          setEditDraft(ruleToDraft(rule))
+                          setEditingId(rule.id)
+                        }}
+                      >
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="!min-h-0 !px-3 !py-1 text-xs !text-red-600 hover:!bg-red-50"
+                        onClick={() => setConfirmDelete(rule.id)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </li>
@@ -268,19 +279,17 @@ export function ScoringRulesPanel({
         </ul>
       )}
 
-      {editable && (
-        <form onSubmit={handleAdd} className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-end gap-2">
-            <RuleFields draft={addDraft} onChange={setAddDraft} episodeCount={episodeCount} />
-            <div className="flex items-end">
-              <Button type="submit" loading={adding}>
-                {t('rules.add')}
-              </Button>
-            </div>
+      <form onSubmit={handleAdd} className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <RuleFields draft={addDraft} onChange={setAddDraft} episodeCount={episodeCount} />
+          <div className="flex items-end">
+            <Button type="submit" loading={adding}>
+              {t('rules.add')}
+            </Button>
           </div>
-          {addProblem && <p className="text-sm text-red-600">{t(problemKey[addProblem])}</p>}
-        </form>
-      )}
+        </div>
+        {addProblem && <p className="text-sm text-red-600">{t(problemKey[addProblem])}</p>}
+      </form>
     </section>
   )
 }

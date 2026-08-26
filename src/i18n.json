@@ -107,7 +107,6 @@
   "rules.scope": "Scope",
   "rules.scope.choose": "Choose a scope…",
   "rules.deleteConfirm": "Remove this rule?",
-  "rules.lockedAfterScoring": "Scoring rules are fixed once the first episode has been scored, so that points already awarded keep their meaning.",
   "rules.savedImmediately": "Rule changes are saved as you make them.",
   "rules.errors.nameRequired": "Give the rule a name.",
   "rules.errors.pointsNotANumber": "Points must be a number.",

@@ -29,6 +29,7 @@ import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { ScoringRulesPanel } from '../components/ScoringRulesPanel'
+import { ScoringRulesDisclosure } from '../components/ScoringRulesDisclosure'
 import { rulesAreEditable } from '../lib/scoringRules'
 import { episodeCountProblem, highestScoredEpisode } from '../lib/seasonDetails'
 import { updateSeasonDetails } from '../lib/seasonApi'
@@ -447,6 +448,8 @@ export function SeasonDetailPage() {
         </div>
       )}
 
+      <ScoringRulesDisclosure rules={rules} />
+
       {/* A member who arrives before the season is ready — from a bookmark, or
           a link shared before the draft opened. The admin panel above is not
           theirs to see, and everything else on this page only exists once the
@@ -706,17 +709,21 @@ export function SeasonDetailPage() {
         {/* A sibling of the form above, not a child: this panel has its own
             form for adding a rule, and nested forms are not valid markup.
             Its edits save as they are made — the footer's Save applies to the
-            season details only. */}
-        <div className="mt-6 border-t border-gray-200 pt-6">
-          <ScoringRulesPanel
-            seasonId={seasonId!}
-            leagueId={leagueId!}
-            rules={rules}
-            episodeCount={season.episodeCount}
-            editable={rulesAreEditable(season.firstEpisodeScoredAt)}
-          />
-          <p className="mt-3 text-xs text-gray-400">{t('rules.savedImmediately')}</p>
-        </div>
+            season details only.
+
+            Gone once the first episode is scored: the rules are settled then,
+            and everyone reads them from the season page instead. */}
+        {rulesAreEditable(season.firstEpisodeScoredAt) && (
+          <div className="mt-6 border-t border-gray-200 pt-6">
+            <ScoringRulesPanel
+              seasonId={seasonId!}
+              leagueId={leagueId!}
+              rules={rules}
+              episodeCount={season.episodeCount}
+            />
+            <p className="mt-3 text-xs text-gray-400">{t('rules.savedImmediately')}</p>
+          </div>
+        )}
       </Modal>
 
       <Modal
