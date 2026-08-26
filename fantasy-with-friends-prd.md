@@ -144,6 +144,12 @@ A single role that spans the whole app, separate from the per-league roles above
 - Contestants can be added/edited while the season is in `setup` state.
 - Once the draft begins, the contestant list is locked.
 
+**3.2.4b Reading an episode's scores**
+
+- Every member of a season can open an episode's page and read its scoring table: contestants, each rule, what was awarded, and the points that follow.
+- Entering scores stays Admin-only. For anyone without write access the page renders read-only — no inputs, no submit, no unlock, no elimination controls — and says that scores are entered by a league admin.
+- The season's Episodes tab offers members a "View scores" link for episodes that have been scored. An unscored episode opened directly says so rather than showing an empty form.
+
 **3.2.5 Define Scoring Rules**
 
 - Admins define a set of scoring rules per season. Three rule types are supported:

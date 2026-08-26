@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { doc, collection, updateDoc, writeBatch } from 'firebase/firestore'
+import { doc, collection, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
@@ -11,6 +11,7 @@ import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import type {
+  MemberRole,
   SeasonDoc,
   ContestantDoc,
   ScoringRuleDoc,
@@ -25,13 +26,22 @@ import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
 
+/** A scored/not-scored cell, for the read-only table a member sees. */
+function ScoreMark({ on, label }: { on: boolean; label: string }) {
+  return (
+    <span className={on ? 'text-green-600' : 'text-gray-300'} title={label} aria-label={label}>
+      {on ? '\u2713' : '\u2014'}
+    </span>
+  )
+}
+
 export function EpisodeScoringPage() {
   const { leagueId, seasonId, episodeNumber } = useParams<{
     leagueId: string
     seasonId: string
     episodeNumber: string
   }>()
-  const { user } = useAuth()
+  const { user, isSuperadmin } = useAuth()
   const navigate = useNavigate()
   const epNum = parseInt(episodeNumber ?? '1', 10)
 
@@ -49,7 +59,18 @@ export function EpisodeScoringPage() {
   const [submitConfirm, setSubmitConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  // Entering scores is admin-only; every season member may read them. Without
+  // this the page offered a member the full form and let the rules reject the
+  // save at the end of it.
+  const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { leagueName, seasonName } = useTrailNames(leagueId, seasonId)
+
+  useEffect(() => {
+    if (!leagueId || !user || !canView) return
+    getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
+      .then((snap) => setMyRole(snap.exists() ? (snap.data() as { role: MemberRole }).role : null))
+      .catch(() => setMyRole(null))
+  }, [leagueId, user, canView])
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -104,6 +125,9 @@ export function EpisodeScoringPage() {
       unsubScores()
     }
   }, [seasonId, episodeNumber, canView])
+
+  // Superadmins are admins of every season in the rules; the client matches.
+  const canEdit = myRole === 'owner' || myRole === 'admin' || isSuperadmin
 
   // Active contestants for this episode (not eliminated before this episode)
   const activeContestants = contestants.filter(
@@ -210,9 +234,11 @@ export function EpisodeScoringPage() {
     >
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">
-          {t('scoring.scoreEpisode', { n: epNum })}
+          {canEdit
+            ? t('scoring.scoreEpisode', { n: epNum })
+            : t('scoring.episodeScores', { n: epNum })}
         </h1>
-        {isLocked && (
+        {canEdit && isLocked && (
           <Button variant="secondary" onClick={() => setUnlockConfirm(true)}>
             {t('scoring.unlockEpisode')}
           </Button>
@@ -249,6 +275,16 @@ export function EpisodeScoringPage() {
                 {episodeRules.map((rule) => {
                   const val = scores[contestant.id]?.[rule.id]
                   if (rule.type === 'binary') {
+                    if (!canEdit) {
+                      return (
+                        <td key={rule.id} className="py-3 px-3 text-center">
+                          <ScoreMark
+                            on={val === true}
+                            label={`${rule.name} — ${contestant.name}`}
+                          />
+                        </td>
+                      )
+                    }
                     return (
                       <td key={rule.id} className="py-3 px-3 text-center">
                         <input
@@ -263,6 +299,13 @@ export function EpisodeScoringPage() {
                     )
                   }
                   if (rule.type === 'numeric') {
+                    if (!canEdit) {
+                      return (
+                        <td key={rule.id} className="py-3 px-3 text-center text-gray-800">
+                          {typeof val === 'number' ? val : <span className="text-gray-300">—</span>}
+                        </td>
+                      )
+                    }
                     return (
                       <td key={rule.id} className="py-3 px-3">
                         <input
@@ -282,6 +325,16 @@ export function EpisodeScoringPage() {
                     )
                   }
                   // bonus_challenge — dropdown of contestants
+                  if (!canEdit) {
+                    return (
+                      <td key={rule.id} className="py-3 px-3 text-center">
+                        <ScoreMark
+                          on={val === contestant.id}
+                          label={`${rule.name} — ${contestant.name}`}
+                        />
+                      </td>
+                    )
+                  }
                   return (
                     <td key={rule.id} className="py-3 px-3">
                       <input
@@ -301,26 +354,33 @@ export function EpisodeScoringPage() {
                   {calcTotalForContestant(contestant.id)}
                 </td>
                 <td className="py-3 pl-3 text-center">
-                  <button
-                    type="button"
-                    disabled={isLocked}
-                    onClick={() => {
-                      if (!eliminations[contestant.id]) {
-                        setEliminationConfirm(contestant.id)
-                      } else {
-                        setEliminations((prev) => ({ ...prev, [contestant.id]: false }))
-                      }
-                    }}
-                    className={[
-                      'rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-40',
-                      eliminations[contestant.id]
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600',
-                    ].join(' ')}
-                    aria-pressed={eliminations[contestant.id]}
-                  >
-                    {t('contestant.eliminated')}
-                  </button>
+                  {!canEdit ? (
+                    <ScoreMark
+                      on={!!eliminations[contestant.id]}
+                      label={`${t('contestant.eliminated')} — ${contestant.name}`}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isLocked}
+                      onClick={() => {
+                        if (!eliminations[contestant.id]) {
+                          setEliminationConfirm(contestant.id)
+                        } else {
+                          setEliminations((prev) => ({ ...prev, [contestant.id]: false }))
+                        }
+                      }}
+                      className={[
+                        'rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-40',
+                        eliminations[contestant.id]
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600',
+                      ].join(' ')}
+                      aria-pressed={eliminations[contestant.id]}
+                    >
+                      {t('contestant.eliminated')}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -328,10 +388,16 @@ export function EpisodeScoringPage() {
         </table>
       </div>
 
-      {!isLocked && (
+      {canEdit && !isLocked && (
         <div className="mt-6">
           <Button onClick={() => setSubmitConfirm(true)}>{t('scoring.submitScores')}</Button>
         </div>
+      )}
+
+      {!canEdit && (
+        <p className="mt-6 text-sm text-gray-500">
+          {existingScore ? t('scoring.readOnlyNotice') : t('scoring.notScoredYet')}
+        </p>
       )}
 
       {/* Elimination confirm */}

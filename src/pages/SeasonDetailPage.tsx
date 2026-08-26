@@ -622,6 +622,13 @@ export function SeasonDetailPage() {
                             : 'Unlocked for editing'}
                       </p>
                     </div>
+                    {/* Members get a way in to read the scores; the page
+                        renders read-only for anyone who cannot enter them. */}
+                    {!isAdmin && scored && (
+                      <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
+                        <Button variant="ghost">{t('scoring.viewScores')}</Button>
+                      </Link>
+                    )}
                     {isAdmin && (
                       <div className="flex gap-2">
                         {!scored && (
