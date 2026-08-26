@@ -362,18 +362,6 @@ export function SeasonDetailPage() {
             </form>
           </section>
 
-          {/* Scoring rules — the same panel an admin sees after the draft
-              opens, so there is one place these are managed. */}
-          <div className="mb-6">
-            <ScoringRulesPanel
-              seasonId={seasonId!}
-              leagueId={leagueId!}
-              rules={rules}
-              episodeCount={season.episodeCount}
-              editable={rulesAreEditable(season.firstEpisodeScoredAt)}
-            />
-          </div>
-
           {/* Draft settings */}
           <section className="mb-6">
             <h3 className="font-medium text-gray-700 mb-3">{t('draft.settings')}</h3>
@@ -469,21 +457,6 @@ export function SeasonDetailPage() {
           <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
             {t('season.setupNoticeBody')}
           </p>
-        </div>
-      )}
-
-      {/* Scoring rules once the season has left setup. Editable until the
-          first episode is scored, read-only after — an admin can still see what
-          the rules are. */}
-      {isAdmin && season.state !== 'setup' && (
-        <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6">
-          <ScoringRulesPanel
-            seasonId={seasonId!}
-            leagueId={leagueId!}
-            rules={rules}
-            episodeCount={season.episodeCount}
-            editable={rulesAreEditable(season.firstEpisodeScoredAt)}
-          />
         </div>
       )}
 
@@ -691,6 +664,7 @@ export function SeasonDetailPage() {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         title={t('season.editDetails')}
+        size="wide"
         footer={
           <>
             <Button variant="secondary" onClick={() => setEditOpen(false)}>
@@ -728,6 +702,21 @@ export function SeasonDetailPage() {
           />
           {editError && <p className="text-sm text-red-600">{editError}</p>}
         </form>
+
+        {/* A sibling of the form above, not a child: this panel has its own
+            form for adding a rule, and nested forms are not valid markup.
+            Its edits save as they are made — the footer's Save applies to the
+            season details only. */}
+        <div className="mt-6 border-t border-gray-200 pt-6">
+          <ScoringRulesPanel
+            seasonId={seasonId!}
+            leagueId={leagueId!}
+            rules={rules}
+            episodeCount={season.episodeCount}
+            editable={rulesAreEditable(season.firstEpisodeScoredAt)}
+          />
+          <p className="mt-3 text-xs text-gray-400">{t('rules.savedImmediately')}</p>
+        </div>
       </Modal>
 
       <Modal

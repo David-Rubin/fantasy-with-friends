@@ -155,6 +155,7 @@ A single role that spans the whole app, separate from the per-league roles above
   | Bonus challenge | A named event awarding points to one contestant        | "Technical win" = +2 pts          |
 
 - Rules can have positive or negative point values.
+- **Rules live in the season's Edit dialog**, alongside its label, episode count and accent colour — one place to manage a season, rather than a panel sitting permanently on the season page.
 - **Rules stay editable until the first episode is scored.** Admins can view, add, edit and remove scoring rules through setup, through the draft, and into an active season that has not been scored yet — a rule everyone agreed on but nobody wrote down is usually noticed late. Once any episode has been scored the rules are fixed: changing a point value afterwards would silently restate every score already recorded under the old value, and team totals are recomputed from these rules. After that point admins can still see the rules, but not change them.
 - The cutoff is enforced by a security rule, not only by the UI: writes to `scoringRules` require the season's `firstEpisodeScoredAt` to be unset.
 - **Bonus challenge scope**: Each bonus challenge rule has a configurable scope that determines when it applies:
