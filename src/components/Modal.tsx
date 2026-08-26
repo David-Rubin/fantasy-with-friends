@@ -9,9 +9,14 @@ interface ModalProps {
   children: ReactNode
   /** Replaces the default close button */
   footer?: ReactNode
+  /**
+   * 'wide' for a dialog that holds a list or a row of fields rather than a
+   * short form. The default stays narrow, which is right for a confirmation.
+   */
+  size?: 'default' | 'wide'
 }
 
-export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, size = 'default' }: ModalProps) {
   return (
     <Transition appear show={open} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onClose}>
@@ -39,7 +44,9 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
             leaveFrom="opacity-100 translate-y-0 sm:scale-100"
             leaveTo="opacity-0 translate-y-full sm:translate-y-0 sm:scale-95"
           >
-            <Dialog.Panel className="w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-xl">
+            <Dialog.Panel
+              className={`w-full ${size === 'wide' ? 'sm:max-w-3xl' : 'sm:max-w-lg'} bg-white rounded-t-2xl sm:rounded-2xl shadow-xl`}
+            >
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                 <Dialog.Title className="text-lg font-semibold text-gray-900">{title}</Dialog.Title>
                 <button
@@ -60,7 +67,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
                   </svg>
                 </button>
               </div>
-              <div className="px-6 py-4">{children}</div>
+              <div className="max-h-[70vh] overflow-y-auto px-6 py-4">{children}</div>
               {footer && (
                 <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
                   {footer}

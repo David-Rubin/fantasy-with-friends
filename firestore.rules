@@ -171,6 +171,14 @@ service cloud.firestore {
       }
     }
 
+    // A season stops being tunable once it has been scored. Expressed here
+    // rather than left to the client: it is a single get() on the parent
+    // season, which is exactly the kind of check a rule can make.
+    function seasonNotYetScored(seasonId) {
+      return get(/databases/$(database)/documents/seasons/$(seasonId))
+        .data.get('firstEpisodeScoredAt', null) == null;
+    }
+
     // ── Seasons ───────────────────────────────────────────────────────────────
     match /seasons/{seasonId} {
       // A league page is readable before joining and lists that league's
@@ -205,7 +213,11 @@ service cloud.firestore {
 
       match /scoringRules/{ruleId} {
         allow read: if isSeasonMember(seasonId);
-        allow write: if isSeasonAdmin(seasonId);
+        // Editable through setup, the draft, and a season that has started but
+        // has no scores yet — then fixed. Changing a point value after an
+        // episode is scored would silently restate every score already recorded
+        // under the old value, and teamTotals are recomputed from these rules.
+        allow write: if isSeasonAdmin(seasonId) && seasonNotYetScored(seasonId);
       }
 
       match /episodeScores/{episodeNumber} {

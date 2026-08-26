@@ -147,6 +147,10 @@ export function LeagueDetailPage() {
   // Season data and the roster are gated on membership; a superadmin reaches
   // both without joining.
   const canOpenSeasons = isMember || isSuperadmin
+  // A season still in `setup` has no contestants, no rules and no draft — there
+  // is nothing on its page for anyone but the admins building it, so members do
+  // not get a link to it until it opens.
+  const canOpenUnreadySeason = isAdmin || isSuperadmin
   // Derived rather than cleared in the listener: a demoted owner stops seeing
   // the queue on the next render, without an extra state write.
   const pendingRequests = canManageLeague ? joinRequests : []
@@ -399,10 +403,13 @@ export function LeagueDetailPage() {
                     <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
                   </>
                 )
-                // Season pages are for members. A non-member sees which seasons
-                // exist — enough to judge whether to join — as plain cards, not
-                // links that would only land them on a refusal.
-                return canOpenSeasons ? (
+                // Season pages are for members, and a season being set up is
+                // only for its admins. Everyone else sees that the season
+                // exists — the badge says what state it is in — as a plain
+                // card, not a link onto an empty page.
+                const openable =
+                  canOpenSeasons && (season.state !== 'setup' || canOpenUnreadySeason)
+                return openable ? (
                   <Link
                     key={season.id}
                     to={`/leagues/${leagueId}/seasons/${season.id}`}

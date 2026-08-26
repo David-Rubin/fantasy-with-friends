@@ -9,6 +9,7 @@ import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMembe
 import { seasonChildTrail } from '../lib/breadcrumbs'
 import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
+import { Modal } from '../components/Modal'
 import { ContestantCard } from '../components/ContestantCard'
 import { TimerBanner } from '../components/TimerBanner'
 import type {
@@ -21,6 +22,7 @@ import type {
 } from '../lib/types'
 import { resolvePickOrder } from '../lib/draft'
 import {
+  reopenSeasonSetup,
   submitPick,
   resolveExpiredTurn,
   assignFromBench,
@@ -38,7 +40,7 @@ interface MemberInfo extends SeasonMemberDoc {
 
 export function DraftRoomPage() {
   const { leagueId, seasonId } = useParams<{ leagueId: string; seasonId: string }>()
-  const { user } = useAuth()
+  const { user, isSuperadmin } = useAuth()
   const navigate = useNavigate()
 
   const [season, setSeason] = useState<SeasonDoc | null>(null)
@@ -53,6 +55,9 @@ export function DraftRoomPage() {
   const [pickError, setPickError] = useState('')
   const [assigning, setAssigning] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
+  const [reopenOpen, setReopenOpen] = useState(false)
+  const [reopening, setReopening] = useState(false)
+  const [reopenError, setReopenError] = useState('')
   const [togglingTimer, setTogglingTimer] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
   const { leagueName, seasonName } = useTrailNames(leagueId, seasonId)
@@ -105,7 +110,8 @@ export function DraftRoomPage() {
     })
   }, [seasonId, canView])
 
-  const isAdmin = myRole === 'owner' || myRole === 'admin'
+  // Superadmins are admins of every season in the rules; the client matches.
+  const isAdmin = myRole === 'owner' || myRole === 'admin' || isSuperadmin
   const isPaused = draft?.status === 'paused'
   // An admin stopped the clock. Distinct from `status: 'paused'` above, which is
   // a turn that expired and is waiting on a proxy pick.
@@ -180,6 +186,22 @@ export function DraftRoomPage() {
       console.error('Bench assignment rejected', error)
     } finally {
       setAssigning(false)
+    }
+  }
+
+  async function handleReopenSetup() {
+    if (!seasonId) return
+    setReopening(true)
+    setReopenError('')
+    try {
+      await reopenSeasonSetup({ seasonId })
+      // The setup panel lives on the season page, which is where the admin
+      // wanted to get to; the season is back in `setup` by the time we land.
+      navigate(`/leagues/${leagueId}/seasons/${seasonId}`)
+    } catch (error) {
+      console.error('Failed to reopen the season for setup', error)
+      setReopenError(error instanceof Error ? error.message : t('common.error'))
+      setReopening(false)
     }
   }
 
@@ -296,11 +318,41 @@ export function DraftRoomPage() {
     <Layout
       breadcrumbs={seasonChildTrail(leagueId, leagueName, seasonId, seasonName, t('nav.draft'))}
     >
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-gray-900">
           {season.label} — {t('dashboard.joinDraft')}
         </h1>
+        {/* A forgotten contestant is usually noticed once the draft is under
+            way. Editing the season means undoing the draft, so this only opens
+            the confirmation. */}
+        {isAdmin && season.state === 'draft' && (
+          <Button variant="secondary" onClick={() => setReopenOpen(true)}>
+            {t('draft.editSettings')}
+          </Button>
+        )}
       </div>
+
+      <Modal
+        open={reopenOpen}
+        onClose={() => setReopenOpen(false)}
+        title={t('draft.reopenTitle')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setReopenOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" loading={reopening} onClick={handleReopenSetup}>
+              {reopening ? t('draft.reopening') : t('draft.reopenConfirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">{t('draft.reopenBody')}</p>
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {t('draft.reopenWarning')}
+        </p>
+        {reopenError && <p className="mt-3 text-sm text-red-600">{reopenError}</p>}
+      </Modal>
 
       {/* Draft complete */}
       {draft?.status === 'complete' && (

@@ -806,6 +806,96 @@ export const closeDraft = functions.https.onCall(async (data: { seasonId: string
 })
 
 /**
+ * Put a season that is drafting back into setup so an admin can change it.
+ *
+ * A forgotten contestant or a wrong scoring rule is only discovered once the
+ * draft is under way, and the setup panel is not reachable from a season in
+ * `draft`. Rather than let settings be edited underneath a running draft — where
+ * adding a contestant mid-draft would mean some teams never had the chance to
+ * take them — the draft is undone entirely and run again afterwards.
+ *
+ * A Cloud Function because a rule cannot express any of it: picks are
+ * `allow write: if false` and are only ever written here, and the reset spans
+ * every contestant and every member of the season.
+ *
+ * Restricted to `draft`. A season that is `active` or `complete` has episode
+ * scores keyed to drafted teams, and undoing its draft would leave a
+ * leaderboard describing rosters that no longer exist.
+ */
+export const reopenSeasonSetup = functions.https.onCall(
+  async (
+    data: { seasonId: string },
+    context
+  ): Promise<{ clearedPicks: number; clearedContestants: number }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const { seasonId } = data
+    if (!seasonId) throw new functions.https.HttpsError('invalid-argument', 'seasonId required')
+
+    const seasonRef = db.doc(`seasons/${seasonId}`)
+    const seasonSnap = await seasonRef.get()
+    if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
+
+    const season = seasonSnap.data()!
+    if (!(await isLeagueAdmin(season.leagueId as string, context.auth.uid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Admins only')
+    }
+    if (season.state !== 'draft') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Only a season that is drafting can be reopened for editing'
+      )
+    }
+
+    const [draftDocs, contestants, members] = await Promise.all([
+      db.collection(`seasons/${seasonId}/draft`).get(),
+      db.collection(`seasons/${seasonId}/contestants`).get(),
+      db.collection(`seasons/${seasonId}/members`).get(),
+    ])
+
+    // The draft document is deleted rather than rewound: opening a draft creates
+    // it, so leaving one behind would have the lobby make a second.
+    type Write = (batch: admin.firestore.WriteBatch) => void
+    const writes: Write[] = []
+    let clearedPicks = 0
+
+    for (const draftDoc of draftDocs.docs) {
+      const picks = await draftDoc.ref.collection('picks').get()
+      clearedPicks += picks.size
+      for (const pick of picks.docs) writes.push((batch) => batch.delete(pick.ref))
+      writes.push((batch) => batch.delete(draftDoc.ref))
+    }
+    for (const contestant of contestants.docs) {
+      writes.push((batch) => batch.update(contestant.ref, { draftedByUid: null }))
+    }
+    for (const member of members.docs) {
+      writes.push((batch) => batch.update(member.ref, { pickPosition: null }))
+    }
+    writes.push((batch) => batch.update(seasonRef, { state: 'setup' }))
+
+    // Committed in chunks because a batch takes 500 writes, and a long season
+    // with a large roster can pass that between its picks and its contestants.
+    for (let i = 0; i < writes.length; i += 400) {
+      const batch = db.batch()
+      for (const write of writes.slice(i, i + 400)) write(batch)
+      await batch.commit()
+    }
+
+    await db.collection('auditLogs').add({
+      action: 'season_reopened_for_setup',
+      seasonId,
+      leagueId: season.leagueId,
+      actorUid: context.auth.uid,
+      newValue: { clearedPicks, clearedContestants: contestants.size },
+      timestamp: Date.now(),
+    })
+
+    return { clearedPicks, clearedContestants: contestants.size }
+  }
+)
+
+/**
  * Hand the turn to the next player.
  *
  * `consecutiveSkips` defaults to 0 because most callers got here by way of a

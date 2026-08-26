@@ -28,6 +28,9 @@ import { logAuditEvent } from '../lib/audit'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { AccentColorPicker } from '../components/AccentColorPicker'
+import { ScoringRulesPanel } from '../components/ScoringRulesPanel'
+import { ScoringRulesDisclosure } from '../components/ScoringRulesDisclosure'
+import { rulesAreEditable } from '../lib/scoringRules'
 import { episodeCountProblem, highestScoredEpisode } from '../lib/seasonDetails'
 import { updateSeasonDetails } from '../lib/seasonApi'
 
@@ -54,14 +57,6 @@ export function SeasonDetailPage() {
   // Setup form state
   const [contestantForm, setContestantForm] = useState({ name: '', photoUrl: '', bio: '' })
   const [addingContestant, setAddingContestant] = useState(false)
-  const [ruleForm, setRuleForm] = useState({
-    type: 'binary' as ScoringRuleDoc['type'],
-    name: '',
-    points: '',
-    scope: null as ScoringRuleDoc['scope'],
-    episodeNumbers: '',
-  })
-  const [addingRule, setAddingRule] = useState(false)
   const [savingSetup, setSavingSetup] = useState(false)
   const [openingDraft, setOpeningDraft] = useState(false)
   const [assignFreeAgentOpen, setAssignFreeAgentOpen] = useState<string | null>(null)
@@ -182,27 +177,6 @@ export function SeasonDetailPage() {
       setContestantForm({ name: '', photoUrl: '', bio: '' })
     } finally {
       setAddingContestant(false)
-    }
-  }
-
-  async function handleAddRule(e: React.FormEvent) {
-    e.preventDefault()
-    if (!seasonId) return
-    setAddingRule(true)
-    try {
-      await addDoc(collection(db, 'seasons', seasonId, 'scoringRules'), {
-        type: ruleForm.type,
-        name: ruleForm.name.trim(),
-        points: parseFloat(ruleForm.points),
-        scope: ruleForm.type === 'bonus_challenge' ? ruleForm.scope : null,
-        episodeNumbers:
-          ruleForm.scope === 'specific_episodes'
-            ? ruleForm.episodeNumbers.split(',').map(Number).filter(Boolean)
-            : null,
-      } satisfies ScoringRuleDoc)
-      setRuleForm({ type: 'binary', name: '', points: '', scope: null, episodeNumbers: '' })
-    } finally {
-      setAddingRule(false)
     }
   }
 
@@ -389,75 +363,21 @@ export function SeasonDetailPage() {
             </form>
           </section>
 
-          {/* Scoring rules */}
-          <section className="mb-6">
-            <h3 className="font-medium text-gray-700 mb-3">Scoring Rules ({rules.length})</h3>
-            {rules.length > 0 && (
-              <ul className="mb-3 flex flex-col gap-1">
-                {rules.map((r) => (
-                  <li key={r.id} className="text-sm text-gray-700">
-                    {r.name} · {r.points > 0 ? '+' : ''}
-                    {r.points} pts · {r.type}
-                    {r.scope && ` · ${r.scope}`}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <form onSubmit={handleAddRule} className="flex flex-col sm:flex-row gap-2 flex-wrap">
-              <select
-                value={ruleForm.type}
-                onChange={(e) =>
-                  setRuleForm((f) => ({ ...f, type: e.target.value as ScoringRuleDoc['type'] }))
-                }
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                aria-label={t('rules.type.binary')}
-              >
-                <option value="binary">{t('rules.type.binary')}</option>
-                <option value="numeric">{t('rules.type.numeric')}</option>
-                <option value="bonus_challenge">{t('rules.type.bonusChallenge')}</option>
-              </select>
-              <Input
-                label={t('rules.name')}
-                value={ruleForm.name}
-                onChange={(e) => setRuleForm((f) => ({ ...f, name: e.target.value }))}
-                required
-                className="flex-1"
-              />
-              <Input
-                label={t('rules.points')}
-                type="number"
-                step="0.5"
-                value={ruleForm.points}
-                onChange={(e) => setRuleForm((f) => ({ ...f, points: e.target.value }))}
-                required
-                className="w-24"
-              />
-              {ruleForm.type === 'bonus_challenge' && (
-                <select
-                  value={ruleForm.scope ?? ''}
-                  onChange={(e) =>
-                    setRuleForm((f) => ({ ...f, scope: e.target.value as ScoringRuleDoc['scope'] }))
-                  }
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  aria-label="Scope"
-                >
-                  <option value="per_episode">{t('rules.scope.perEpisode')}</option>
-                  <option value="specific_episodes">{t('rules.scope.specificEpisode')}</option>
-                  <option value="season_level">{t('rules.scope.seasonLevel')}</option>
-                </select>
-              )}
-              <div className="flex items-end">
-                <Button type="submit" loading={addingRule} variant="secondary">
-                  {t('rules.add')}
-                </Button>
-              </div>
-            </form>
-          </section>
-
           {/* Draft settings */}
           <section className="mb-6">
             <h3 className="font-medium text-gray-700 mb-3">{t('draft.settings')}</h3>
             <div className="flex flex-wrap gap-4">
+              {/* Read-only on purpose: `draftFormat` is 'snake' and nothing else
+                  yet, and a select with one option would imply a choice that is
+                  not there. Shown rather than hidden because how the order runs
+                  is the thing people most want to know before a draft. */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-gray-600">{t('draft.format')}</span>
+                <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  {t('draft.format.snake')}
+                </p>
+                <span className="text-xs text-gray-400">{t('draft.formatComingSoon')}</span>
+              </div>
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-gray-600">{t('draft.pickOrder')}</span>
                 <select
@@ -525,6 +445,21 @@ export function SeasonDetailPage() {
           {!canOpenDraft && (
             <p className="mt-2 text-xs text-gray-400">{t('season.openDraftDisabled')}</p>
           )}
+        </div>
+      )}
+
+      <ScoringRulesDisclosure rules={rules} />
+
+      {/* A member who arrives before the season is ready — from a bookmark, or
+          a link shared before the draft opened. The admin panel above is not
+          theirs to see, and everything else on this page only exists once the
+          season is scoring, so without this the page is simply blank. */}
+      {season.state === 'setup' && !isAdmin && (
+        <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
+          <p className="font-medium text-gray-700">{t('season.setupNoticeTitle')}</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
+            {t('season.setupNoticeBody')}
+          </p>
         </div>
       )}
 
@@ -687,6 +622,13 @@ export function SeasonDetailPage() {
                             : 'Unlocked for editing'}
                       </p>
                     </div>
+                    {/* Members get a way in to read the scores; the page
+                        renders read-only for anyone who cannot enter them. */}
+                    {!isAdmin && scored && (
+                      <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
+                        <Button variant="ghost">{t('scoring.viewScores')}</Button>
+                      </Link>
+                    )}
                     {isAdmin && (
                       <div className="flex gap-2">
                         {!scored && (
@@ -732,6 +674,7 @@ export function SeasonDetailPage() {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         title={t('season.editDetails')}
+        size="wide"
         footer={
           <>
             <Button variant="secondary" onClick={() => setEditOpen(false)}>
@@ -769,6 +712,25 @@ export function SeasonDetailPage() {
           />
           {editError && <p className="text-sm text-red-600">{editError}</p>}
         </form>
+
+        {/* A sibling of the form above, not a child: this panel has its own
+            form for adding a rule, and nested forms are not valid markup.
+            Its edits save as they are made — the footer's Save applies to the
+            season details only.
+
+            Gone once the first episode is scored: the rules are settled then,
+            and everyone reads them from the season page instead. */}
+        {rulesAreEditable(season.firstEpisodeScoredAt) && (
+          <div className="mt-6 border-t border-gray-200 pt-6">
+            <ScoringRulesPanel
+              seasonId={seasonId!}
+              leagueId={leagueId!}
+              rules={rules}
+              episodeCount={season.episodeCount}
+            />
+            <p className="mt-3 text-xs text-gray-400">{t('rules.savedImmediately')}</p>
+          </div>
+        )}
       </Modal>
 
       <Modal
