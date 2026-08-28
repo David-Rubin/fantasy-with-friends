@@ -2,8 +2,12 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { User } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { onAuthChanged, getUserDoc } from '../lib/auth'
+import { documentTitle } from '../lib/documentTitle'
+import { tabScopedAuthEnabled } from '../lib/authPersistence'
 import { markTabSignedIn } from '../lib/tabSession'
 import { db } from '../lib/firebase'
+
+const TAB_SCOPED_AUTH = tabScopedAuthEnabled(import.meta.env)
 
 interface UserDoc {
   uid: string
@@ -58,6 +62,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
     })
   }, [])
+
+  // Named in the tab strip only when a session is per-tab: with two accounts
+  // open side by side, this is what tells them apart without switching.
+  useEffect(() => {
+    document.title = documentTitle({
+      displayName: userDoc?.displayName,
+      tabScopedAuth: TAB_SCOPED_AUTH,
+    })
+  }, [userDoc])
 
   return (
     <AuthContext.Provider value={{ user, userDoc, isSuperadmin, loading }}>

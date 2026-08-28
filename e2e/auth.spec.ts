@@ -142,6 +142,10 @@ test.describe('Per-tab sessions', () => {
     await expect(first.getByText('Ada Owner')).toBeVisible()
     await expect(second.getByText('Bob Member')).toBeVisible()
 
+    // The tab strip is what tells them apart without switching tabs.
+    await expect(first).toHaveTitle('Fantasy With Friends — Ada Owner')
+    await expect(second).toHaveTitle('Fantasy With Friends — Bob Member')
+
     await context.close()
   })
 })

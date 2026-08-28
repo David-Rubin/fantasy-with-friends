@@ -1,5 +1,6 @@
 {
   "nav.appName": "Fantasy With Friends",
+  "nav.tabTitle": "{app} — {user}",
   "nav.dashboard": "Dashboard",
   "nav.league": "League",
   "nav.season": "Season",
