@@ -1,7 +1,8 @@
-import { doc, updateDoc } from 'firebase/firestore'
+import { doc, setDoc, updateDoc } from 'firebase/firestore'
 import { db } from './firebase'
 import { logAuditEvent } from './audit'
 import type { SeasonDetails } from './seasonDetails'
+import type { SeasonMemberDoc } from './types'
 
 /**
  * Writing a season's edited details.
@@ -36,5 +37,39 @@ export async function updateSeasonDetails(
     leagueId,
     oldValue: previous,
     newValue: next,
+  })
+}
+
+/**
+ * A league member joining a season themselves.
+ *
+ * Whether they may is decided in ./seasonMembership and, as a constraint rather
+ * than advice, by the `create` rule on the season roster — the button only ever
+ * appears where that rule would also allow the write.
+ *
+ * The team name mirrors what a season's own creation and a join-request
+ * approval already give everybody, so a roster reads the same however its
+ * members arrived. It is theirs to change afterwards.
+ */
+export async function joinSeason(
+  seasonId: string,
+  leagueId: string,
+  uid: string,
+  displayName: string
+): Promise<void> {
+  await setDoc(doc(db, 'seasons', seasonId, 'members', uid), {
+    // uid and displayName are denormalized deliberately — see SeasonMemberDoc.
+    uid,
+    displayName,
+    teamName: `${displayName}'s Team`,
+    pickPosition: null,
+    joinedAt: Date.now(),
+  } satisfies SeasonMemberDoc)
+
+  await logAuditEvent({
+    action: 'season_joined',
+    seasonId,
+    leagueId,
+    targetUid: uid,
   })
 }

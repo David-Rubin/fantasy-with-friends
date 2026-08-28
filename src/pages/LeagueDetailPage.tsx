@@ -20,9 +20,12 @@ import { Modal } from '../components/Modal'
 import { Input, Textarea } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
+import { useMySeasonIds } from '../components/SeasonMemberGate'
 import { leagueTrail } from '../lib/breadcrumbs'
 import { updateLeagueDetails, removeLeagueMember } from '../lib/leagueApi'
 import { approveJoinRequest, rejectJoinRequest, useMyJoinRequests } from '../lib/joinRequests'
+import { canJoinSeason } from '../lib/seasonMembership'
+import { joinSeason } from '../lib/seasonApi'
 import type {
   LeagueDoc,
   LeagueJoinRequestDoc,
@@ -42,7 +45,7 @@ interface MemberWithName extends LeagueMemberDoc {
 
 export function LeagueDetailPage() {
   const { leagueId } = useParams<{ leagueId: string }>()
-  const { user, isSuperadmin } = useAuth()
+  const { user, userDoc, isSuperadmin } = useAuth()
   const navigate = useNavigate()
 
   const [league, setLeague] = useState<LeagueDoc | null>(null)
@@ -55,6 +58,8 @@ export function LeagueDetailPage() {
   // never flashes a Join button at someone who already belongs here.
   const [membershipResolved, setMembershipResolved] = useState(false)
   const joinRequestStatus = useMyJoinRequests(user?.uid)
+  const { seasonIds: mySeasonIds, resolved: seasonMembershipResolved } = useMySeasonIds()
+  const [joiningSeason, setJoiningSeason] = useState<string | null>(null)
   const [newSeasonOpen, setNewSeasonOpen] = useState(false)
   const [seasonForm, setSeasonForm] = useState({
     label: '',
@@ -253,6 +258,16 @@ export function LeagueDetailPage() {
     })
   }
 
+  async function handleJoinSeason(seasonId: string) {
+    if (!leagueId || !user || !userDoc) return
+    setJoiningSeason(seasonId)
+    try {
+      await joinSeason(seasonId, leagueId, user.uid, userDoc.displayName)
+    } finally {
+      setJoiningSeason(null)
+    }
+  }
+
   async function handleCreateSeason(e: React.FormEvent) {
     e.preventDefault()
     if (!leagueId || !user || !league) return
@@ -409,20 +424,41 @@ export function LeagueDetailPage() {
                 // card, not a link onto an empty page.
                 const openable =
                   canOpenSeasons && (season.state !== 'setup' || canOpenUnreadySeason)
-                return openable ? (
+                // A season still being set up has no pick order to disturb, so
+                // a league member may let themselves in without asking anybody.
+                const joinable = canJoinSeason({
+                  state: season.state,
+                  isLeagueMember: isMember,
+                  isSeasonMember: mySeasonIds.has(season.id),
+                  resolved: membershipResolved && seasonMembershipResolved,
+                })
+                const card = openable ? (
                   <Link
-                    key={season.id}
                     to={`/leagues/${leagueId}/seasons/${season.id}`}
-                    className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
+                    className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
                   >
                     {summary}
                   </Link>
                 ) : (
-                  <div
-                    key={season.id}
-                    className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4"
-                  >
+                  <div className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4">
                     {summary}
+                  </div>
+                )
+                // The button sits beside the card rather than inside it: the
+                // card is a link when the season is openable, and a button
+                // nested in a link is reachable by neither keyboard nor screen
+                // reader in any predictable way.
+                return (
+                  <div key={season.id} className="flex items-center gap-3">
+                    {card}
+                    {joinable && (
+                      <Button
+                        onClick={() => handleJoinSeason(season.id)}
+                        loading={joiningSeason === season.id}
+                      >
+                        {joiningSeason === season.id ? t('season.joining') : t('season.join')}
+                      </Button>
+                    )}
                   </div>
                 )
               })}
