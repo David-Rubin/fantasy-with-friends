@@ -174,6 +174,10 @@ service cloud.firestore {
     // A season stops being tunable once it has been scored. Expressed here
     // rather than left to the client: it is a single get() on the parent
     // season, which is exactly the kind of check a rule can make.
+    function seasonState(seasonId) {
+      return get(/databases/$(database)/documents/seasons/$(seasonId)).data.state;
+    }
+
     function seasonNotYetScored(seasonId) {
       return get(/databases/$(database)/documents/seasons/$(seasonId))
         .data.get('firstEpisodeScoredAt', null) == null;
@@ -202,7 +206,32 @@ service cloud.firestore {
         // Team name update — own record only
         allow update: if request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamName']);
-        // Joining / position assignment handled by Cloud Function
+
+        // A league member joins a season for themselves, while it is still
+        // being set up. No approval: they are already in the league, and pick
+        // order does not exist until the draft is randomized, so an arrival now
+        // is indistinguishable from one who was there when the season was
+        // created. Without this a member admitted to the league after a season
+        // began had no way in at all, and no control anywhere to ask for one.
+        //
+        // A rule rather than a Cloud Function because a rule can decide all of
+        // it: one get() for the season's state, one exists() for the league
+        // roster. `create` only, so an existing membership — with its pick
+        // position and team name — can never be overwritten this way.
+        //
+        // pickPosition is pinned to null because that is the only honest value
+        // before a draft is randomized; the position itself is assigned by an
+        // admin. displayName is not checked against the league roster: it is
+        // copied from the joiner's own self-writable user document everywhere
+        // else in the app, so a check here would guard nothing.
+        allow create: if isSignedIn()
+          && request.auth.uid == uid
+          && request.resource.data.uid == uid
+          && request.resource.data.pickPosition == null
+          && seasonState(seasonId) == 'setup'
+          && isLeagueMember(seasonLeagueId(seasonId));
+
+        // Adding anyone else, and assigning pick positions, stays with admins.
         allow write: if isSeasonAdmin(seasonId);
       }
 

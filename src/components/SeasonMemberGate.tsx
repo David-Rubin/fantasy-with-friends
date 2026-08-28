@@ -17,20 +17,17 @@ import { t } from '../lib/i18n'
  * membership first and says so plainly.
  *
  * League membership is deliberately not enough: a user admitted to a league
- * after a season began is not in that season.
+ * after a season began is not in that season. Such a member can let themselves
+ * into any season still in `setup` from the league page — see
+ * src/lib/seasonMembership.ts — which is what this hook then sees.
  */
-export function useSeasonMembership(seasonId: string | undefined): {
-  membership: 'loading' | 'member' | 'none'
-  /** Cleared to read season data — a superadmin qualifies without joining. */
-  canView: boolean
-  /** Render the refusal panel instead of the page. */
-  blocked: boolean
-} {
-  const { user, isSuperadmin } = useAuth()
-  const [membership, setMembership] = useState<'loading' | 'member' | 'none'>('loading')
+export function useMySeasonIds(): { seasonIds: Set<string>; resolved: boolean } {
+  const { user } = useAuth()
+  const [seasonIds, setSeasonIds] = useState<Set<string>>(new Set())
+  const [resolved, setResolved] = useState(false)
 
   useEffect(() => {
-    if (!seasonId || !user) return
+    if (!user) return
     // Asked through the collection group rule for a user's own membership docs.
     // The season's roster is closed to non-members, so testing membership by
     // reading it would be a denied read on every visit by a non-member.
@@ -38,15 +35,34 @@ export function useSeasonMembership(seasonId: string | undefined): {
       query(collectionGroup(db, 'members'), where('uid', '==', user.uid)),
       'my season membership',
       (snap) => {
-        const mine = snap.docs.some(
-          (d) =>
-            d.ref.parent.parent?.id === seasonId && d.ref.parent.parent?.parent?.id === 'seasons'
-        )
-        setMembership(mine ? 'member' : 'none')
+        const mine = snap.docs
+          .filter((d) => d.ref.parent.parent?.parent?.id === 'seasons')
+          .map((d) => d.ref.parent.parent!.id)
+        setSeasonIds(new Set(mine))
+        setResolved(true)
       },
-      () => setMembership('none')
+      () => {
+        setSeasonIds(new Set())
+        setResolved(true)
+      }
     )
-  }, [seasonId, user])
+  }, [user])
+
+  return { seasonIds, resolved }
+}
+
+export function useSeasonMembership(seasonId: string | undefined): {
+  membership: 'loading' | 'member' | 'none'
+  /** Cleared to read season data — a superadmin qualifies without joining. */
+  canView: boolean
+  /** Render the refusal panel instead of the page. */
+  blocked: boolean
+} {
+  const { isSuperadmin } = useAuth()
+  const { seasonIds, resolved } = useMySeasonIds()
+
+  const membership =
+    !resolved || !seasonId ? 'loading' : seasonIds.has(seasonId) ? 'member' : 'none'
 
   return {
     membership,

@@ -65,6 +65,8 @@
   "league.approve": "Approve",
   "league.reject": "Reject",
   "league.requestRejected": "Your request to join was declined. You can ask again.",
+  "season.join": "Join season",
+  "season.joining": "Joining…",
   "season.notAMember": "You're not a member of this season.",
   "season.backToLeague": "Back to league",
   "season.create": "Create season",
