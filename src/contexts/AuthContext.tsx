@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { User } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { onAuthChanged, getUserDoc } from '../lib/auth'
+import { markTabSignedIn } from '../lib/tabSession'
 import { db } from '../lib/firebase'
 
 interface UserDoc {
@@ -35,6 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return onAuthChanged(async (firebaseUser) => {
       setUser(firebaseUser)
       if (firebaseUser) {
+        // Sticky for the life of the tab, and never cleared on sign-out: it is
+        // what tells the login form that a captured path belongs to whoever was
+        // here before.
+        markTabSignedIn()
         const [profile, superadmin] = await Promise.all([
           getUserDoc(firebaseUser.uid),
           // Reading your own record is all the rule permits, and all the client

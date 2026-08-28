@@ -3,12 +3,22 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Input } from '../components/Input'
 import { Button } from '../components/Button'
 import { loginWithEmail } from '../lib/auth'
+import { postLoginTarget } from '../lib/loginRedirect'
+import { tabHasHostedSignIn } from '../lib/tabSession'
 import { t } from '../lib/i18n'
 
 export function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const redirect = searchParams.get('redirect') ?? '/dashboard'
+  // Resolved once, on mount. Signing in marks the tab as having hosted someone,
+  // so reading this after the fact would answer for the person logging in now
+  // rather than for whoever was here before them.
+  const [target] = useState(() =>
+    postLoginTarget({
+      requested: searchParams.get('redirect'),
+      tabHasHostedSignIn: tabHasHostedSignIn(),
+    })
+  )
 
   const [email, setEmail] = useState('')
   const [pin, setPin] = useState('')
@@ -23,7 +33,9 @@ export function LoginPage() {
       // Auth is disabled for now — the PIN above is not checked. See loginAsUser
       // in functions/src/index.ts for the real (temporary) login logic.
       await loginWithEmail(email.trim())
-      navigate(redirect)
+      // replace, so Back from the page they land on does not return to a login
+      // form they have already used.
+      navigate(target, { replace: true })
     } catch {
       setError(t('auth.userNotFound'))
     } finally {

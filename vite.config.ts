@@ -22,7 +22,9 @@ export default defineConfig({
     // VITE_USE_EMULATOR is pinned off deliberately. Vite loads .env.local in
     // test mode too, so a developer running the emulator locally would
     // otherwise have their test run try to connect to it, and behave
-    // differently from CI.
+    // differently from CI. VITE_TAB_SCOPED_AUTH is pinned for the same reason:
+    // it changes how the auth instance is built, and a developer testing
+    // per-tab logins should not thereby be testing a different app than CI.
     env: {
       VITE_FIREBASE_API_KEY: 'test-api-key',
       VITE_FIREBASE_AUTH_DOMAIN: 'demo-project.firebaseapp.com',
@@ -32,6 +34,7 @@ export default defineConfig({
       VITE_FIREBASE_APP_ID: '1:000000000000:web:test',
       VITE_FIREBASE_MEASUREMENT_ID: 'G-TEST',
       VITE_USE_EMULATOR: 'false',
+      VITE_TAB_SCOPED_AUTH: 'false',
     },
     // Cloud Function logic is covered here too — the draft rules that decide
     // turn order and completion live server-side and are worth testing directly.
