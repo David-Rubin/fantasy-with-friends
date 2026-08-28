@@ -325,7 +325,7 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 1. User enters email on `/login`.
 2. A PIN input field (labeled **"PIN"**, not "Password") is shown.
 3. User enters their 6-digit PIN.
-4. On success, redirect to `/dashboard` (or the originally requested URL if they were redirected mid-flow).
+4. On success, redirect to `/dashboard`. A requested URL is followed only in a tab nobody has signed in to yet, so a shared link still lands where it points while a second person logging in never arrives on the first person's page.
 5. Error state: incorrect PIN → "Incorrect PIN. Check your email or request a new one." with a "Resend PIN" link.
 6. After 5 consecutive failed attempts, the account is locked for 15 minutes.
 
@@ -621,7 +621,7 @@ WCAG 2.1 AA as a guiding reference, applied pragmatically. The goal is a solid, 
 - **Mechanism**: Email + 6-digit PIN. PINs are generated server-side, stored as a hashed value (never plaintext), and delivered to the user via email at account creation.
 - **PIN expiry**: PINs do not expire. Users can request a new PIN at any time via a "Resend PIN" flow, which invalidates the previous PIN.
 - **Brute-force protection**: After 5 consecutive failed login attempts for a given email, the account is locked for 15 minutes. The user is notified via the login UI. After the cooldown, attempts reset.
-- **Session management**: Firebase Auth session tokens are used post-login. Sessions persist across browser restarts (standard Firebase behavior). No manual session expiry in MVP.
+- **Session management**: Firebase Auth session tokens are used post-login. By default one session is shared by every tab and persists across browser restarts (standard Firebase behavior). `VITE_TAB_SCOPED_AUTH` scopes the session to a single tab instead, allowing several accounts to be signed in side by side; it is off unless set, and turning it off again only signs current users out once. No manual session expiry in MVP.
 - **Future consideration**: User-provided passwords and/or OAuth (Google) sign-in may be added in a future iteration.
 
 ### 7.2 Authorization
