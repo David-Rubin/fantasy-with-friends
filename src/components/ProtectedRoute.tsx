@@ -1,6 +1,8 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { loginPathFor } from '../lib/loginRedirect'
+import { tabHasHostedSignIn } from '../lib/tabSession'
 import { t } from '../lib/i18n'
 
 interface ProtectedRouteProps {
@@ -25,7 +27,18 @@ export function ProtectedRoute({ children, requireSuperadmin }: ProtectedRoutePr
   }
 
   if (!user) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />
+    // The path only travels to the login form in a tab nobody has signed in to
+    // yet — otherwise it is the last person's page. See src/lib/loginRedirect.ts.
+    return (
+      <Navigate
+        to={loginPathFor({
+          pathname: location.pathname,
+          search: location.search,
+          tabHasHostedSignIn: tabHasHostedSignIn(),
+        })}
+        replace
+      />
+    )
   }
 
   // Send them somewhere they can actually use rather than showing a wall.

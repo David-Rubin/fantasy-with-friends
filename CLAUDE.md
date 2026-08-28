@@ -146,7 +146,16 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=000000000000
 VITE_FIREBASE_APP_ID=1:000000000000:web:demo
 VITE_FIREBASE_MEASUREMENT_ID=G-DEMO
 VITE_USE_EMULATOR=true
+VITE_TAB_SCOPED_AUTH=true
 ```
+
+`VITE_TAB_SCOPED_AUTH` scopes a signed-in session to one tab instead of to the
+whole browser, so several accounts can be driven side by side — which is what
+makes testing a draft or a join request realistic. It is off unless set, so
+production keeps Firebase's shared-across-tabs default until the same variable
+is set in the hosting build config. Flipping it either way costs everyone
+currently signed in one sign-out and nothing else; nothing persisted depends on
+it. See `src/lib/authPersistence.ts`.
 
 Then `npm run emulators` (builds the functions first, so the emulator can never
 serve stale or missing function code) and `npm run dev`.
