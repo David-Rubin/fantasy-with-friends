@@ -3,12 +3,14 @@ import { Button } from './Button'
 import { Input } from './Input'
 import { InfoTooltip } from './InfoTooltip'
 import {
+  allEpisodeNumbers,
   emptyRuleDraft,
   ruleToDraft,
   validateRuleDraft,
   type RuleDraft,
   type RuleProblem,
 } from '../lib/scoringRules'
+import { EpisodeMultiSelect } from './EpisodeMultiSelect'
 import { addScoringRule, deleteScoringRule, updateScoringRule } from '../lib/scoringRulesApi'
 import type { ScoringRule, ScoringRuleDoc } from '../lib/types'
 import { t } from '../lib/i18n'
@@ -39,33 +41,44 @@ export function RuleSummary({ rule }: { rule: ScoringRule }) {
       {' · '}
       {rule.points > 0 ? '+' : ''}
       {rule.points} {t('rules.pts')}
+      {' · '}
+      {/* Named episodes rather than a count: "Ep 2, 5" is the thing a reader
+          wants, and a rule covering the season says so in as few words. */}
+      {rule.episodeNumbers
+        ? t('rules.episodes.listed', { list: rule.episodeNumbers.join(', ') })
+        : t('rules.episodes.all')}
     </div>
   )
 }
 
 /** The stored shape of a rule, for the audit trail's "before" value. */
-function withoutId({ type, name, points }: ScoringRule): ScoringRuleDoc {
-  return { type, name, points }
+function withoutId({ type, name, points, episodeNumbers }: ScoringRule): ScoringRuleDoc {
+  return { type, name, points, episodeNumbers: episodeNumbers ?? null }
 }
 
 const problemKey: Record<RuleProblem, string> = {
   'name-required': 'rules.errors.nameRequired',
   'points-not-a-whole-number': 'rules.errors.pointsNotAWholeNumber',
   'points-zero': 'rules.errors.pointsZero',
+  'episodes-required': 'rules.errors.episodesRequired',
 }
 
 interface ScoringRulesPanelProps {
   seasonId: string
   leagueId: string
   rules: ScoringRule[]
+  /** How many episodes the season has — the choices in the episode picker. */
+  episodeCount: number
 }
 
 function RuleFields({
   draft,
   onChange,
+  episodeNumbers,
 }: {
   draft: RuleDraft
   onChange: (next: RuleDraft) => void
+  episodeNumbers: number[]
 }) {
   return (
     <>
@@ -88,17 +101,28 @@ function RuleFields({
           <InfoTooltip text={t('rules.pointsHint')} label={t('rules.pointsHintLabel')} />
         }
       />
+      <EpisodeMultiSelect
+        episodeNumbers={episodeNumbers}
+        selected={draft.episodeNumbers}
+        onChange={(next) => onChange({ ...draft, episodeNumbers: next })}
+      />
     </>
   )
 }
 
-export function ScoringRulesPanel({ seasonId, leagueId, rules }: ScoringRulesPanelProps) {
-  const [addDraft, setAddDraft] = useState<RuleDraft>(emptyRuleDraft)
+export function ScoringRulesPanel({
+  seasonId,
+  leagueId,
+  rules,
+  episodeCount,
+}: ScoringRulesPanelProps) {
+  const episodeNumbers = allEpisodeNumbers(episodeCount)
+  const [addDraft, setAddDraft] = useState<RuleDraft>(() => emptyRuleDraft(episodeCount))
   const [adding, setAdding] = useState(false)
   const [addProblem, setAddProblem] = useState<RuleProblem | null>(null)
 
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<RuleDraft>(emptyRuleDraft)
+  const [editDraft, setEditDraft] = useState<RuleDraft>(() => emptyRuleDraft(episodeCount))
   const [savingEdit, setSavingEdit] = useState(false)
   const [editProblem, setEditProblem] = useState<RuleProblem | null>(null)
 
@@ -112,8 +136,8 @@ export function ScoringRulesPanel({ seasonId, leagueId, rules }: ScoringRulesPan
     if (problem) return
     setAdding(true)
     try {
-      await addScoringRule(seasonId, leagueId, addDraft)
-      setAddDraft(emptyRuleDraft)
+      await addScoringRule(seasonId, leagueId, addDraft, episodeCount)
+      setAddDraft(emptyRuleDraft(episodeCount))
     } catch (error) {
       console.error('Failed to add scoring rule', error)
       setAddProblem('points-not-a-whole-number')
@@ -128,7 +152,7 @@ export function ScoringRulesPanel({ seasonId, leagueId, rules }: ScoringRulesPan
     if (problem) return
     setSavingEdit(true)
     try {
-      await updateScoringRule(seasonId, leagueId, rule.id, withoutId(rule), editDraft)
+      await updateScoringRule(seasonId, leagueId, rule.id, withoutId(rule), editDraft, episodeCount)
       setEditingId(null)
     } catch (error) {
       console.error('Failed to update scoring rule', error)
@@ -162,7 +186,11 @@ export function ScoringRulesPanel({ seasonId, leagueId, rules }: ScoringRulesPan
               {editingId === rule.id ? (
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-wrap items-end gap-2">
-                    <RuleFields draft={editDraft} onChange={setEditDraft} />
+                    <RuleFields
+                      draft={editDraft}
+                      onChange={setEditDraft}
+                      episodeNumbers={episodeNumbers}
+                    />
                     <div className="flex items-end gap-2">
                       <Button loading={savingEdit} onClick={() => handleSaveEdit(rule)}>
                         {t('common.save')}
@@ -205,7 +233,7 @@ export function ScoringRulesPanel({ seasonId, leagueId, rules }: ScoringRulesPan
                         className="!min-h-0 !px-3 !py-1 text-xs"
                         onClick={() => {
                           setEditProblem(null)
-                          setEditDraft(ruleToDraft(rule))
+                          setEditDraft(ruleToDraft(rule, episodeCount))
                           setEditingId(rule.id)
                         }}
                       >
@@ -229,7 +257,7 @@ export function ScoringRulesPanel({ seasonId, leagueId, rules }: ScoringRulesPan
 
       <form onSubmit={handleAdd} className="flex flex-col gap-2">
         <div className="flex flex-wrap items-end gap-2">
-          <RuleFields draft={addDraft} onChange={setAddDraft} />
+          <RuleFields draft={addDraft} onChange={setAddDraft} episodeNumbers={episodeNumbers} />
           <div className="flex items-end">
             <Button type="submit" loading={adding}>
               {t('rules.add')}

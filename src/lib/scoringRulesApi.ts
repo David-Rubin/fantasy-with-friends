@@ -19,9 +19,10 @@ import type { ScoringRuleDoc } from './types'
 export async function addScoringRule(
   seasonId: string,
   leagueId: string,
-  draft: RuleDraft
+  draft: RuleDraft,
+  episodeCount: number
 ): Promise<void> {
-  const rule = draftToRule(draft)
+  const rule = draftToRule(draft, episodeCount)
   await addDoc(collection(db, 'seasons', seasonId, 'scoringRules'), rule satisfies ScoringRuleDoc)
   await logAuditEvent({ action: 'scoring_rule_added', seasonId, leagueId, newValue: rule })
 }
@@ -31,9 +32,10 @@ export async function updateScoringRule(
   leagueId: string,
   ruleId: string,
   previous: ScoringRuleDoc,
-  draft: RuleDraft
+  draft: RuleDraft,
+  episodeCount: number
 ): Promise<void> {
-  const rule = draftToRule(draft)
+  const rule = draftToRule(draft, episodeCount)
   await updateDoc(doc(db, 'seasons', seasonId, 'scoringRules', ruleId), { ...rule })
   await logAuditEvent({
     action: 'scoring_rule_updated',

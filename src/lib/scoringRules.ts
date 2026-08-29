@@ -13,13 +13,45 @@ export interface RuleDraft {
   name: string
   /** Text, because a half-typed "-" or "1." is not yet a number. */
   points: string
+  /**
+   * Always the concrete set of ticked episodes, never a "means all" sentinel —
+   * a checkbox list has no way to render one. The sentinel is applied on the
+   * way out, in draftToRule.
+   */
+  episodeNumbers: number[]
 }
 
-export type RuleProblem = 'name-required' | 'points-not-a-whole-number' | 'points-zero'
+export type RuleProblem =
+  'name-required' | 'points-not-a-whole-number' | 'points-zero' | 'episodes-required'
 
-export const emptyRuleDraft: RuleDraft = {
-  name: '',
-  points: '',
+/** Episodes 1..episodeCount, which is what a season's rules are chosen from. */
+export function allEpisodeNumbers(episodeCount: number): number[] {
+  if (!Number.isFinite(episodeCount) || episodeCount < 1) return []
+  return Array.from({ length: Math.floor(episodeCount) }, (_, i) => i + 1)
+}
+
+/** A blank rule, starting out covering the whole season. */
+export function emptyRuleDraft(episodeCount: number): RuleDraft {
+  return {
+    name: '',
+    points: '',
+    episodeNumbers: allEpisodeNumbers(episodeCount),
+  }
+}
+
+/**
+ * Whether a rule is scored in a given episode.
+ *
+ * Absent and null both mean every episode — absent because rules written
+ * before the field existed do not carry it, and reading those as "no episodes"
+ * would silently empty every scoring table in the app.
+ */
+export function ruleCoversEpisode(
+  rule: Pick<ScoringRuleDoc, 'episodeNumbers'>,
+  episodeNumber: number
+): boolean {
+  if (!rule.episodeNumbers) return true
+  return rule.episodeNumbers.includes(episodeNumber)
 }
 
 /**
@@ -39,23 +71,42 @@ export function validateRuleDraft(draft: RuleDraft): RuleProblem | null {
   // Covers "0" and "-0". A rule worth nothing scores nothing, so it is a row in
   // the scoring table that can only waste the admin's time every episode.
   if (parseInt(points, 10) === 0) return 'points-zero'
+  // Deselecting every episode is allowed while the admin is working — a rule
+  // scored nowhere is only a problem once they try to keep it.
+  if (draft.episodeNumbers.length === 0) return 'episodes-required'
   return null
 }
 
-/** The stored rule for a draft that has already been validated. */
-export function draftToRule(draft: RuleDraft): ScoringRuleDoc {
+/**
+ * The stored rule for a draft that has already been validated.
+ *
+ * A selection covering the whole season is stored as `null` rather than the
+ * list: see ScoringRuleDoc.episodeNumbers for why the two are not the same.
+ */
+export function draftToRule(draft: RuleDraft, episodeCount: number): ScoringRuleDoc {
+  const episodes = [...new Set(draft.episodeNumbers)].sort((a, b) => a - b)
+  const coversEverything = episodes.length >= allEpisodeNumbers(episodeCount).length
   return {
     type: 'binary',
     name: draft.name.trim(),
     points: parseInt(draft.points.trim(), 10),
+    episodeNumbers: coversEverything ? null : episodes,
   }
 }
 
-/** A stored rule back into a draft, for editing it. */
-export function ruleToDraft(rule: ScoringRuleDoc): RuleDraft {
+/**
+ * A stored rule back into a draft, for editing it.
+ *
+ * Episodes outside the season are dropped: a count lowered after the rule was
+ * written leaves numbers behind that no longer name anything, and the checkbox
+ * list has nowhere to show them.
+ */
+export function ruleToDraft(rule: ScoringRuleDoc, episodeCount: number): RuleDraft {
+  const all = allEpisodeNumbers(episodeCount)
   return {
     name: rule.name,
     points: String(rule.points),
+    episodeNumbers: rule.episodeNumbers ? all.filter((n) => rule.episodeNumbers!.includes(n)) : all,
   }
 }
 
