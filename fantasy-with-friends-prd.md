@@ -141,7 +141,9 @@ A single role that spans the whole app, separate from the per-league roles above
 
 - Admins add contestants to a season before the draft opens.
 - Each contestant record includes: name, photo (URL or upload), and a free-text bio.
-- Contestants can be added/edited while the season is in `setup` state.
+- **The bio is a multi-line field, capped at 300 characters**, with a live count of what will be stored. Whitespace inside it is kept exactly as typed — a paragraph break belongs to whoever wrote it — and only the ends are trimmed, where whitespace is invisible and would otherwise survive every later edit. Everything that displays a bio preserves that whitespace; HTML collapses it by default.
+- **The cast is shown as a grid of cards** in the Season Setup panel — photo, name, and the opening of the bio — rather than a list of names. Setup is where the cast gets checked over as a whole, so a missing photo or an empty bio should be visible at a glance.
+- Contestants can be added/edited while the season is in `setup` state. Editing opens a dialog over the same fields as the add form, and touches only those fields — a contestant record also carries who drafted them and when they were eliminated.
 - Once the draft begins, the contestant list is locked.
 
 **3.2.4b Reading an episode's scores**
@@ -154,7 +156,7 @@ A single role that spans the whole app, separate from the per-league roles above
 
 - Admins define a set of scoring rules per season. A rule is a named yes/no outcome worth a fixed point value — "Star Baker" = +3 pts. Each episode, the admin ticks the rules that applied to each contestant.
 - One rule type, deliberately. Numeric ratings and bonus challenges were specified here and cut before the MVP: each carried its own scoring input, its own scope and its own explanation, for leagues that only ever wanted to tick boxes.
-- Rules can have positive or negative point values.
+- **Point values are whole numbers and never zero.** Negative is allowed and expected — a penalty is a rule like any other, and the form says so beside the field. Zero is refused: a rule worth nothing is a column in every scoring table that can only waste the admin's time.
 - **Editing lives in one place at a time**: the Season Setup panel while the season is being set up, and the season's Edit dialog once the draft has opened. Either way it appears only while the rules are still open to change — once the first episode is scored both drop the section rather than showing forms that cannot be used.
 - **Reading opens once the draft is done.** From `active` onward the season page carries the rules in an expandable panel, collapsed by default, visible to every member of the season regardless of role — how points are earned is something a player checks mid-episode and otherwise ignores. Before that the rules are still being written, and a half-finished list read as settled is worse than none.
 - **Rules stay editable until the first episode is scored.** Admins can view, add, edit and remove scoring rules through setup, through the draft, and into an active season that has not been scored yet — a rule everyone agreed on but nobody wrote down is usually noticed late. Once any episode has been scored the rules are fixed: changing a point value afterwards would silently restate every score already recorded under the old value, and team totals are recomputed from these rules. After that point the rules remain readable to everyone on the season page, but nobody can change them.
@@ -169,7 +171,7 @@ A single role that spans the whole app, separate from the per-league roles above
 **3.3.1 Opening the Draft**
 
 - An Admin transitions the season from `setup` → `draft`.
-- Draft settings are configured during season setup and can be saved before the draft is officially opened.
+- Draft settings are configured during season setup and can be saved before the draft is officially opened. **Opening the draft also commits whatever is currently in those fields**, so a setting changed and not separately saved is not silently discarded; Save Draft Setup is for keeping changes _without_ opening.
 - Before opening, the Admin configures draft settings:
 
   **Pick order methodology** (default: Randomized):
@@ -180,6 +182,8 @@ A single role that spans the whole app, separate from the per-league roles above
   | Admin-set  | Admin manually specifies the exact pick order before the draft     |
 
   _(Additional pick order methods — e.g. auction, weighted random — can be added in future iterations.)_
+
+  **Pick timer**: how long each turn lasts, from 5 to 600 seconds, defaulting to 60. The bound is enforced on the value itself, not only by the input's arrows — a figure typed past either end settles to the nearest allowed one.
 
   **Timer expiry behavior** (what happens when a player's pick clock runs out):
 
@@ -201,8 +205,9 @@ A single role that spans the whole app, separate from the per-league roles above
   - Current picker (visible to all participants at all times) and a countdown timer
   - All contestants, ordered as follows at all times:
     1. **Available contestants** (not yet drafted) — shown first, fully interactive for the active picker
-    2. **Drafted contestants** — shown at the end, greyed out and read-only; bio remains visible on hover/tap; owner name displayed on the card
+    2. **Drafted contestants** — shown at the end, greyed out and read-only; owner name displayed on the card
   - Each player's team roster as it fills up
+- **Bios are clipped to two lines on the card, with the whole of one readable on hover or tap.** A card has to stay a scannable size on a board of twenty, but a pick is made partly on what the bio says. The panel opens upward — the Pick buttons sit below, and covering an irreversible action on a page with a running clock is how somebody drafts the wrong person — and it opens on hover and stays on click, so touch and keyboard reach it too. Only a bio that is actually cut off is interactive.
 - When a player's turn comes, only they see active "Pick" buttons on available contestant cards.
 - **Admin proxy picks**: At any point during the draft, an Admin can select on behalf of any member — useful when a friend phones in their pick separately. The Admin sees a "Pick for [Member]" option on any available contestant card during that member's turn.
 - Picks propagate in real-time to all participants via Firestore `onSnapshot`.
@@ -346,15 +351,15 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 
 1. Admin enters: season label, episode count. (The show comes from the league.)
 2. **Players**: every current league member is enrolled in the season automatically, as is anyone admitted to the league while the season is still in `setup`. There is no per-season invite.
-3. Admin adds contestants (name + optional photo + bio). Minimum 2 required to proceed to draft.
+3. Admin adds contestants (name + optional photo + bio, up to 300 characters). Minimum 2 required to proceed to draft. Those added appear as a grid of cards above the form, each with an Edit control.
 4. Admin defines scoring rules (name + point value + the episodes they apply to), in the Season Setup panel. Minimum 1 required.
 5. Admin configures draft settings:
    - Pick order methodology (Randomized default / Admin-set).
    - If Admin-set: a drag-to-reorder list of league members.
-   - Timer duration per pick (default 60 seconds).
+   - Timer duration per pick (5–600 seconds, default 60).
    - Timer expiry behavior (Auto-pick / Admin picks / Skip).
 6. **Admin can save progress at any point** using a "Save Draft Setup" button. The season remains in `setup` state; no draft is triggered yet.
-7. When ready, Admin clicks "Open Draft" — season transitions to `draft` state and the draft lobby becomes visible to season members. From this point the season's roster is closed: users admitted to the league later will not join it.
+7. When ready, Admin clicks "Open Draft" — the draft settings on screen are saved along with the transition, the season moves to `draft` state, and the draft lobby becomes visible to season members. From this point the season's roster is closed: users admitted to the league later will not join it.
 
 ---
 
