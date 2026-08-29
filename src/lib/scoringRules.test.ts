@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import {
-  parseEpisodeNumbers,
   validateRuleDraft,
   draftToRule,
   ruleToDraft,
@@ -16,120 +15,69 @@ const draft = (over: Partial<RuleDraft> = {}): RuleDraft => ({
   ...over,
 })
 
-describe('parseEpisodeNumbers', () => {
-  it('reads a comma-separated list', () => {
-    expect(parseEpisodeNumbers('1, 4, 9')).toEqual([1, 4, 9])
-  })
-
-  it('ignores empty entries from stray commas', () => {
-    expect(parseEpisodeNumbers('1, ,3,')).toEqual([1, 3])
-  })
-
-  it('reports a typo rather than dropping it', () => {
-    // The old implementation filtered falsy values, so "4x" vanished and the
-    // rule silently covered fewer episodes than the admin typed.
-    const parsed = parseEpisodeNumbers('1, 4x, 9')
-    expect(parsed).toHaveLength(3)
-    expect(Number.isNaN(parsed[1])).toBe(true)
-  })
-
-  it('is empty for an empty string', () => {
-    expect(parseEpisodeNumbers('')).toEqual([])
-    expect(parseEpisodeNumbers('  ')).toEqual([])
-  })
-})
-
 describe('validateRuleDraft', () => {
-  it('accepts a plain binary rule', () => {
-    expect(validateRuleDraft(draft(), 10)).toBeNull()
+  it('accepts a plain rule', () => {
+    expect(validateRuleDraft(draft())).toBeNull()
   })
 
   it('requires a name', () => {
-    expect(validateRuleDraft(draft({ name: '   ' }), 10)).toBe('name-required')
+    expect(validateRuleDraft(draft({ name: '   ' }))).toBe('name-required')
   })
 
   it('requires points to be a number', () => {
-    expect(validateRuleDraft(draft({ points: '' }), 10)).toBe('points-not-a-number')
-    expect(validateRuleDraft(draft({ points: 'lots' }), 10)).toBe('points-not-a-number')
+    expect(validateRuleDraft(draft({ points: '' }))).toBe('points-not-a-whole-number')
+    expect(validateRuleDraft(draft({ points: 'lots' }))).toBe('points-not-a-whole-number')
   })
 
-  it('allows negative and fractional points', () => {
-    expect(validateRuleDraft(draft({ points: '-2.5' }), 10)).toBeNull()
+  it('refuses a decimal', () => {
+    expect(validateRuleDraft(draft({ points: '2.5' }))).toBe('points-not-a-whole-number')
+    expect(validateRuleDraft(draft({ points: '-2.5' }))).toBe('points-not-a-whole-number')
   })
 
-  it('allows a zero-point rule', () => {
-    expect(validateRuleDraft(draft({ points: '0' }), 10)).toBeNull()
+  it('refuses a number with anything else attached', () => {
+    // parseFloat would read this as 5 and store a rule nobody typed.
+    expect(validateRuleDraft(draft({ points: '5 points' }))).toBe('points-not-a-whole-number')
   })
 
-  it('wants a scope on a bonus challenge', () => {
-    expect(validateRuleDraft(draft({ type: 'bonus_challenge' }), 10)).toBe('scope-required')
+  it('allows negative points, for a penalty', () => {
+    expect(validateRuleDraft(draft({ points: '-2' }))).toBeNull()
   })
 
-  it('wants episodes when the scope is specific episodes', () => {
-    const d = draft({ type: 'bonus_challenge', scope: 'specific_episodes' })
-    expect(validateRuleDraft(d, 10)).toBe('episodes-required')
+  it('refuses a zero-point rule', () => {
+    expect(validateRuleDraft(draft({ points: '0' }))).toBe('points-zero')
+    expect(validateRuleDraft(draft({ points: '-0' }))).toBe('points-zero')
   })
 
-  it('refuses an episode the season does not have', () => {
-    const d = draft({
-      type: 'bonus_challenge',
-      scope: 'specific_episodes',
-      episodeNumbers: '3, 12',
-    })
-    expect(validateRuleDraft(d, 10)).toBe('episodes-out-of-range')
-  })
-
-  it('refuses a mistyped episode number', () => {
-    const d = draft({ type: 'bonus_challenge', scope: 'specific_episodes', episodeNumbers: '4x' })
-    expect(validateRuleDraft(d, 10)).toBe('episodes-out-of-range')
-  })
-
-  it('ignores scope entirely for non-bonus rules', () => {
-    expect(validateRuleDraft(draft({ type: 'numeric', scope: null }), 10)).toBeNull()
+  it('ignores surrounding whitespace', () => {
+    expect(validateRuleDraft(draft({ points: '  -3  ' }))).toBeNull()
   })
 })
 
 describe('draftToRule', () => {
   it('trims the name and parses the points', () => {
-    expect(draftToRule(draft({ name: '  Wins immunity  ', points: '5' }))).toMatchObject({
+    expect(draftToRule(draft({ name: '  Wins immunity  ', points: '5' }))).toEqual({
+      type: 'binary',
       name: 'Wins immunity',
       points: 5,
     })
   })
 
-  it('drops scope and episodes on a rule that is not a bonus challenge', () => {
-    const rule = draftToRule(
-      draft({ type: 'binary', scope: 'specific_episodes', episodeNumbers: '1,2' })
-    )
-    expect(rule.scope).toBeNull()
-    expect(rule.episodeNumbers).toBeNull()
-  })
-
-  it('keeps episodes only when the scope asks for them', () => {
-    const specific = draftToRule(
-      draft({ type: 'bonus_challenge', scope: 'specific_episodes', episodeNumbers: '2, 5' })
-    )
-    expect(specific.episodeNumbers).toEqual([2, 5])
-
-    const seasonLevel = draftToRule(
-      draft({ type: 'bonus_challenge', scope: 'season_level', episodeNumbers: '2, 5' })
-    )
-    expect(seasonLevel.episodeNumbers).toBeNull()
+  it('parses a negative point value', () => {
+    expect(draftToRule(draft({ points: '-3' })).points).toBe(-3)
   })
 })
 
 describe('ruleToDraft', () => {
   it('round-trips a rule through editing unchanged', () => {
-    const rule = draftToRule(
-      draft({ type: 'bonus_challenge', scope: 'specific_episodes', episodeNumbers: '2, 5' })
-    )
+    const rule = draftToRule(draft())
     expect(draftToRule(ruleToDraft(rule))).toEqual(rule)
   })
 
-  it('shows an absent episode list as empty text', () => {
-    expect(
-      ruleToDraft({ type: 'binary', name: 'x', points: 1, scope: null, episodeNumbers: null })
-    ).toMatchObject({ episodeNumbers: '' })
+  it('renders the points back as text for the form', () => {
+    expect(ruleToDraft({ type: 'binary', name: 'x', points: -1 })).toEqual({
+      name: 'x',
+      points: '-1',
+    })
   })
 })
 

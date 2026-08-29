@@ -31,10 +31,16 @@ import { AccentColorPicker } from '../components/AccentColorPicker'
 import { ScoringRulesPanel } from '../components/ScoringRulesPanel'
 import { ScoringRulesDisclosure } from '../components/ScoringRulesDisclosure'
 import { rulesAreEditable } from '../lib/scoringRules'
-import { episodeCountProblem, highestScoredEpisode } from '../lib/seasonDetails'
+import {
+  clampTimerSeconds,
+  episodeCountProblem,
+  highestScoredEpisode,
+  TIMER_SECONDS_MAX,
+  TIMER_SECONDS_MIN,
+} from '../lib/seasonDetails'
 import { updateSeasonDetails } from '../lib/seasonApi'
 
-type Tab = 'leaderboard' | 'roster' | 'freeAgents' | 'episodes' | 'awards'
+type Tab = 'leaderboard' | 'roster' | 'freeAgents' | 'episodes'
 
 interface MemberDoc extends SeasonMemberDoc {
   uid: string
@@ -69,12 +75,23 @@ export function SeasonDetailPage() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [editError, setEditError] = useState('')
 
-  // Draft settings form
+  // Draft settings form. `timerSeconds` is text, not a number, for the same
+  // reason a rule's points are: an emptied field is a legitimate step on the
+  // way from "5" to "400", and a number cannot hold it. It is read back as a
+  // number only when the field is left, and again when the form is written.
   const [draftSettings, setDraftSettings] = useState({
     pickOrderMethod: 'randomized' as SeasonDoc['pickOrderMethod'],
-    timerSeconds: 60,
+    timerSeconds: '60',
     timerExpiry: 'auto-pick' as SeasonDoc['timerExpiry'],
   })
+
+  // What the form actually writes: whatever is in the timer field, brought
+  // inside its bounds. Nothing downstream should ever see the raw text.
+  const draftSettingsToSave = {
+    pickOrderMethod: draftSettings.pickOrderMethod,
+    timerSeconds: clampTimerSeconds(parseInt(draftSettings.timerSeconds, 10)),
+    timerExpiry: draftSettings.timerExpiry,
+  }
 
   useEffect(() => {
     if (!seasonId) return
@@ -84,7 +101,7 @@ export function SeasonDetailPage() {
         setSeason(data)
         setDraftSettings({
           pickOrderMethod: data.pickOrderMethod,
-          timerSeconds: data.timerSeconds,
+          timerSeconds: String(data.timerSeconds),
           timerExpiry: data.timerExpiry,
         })
       }
@@ -184,11 +201,7 @@ export function SeasonDetailPage() {
     if (!seasonId) return
     setSavingSetup(true)
     try {
-      await updateDoc(doc(db, 'seasons', seasonId), {
-        pickOrderMethod: draftSettings.pickOrderMethod,
-        timerSeconds: draftSettings.timerSeconds,
-        timerExpiry: draftSettings.timerExpiry,
-      })
+      await updateDoc(doc(db, 'seasons', seasonId), draftSettingsToSave)
     } finally {
       setSavingSetup(false)
     }
@@ -198,7 +211,12 @@ export function SeasonDetailPage() {
     if (!seasonId) return
     setOpeningDraft(true)
     try {
-      await updateDoc(doc(db, 'seasons', seasonId), { state: 'draft' })
+      // The settings go with the state change, in one write. Opening the draft
+      // used to save the state alone, so a timer typed into the field and never
+      // committed with Save draft setup was silently dropped — the lobby then
+      // started the clock on whatever was last persisted, which reads as the
+      // edit not taking effect.
+      await updateDoc(doc(db, 'seasons', seasonId), { ...draftSettingsToSave, state: 'draft' })
       navigate(`/leagues/${leagueId}/seasons/${seasonId}/draft`)
     } finally {
       setOpeningDraft(false)
@@ -299,7 +317,6 @@ export function SeasonDetailPage() {
     { key: 'roster', label: t('season.tabs.roster') },
     { key: 'freeAgents', label: t('season.tabs.freeAgents') },
     { key: 'episodes', label: t('season.tabs.episodes') },
-    { key: 'awards', label: t('season.tabs.awards') },
   ]
 
   return (
@@ -363,6 +380,15 @@ export function SeasonDetailPage() {
             </form>
           </section>
 
+          {/* Scoring rules — here rather than behind the edit dialog because
+              adding them is setup work: `canOpenDraft` needs at least one, so
+              this sits beside the contestant list that gates the draft too.
+              Unlike in the dialog there is no nested-form hazard, since nothing
+              else in this panel is a form. */}
+          <section className="mb-6">
+            <ScoringRulesPanel seasonId={seasonId!} leagueId={leagueId!} rules={rules} />
+          </section>
+
           {/* Draft settings */}
           <section className="mb-6">
             <h3 className="font-medium text-gray-700 mb-3">{t('draft.settings')}</h3>
@@ -400,11 +426,22 @@ export function SeasonDetailPage() {
                 </span>
                 <input
                   type="number"
-                  min={15}
-                  max={300}
+                  min={TIMER_SECONDS_MIN}
+                  max={TIMER_SECONDS_MAX}
                   value={draftSettings.timerSeconds}
+                  // Takes whatever is typed, empty included — clearing the field
+                  // is how you replace 5 with 400 without fighting it.
                   onChange={(e) =>
-                    setDraftSettings((s) => ({ ...s, timerSeconds: parseInt(e.target.value, 10) }))
+                    setDraftSettings((s) => ({ ...s, timerSeconds: e.target.value }))
+                  }
+                  // Settled only once the field is left: an emptied or
+                  // out-of-range box becomes the nearest allowed value, and a
+                  // half-typed one is left alone until then.
+                  onBlur={() =>
+                    setDraftSettings((s) => ({
+                      ...s,
+                      timerSeconds: String(clampTimerSeconds(parseInt(s.timerSeconds, 10))),
+                    }))
                   }
                   className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
@@ -448,7 +485,10 @@ export function SeasonDetailPage() {
         </div>
       )}
 
-      <ScoringRulesDisclosure rules={rules} />
+      {/* Only once the draft has closed. Before that the rules are still being
+          written, and a half-finished list read as settled is worse than none;
+          the admin has the editable panel above instead. */}
+      {['active', 'complete'].includes(season.state) && <ScoringRulesDisclosure rules={rules} />}
 
       {/* A member who arrives before the season is ready — from a bookmark, or
           a link shared before the draft opened. The admin panel above is not
@@ -658,13 +698,6 @@ export function SeasonDetailPage() {
               })}
             </div>
           )}
-
-          {/* Season Awards tab */}
-          {tab === 'awards' && (
-            <Link to={`/leagues/${leagueId}/seasons/${seasonId}/awards`}>
-              <Button>{t('awards.title')}</Button>
-            </Link>
-          )}
         </>
       )}
 
@@ -718,17 +751,14 @@ export function SeasonDetailPage() {
             Its edits save as they are made — the footer's Save applies to the
             season details only.
 
+            Absent during setup, where the editor lives on the setup panel
+            instead — one place to edit rules at a time, never two.
+
             Gone once the first episode is scored: the rules are settled then,
             and everyone reads them from the season page instead. */}
-        {rulesAreEditable(season.firstEpisodeScoredAt) && (
+        {season.state !== 'setup' && rulesAreEditable(season.firstEpisodeScoredAt) && (
           <div className="mt-6 border-t border-gray-200 pt-6">
-            <ScoringRulesPanel
-              seasonId={seasonId!}
-              leagueId={leagueId!}
-              rules={rules}
-              episodeCount={season.episodeCount}
-            />
-            <p className="mt-3 text-xs text-gray-400">{t('rules.savedImmediately')}</p>
+            <ScoringRulesPanel seasonId={seasonId!} leagueId={leagueId!} rules={rules} />
           </div>
         )}
       </Modal>

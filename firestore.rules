@@ -259,11 +259,6 @@ service cloud.firestore {
         }
       }
 
-      match /seasonAwards/{ruleId} {
-        allow read: if isSeasonMember(seasonId);
-        allow write: if isSeasonAdmin(seasonId);
-      }
-
       match /draft/{draftId} {
         allow read: if isSeasonMember(seasonId);
         // Draft state transitions are admin-only
