@@ -10,86 +10,52 @@ import type { ScoringRuleDoc } from './types'
 
 /** The form an admin fills in, before anything is parsed. */
 export interface RuleDraft {
-  type: ScoringRuleDoc['type']
   name: string
   /** Text, because a half-typed "-" or "1." is not yet a number. */
   points: string
-  scope: ScoringRuleDoc['scope']
-  /** Comma-separated, e.g. "1, 4, 9". */
-  episodeNumbers: string
 }
 
-export type RuleProblem =
-  | 'name-required'
-  | 'points-not-a-number'
-  | 'scope-required'
-  | 'episodes-required'
-  | 'episodes-out-of-range'
+export type RuleProblem = 'name-required' | 'points-not-a-whole-number' | 'points-zero'
 
 export const emptyRuleDraft: RuleDraft = {
-  type: 'binary',
   name: '',
   points: '',
-  scope: null,
-  episodeNumbers: '',
 }
 
 /**
- * Episode numbers from a comma-separated list.
+ * Points are whole numbers, and never zero.
  *
- * Deliberately not `.filter(Boolean)`, which the first version of this used:
- * that silently drops episode 0 *and* anything unparseable, so a typo became a
- * rule quietly scoped to fewer episodes than the admin listed. Anything that is
- * not a positive whole number is reported instead, by leaving NaN in the result
- * for the validator to catch.
+ * Matched against the whole string rather than handed to parseFloat, which
+ * reads "5 points" as 5 and would store a rule the admin never typed. Negative
+ * is allowed and deliberately so — a penalty is a rule like any other.
  */
-export function parseEpisodeNumbers(input: string): number[] {
-  return input
-    .split(',')
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-    .map((part) => (/^\d+$/.test(part) ? parseInt(part, 10) : NaN))
-}
+const WHOLE_NUMBER = /^-?\d+$/
 
 /** Why this draft is not yet a rule, or null when it is fine. */
-export function validateRuleDraft(draft: RuleDraft, episodeCount: number): RuleProblem | null {
+export function validateRuleDraft(draft: RuleDraft): RuleProblem | null {
   if (!draft.name.trim()) return 'name-required'
-  if (!Number.isFinite(parseFloat(draft.points))) return 'points-not-a-number'
-
-  if (draft.type === 'bonus_challenge') {
-    if (!draft.scope) return 'scope-required'
-    if (draft.scope === 'specific_episodes') {
-      const episodes = parseEpisodeNumbers(draft.episodeNumbers)
-      if (episodes.length === 0) return 'episodes-required'
-      if (episodes.some((n) => !Number.isFinite(n) || n < 1 || n > episodeCount)) {
-        return 'episodes-out-of-range'
-      }
-    }
-  }
+  const points = draft.points.trim()
+  if (!WHOLE_NUMBER.test(points)) return 'points-not-a-whole-number'
+  // Covers "0" and "-0". A rule worth nothing scores nothing, so it is a row in
+  // the scoring table that can only waste the admin's time every episode.
+  if (parseInt(points, 10) === 0) return 'points-zero'
   return null
 }
 
 /** The stored rule for a draft that has already been validated. */
 export function draftToRule(draft: RuleDraft): ScoringRuleDoc {
-  const scope = draft.type === 'bonus_challenge' ? draft.scope : null
   return {
-    type: draft.type,
+    type: 'binary',
     name: draft.name.trim(),
-    points: parseFloat(draft.points),
-    scope,
-    episodeNumbers:
-      scope === 'specific_episodes' ? parseEpisodeNumbers(draft.episodeNumbers) : null,
+    points: parseInt(draft.points.trim(), 10),
   }
 }
 
 /** A stored rule back into a draft, for editing it. */
 export function ruleToDraft(rule: ScoringRuleDoc): RuleDraft {
   return {
-    type: rule.type,
     name: rule.name,
     points: String(rule.points),
-    scope: rule.scope,
-    episodeNumbers: rule.episodeNumbers?.join(', ') ?? '',
   }
 }
 

@@ -134,17 +134,11 @@ export function EpisodeScoringPage() {
     (c) => c.eliminatedEpisode === null || c.eliminatedEpisode >= epNum
   )
 
-  // Rules applicable to this episode
-  const episodeRules = rules.filter((r) => {
-    if (r.type !== 'bonus_challenge') return true
-    if (r.scope === 'season_level') return false
-    if (r.scope === 'specific_episodes') {
-      return r.episodeNumbers?.includes(epNum) ?? false
-    }
-    return true // per_episode
-  })
+  // Every rule applies to every episode: a rule is a thing that either happened
+  // or did not, and there is no scope to narrow it any more.
+  const episodeRules = rules
 
-  function setScore(contestantId: string, ruleId: string, value: boolean | number | string) {
+  function setScore(contestantId: string, ruleId: string, value: boolean) {
     setScores((prev) => ({
       ...prev,
       [contestantId]: { ...(prev[contestantId] ?? {}), [ruleId]: value },
@@ -153,7 +147,7 @@ export function EpisodeScoringPage() {
 
   function calcTotalForContestant(contestantId: string): number {
     const entry = scores[contestantId] ?? {}
-    return episodeRules.reduce((sum, rule) => sum + evaluateRule(rule, entry, contestantId), 0)
+    return episodeRules.reduce((sum, rule) => sum + evaluateRule(rule, entry), 0)
   }
 
   async function handleSubmit() {
@@ -274,78 +268,22 @@ export function EpisodeScoringPage() {
                 <td className="py-3 pr-4 font-medium text-gray-900">{contestant.name}</td>
                 {episodeRules.map((rule) => {
                   const val = scores[contestant.id]?.[rule.id]
-                  if (rule.type === 'binary') {
-                    if (!canEdit) {
-                      return (
-                        <td key={rule.id} className="py-3 px-3 text-center">
-                          <ScoreMark
-                            on={val === true}
-                            label={`${rule.name} — ${contestant.name}`}
-                          />
-                        </td>
-                      )
-                    }
-                    return (
-                      <td key={rule.id} className="py-3 px-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={val === true}
-                          disabled={isLocked}
-                          onChange={(e) => setScore(contestant.id, rule.id, e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          aria-label={`${rule.name} for ${contestant.name}`}
-                        />
-                      </td>
-                    )
-                  }
-                  if (rule.type === 'numeric') {
-                    if (!canEdit) {
-                      return (
-                        <td key={rule.id} className="py-3 px-3 text-center text-gray-800">
-                          {typeof val === 'number' ? val : <span className="text-gray-300">—</span>}
-                        </td>
-                      )
-                    }
-                    return (
-                      <td key={rule.id} className="py-3 px-3">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.5}
-                          value={typeof val === 'number' ? val : ''}
-                          disabled={isLocked}
-                          onChange={(e) =>
-                            setScore(contestant.id, rule.id, parseFloat(e.target.value) || 0)
-                          }
-                          className="w-16 rounded border border-gray-300 px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
-                          aria-label={`${rule.name} for ${contestant.name}`}
-                        />
-                      </td>
-                    )
-                  }
-                  // bonus_challenge — dropdown of contestants
                   if (!canEdit) {
                     return (
                       <td key={rule.id} className="py-3 px-3 text-center">
-                        <ScoreMark
-                          on={val === contestant.id}
-                          label={`${rule.name} — ${contestant.name}`}
-                        />
+                        <ScoreMark on={val === true} label={`${rule.name} — ${contestant.name}`} />
                       </td>
                     )
                   }
                   return (
-                    <td key={rule.id} className="py-3 px-3">
+                    <td key={rule.id} className="py-3 px-3 text-center">
                       <input
                         type="checkbox"
-                        checked={val === contestant.id}
+                        checked={val === true}
                         disabled={isLocked}
-                        onChange={(e) =>
-                          setScore(contestant.id, rule.id, e.target.checked ? contestant.id : '')
-                        }
+                        onChange={(e) => setScore(contestant.id, rule.id, e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        aria-label={`${rule.name} — ${contestant.name}`}
+                        aria-label={`${rule.name} for ${contestant.name}`}
                       />
                     </td>
                   )

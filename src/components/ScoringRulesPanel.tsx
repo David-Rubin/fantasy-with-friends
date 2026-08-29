@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from './Button'
 import { Input } from './Input'
+import { InfoTooltip } from './InfoTooltip'
 import {
   emptyRuleDraft,
   ruleToDraft,
@@ -16,9 +17,10 @@ import { t } from '../lib/i18n'
  * The scoring rules for a season: what they are, and — until the first episode
  * is scored — the forms to change them.
  *
- * Editing only: it lives in the season's Edit dialog, and is rendered there
- * solely while the rules are still open to change. Once the first episode is
- * scored the dialog drops it entirely rather than showing dead forms.
+ * Editing only, and shown in one place at a time: the setup panel while the
+ * season is being set up, the season's Edit dialog after that. Either way it is
+ * rendered solely while the rules are still open to change; once the first
+ * episode is scored both drop it rather than showing dead forms.
  *
  * Everyone reads the rules elsewhere — ScoringRulesDisclosure on the season
  * page — which is why the read-only rendering of a rule lives in RuleSummary
@@ -31,68 +33,42 @@ import { t } from '../lib/i18n'
  * looking them up mid-season.
  */
 export function RuleSummary({ rule }: { rule: ScoringRule }) {
-  const typeKey = rule.type === 'bonus_challenge' ? 'bonusChallenge' : rule.type
-  const scopeKey =
-    rule.scope === 'per_episode'
-      ? 'perEpisode'
-      : rule.scope === 'specific_episodes'
-        ? 'specificEpisode'
-        : 'seasonLevel'
   return (
     <div className="text-sm text-gray-700">
       <span className="font-medium text-gray-900">{rule.name}</span>
       {' · '}
       {rule.points > 0 ? '+' : ''}
       {rule.points} {t('rules.pts')}
-      {' · '}
-      {t(`rules.type.${typeKey}`)}
-      {rule.scope && ` · ${t(`rules.scope.${scopeKey}`)}`}
-      {rule.episodeNumbers?.length ? ` (${rule.episodeNumbers.join(', ')})` : ''}
     </div>
   )
 }
 
 /** The stored shape of a rule, for the audit trail's "before" value. */
-function withoutId({ type, name, points, scope, episodeNumbers }: ScoringRule): ScoringRuleDoc {
-  return { type, name, points, scope, episodeNumbers }
+function withoutId({ type, name, points }: ScoringRule): ScoringRuleDoc {
+  return { type, name, points }
 }
 
 const problemKey: Record<RuleProblem, string> = {
   'name-required': 'rules.errors.nameRequired',
-  'points-not-a-number': 'rules.errors.pointsNotANumber',
-  'scope-required': 'rules.errors.scopeRequired',
-  'episodes-required': 'rules.errors.episodesRequired',
-  'episodes-out-of-range': 'rules.errors.episodesOutOfRange',
+  'points-not-a-whole-number': 'rules.errors.pointsNotAWholeNumber',
+  'points-zero': 'rules.errors.pointsZero',
 }
 
 interface ScoringRulesPanelProps {
   seasonId: string
   leagueId: string
   rules: ScoringRule[]
-  episodeCount: number
 }
 
 function RuleFields({
   draft,
   onChange,
-  episodeCount,
 }: {
   draft: RuleDraft
   onChange: (next: RuleDraft) => void
-  episodeCount: number
 }) {
   return (
     <>
-      <select
-        value={draft.type}
-        onChange={(e) => onChange({ ...draft, type: e.target.value as RuleDraft['type'] })}
-        className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        aria-label={t('rules.type')}
-      >
-        <option value="binary">{t('rules.type.binary')}</option>
-        <option value="numeric">{t('rules.type.numeric')}</option>
-        <option value="bonus_challenge">{t('rules.type.bonusChallenge')}</option>
-      </select>
       <Input
         label={t('rules.name')}
         value={draft.name}
@@ -102,45 +78,21 @@ function RuleFields({
       <Input
         label={t('rules.points')}
         type="number"
-        step="0.5"
+        step={1}
         value={draft.points}
         onChange={(e) => onChange({ ...draft, points: e.target.value })}
-        className="w-24"
+        // Important because the base style is `w-full`, which otherwise makes a
+        // field for "-2" as wide as the one for the rule's name.
+        className="!w-24"
+        labelAdornment={
+          <InfoTooltip text={t('rules.pointsHint')} label={t('rules.pointsHintLabel')} />
+        }
       />
-      {draft.type === 'bonus_challenge' && (
-        <select
-          value={draft.scope ?? ''}
-          onChange={(e) =>
-            onChange({ ...draft, scope: (e.target.value || null) as RuleDraft['scope'] })
-          }
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          aria-label={t('rules.scope')}
-        >
-          <option value="">{t('rules.scope.choose')}</option>
-          <option value="per_episode">{t('rules.scope.perEpisode')}</option>
-          <option value="specific_episodes">{t('rules.scope.specificEpisode')}</option>
-          <option value="season_level">{t('rules.scope.seasonLevel')}</option>
-        </select>
-      )}
-      {draft.type === 'bonus_challenge' && draft.scope === 'specific_episodes' && (
-        <Input
-          label={t('rules.episodeNumbers')}
-          value={draft.episodeNumbers}
-          onChange={(e) => onChange({ ...draft, episodeNumbers: e.target.value })}
-          placeholder={`1, 2 … ${episodeCount}`}
-          className="w-40"
-        />
-      )}
     </>
   )
 }
 
-export function ScoringRulesPanel({
-  seasonId,
-  leagueId,
-  rules,
-  episodeCount,
-}: ScoringRulesPanelProps) {
+export function ScoringRulesPanel({ seasonId, leagueId, rules }: ScoringRulesPanelProps) {
   const [addDraft, setAddDraft] = useState<RuleDraft>(emptyRuleDraft)
   const [adding, setAdding] = useState(false)
   const [addProblem, setAddProblem] = useState<RuleProblem | null>(null)
@@ -155,7 +107,7 @@ export function ScoringRulesPanel({
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
-    const problem = validateRuleDraft(addDraft, episodeCount)
+    const problem = validateRuleDraft(addDraft)
     setAddProblem(problem)
     if (problem) return
     setAdding(true)
@@ -164,14 +116,14 @@ export function ScoringRulesPanel({
       setAddDraft(emptyRuleDraft)
     } catch (error) {
       console.error('Failed to add scoring rule', error)
-      setAddProblem('points-not-a-number')
+      setAddProblem('points-not-a-whole-number')
     } finally {
       setAdding(false)
     }
   }
 
   async function handleSaveEdit(rule: ScoringRule) {
-    const problem = validateRuleDraft(editDraft, episodeCount)
+    const problem = validateRuleDraft(editDraft)
     setEditProblem(problem)
     if (problem) return
     setSavingEdit(true)
@@ -210,11 +162,7 @@ export function ScoringRulesPanel({
               {editingId === rule.id ? (
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-wrap items-end gap-2">
-                    <RuleFields
-                      draft={editDraft}
-                      onChange={setEditDraft}
-                      episodeCount={episodeCount}
-                    />
+                    <RuleFields draft={editDraft} onChange={setEditDraft} />
                     <div className="flex items-end gap-2">
                       <Button loading={savingEdit} onClick={() => handleSaveEdit(rule)}>
                         {t('common.save')}
@@ -281,7 +229,7 @@ export function ScoringRulesPanel({
 
       <form onSubmit={handleAdd} className="flex flex-col gap-2">
         <div className="flex flex-wrap items-end gap-2">
-          <RuleFields draft={addDraft} onChange={setAddDraft} episodeCount={episodeCount} />
+          <RuleFields draft={addDraft} onChange={setAddDraft} />
           <div className="flex items-end">
             <Button type="submit" loading={adding}>
               {t('rules.add')}

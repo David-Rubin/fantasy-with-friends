@@ -3,7 +3,7 @@ import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
 import { nextSlot, pickerAt, draftOutcome, openSlots, skipLimitReached } from './draft'
 import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
-import type { ScoringRule, ContestantScoreDoc, SeasonAwardDoc } from './scoring'
+import type { ContestantScoreDoc } from './scoring'
 
 admin.initializeApp()
 const db = admin.firestore()
@@ -1060,25 +1060,12 @@ export const onEpisodeScoreWritten = functions.firestore
     await recalcTeamTotals(seasonId)
   })
 
-export const onSeasonAwardWritten = functions.firestore
-  .document('seasons/{seasonId}/seasonAwards/{ruleId}')
-  .onWrite(async (_, context) => {
-    const { seasonId } = context.params
-    await recalcTeamTotals(seasonId)
-  })
-
 async function recalcTeamTotals(seasonId: string) {
   // Fetch all data needed for recalculation
-  const [membersSnap, rulesSnap, awardsSnap, episodeScoresSnap] = await Promise.all([
+  const [membersSnap, episodeScoresSnap] = await Promise.all([
     db.collection(`seasons/${seasonId}/members`).get(),
-    db.collection(`seasons/${seasonId}/scoringRules`).get(),
-    db.collection(`seasons/${seasonId}/seasonAwards`).get(),
     db.collection(`seasons/${seasonId}/episodeScores`).get(),
   ])
-
-  const rules = rulesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as ScoringRule[]
-  const awards = awardsSnap.docs.map((d) => d.data()) as SeasonAwardDoc[]
-  const awardRules = rules.filter((r) => r.type === 'bonus_challenge' && r.scope === 'season_level')
 
   // Fetch contestant scores for each episode
   const episodeDocs = await Promise.all(
@@ -1116,8 +1103,8 @@ async function recalcTeamTotals(seasonId: string) {
   for (const memberDoc of membersSnap.docs) {
     const uid = memberDoc.id
     const contestantIds = teamContestants[uid] ?? []
-    teamTotals[uid] = calcTeamTotal(contestantIds, episodeDocs, awards, awardRules)
-    teamEpisodeTotals[uid] = calcTeamEpisodeTotals(contestantIds, episodeDocs, awards, awardRules)
+    teamTotals[uid] = calcTeamTotal(contestantIds, episodeDocs)
+    teamEpisodeTotals[uid] = calcTeamEpisodeTotals(contestantIds, episodeDocs)
   }
 
   await db.doc(`seasons/${seasonId}`).update({ teamTotals, teamEpisodeTotals })

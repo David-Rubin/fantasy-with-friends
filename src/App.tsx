@@ -9,7 +9,6 @@ import { LeagueDetailPage } from './pages/LeagueDetailPage'
 import { SeasonDetailPage } from './pages/SeasonDetailPage'
 import { DraftRoomPage } from './pages/DraftRoomPage'
 import { EpisodeScoringPage } from './pages/EpisodeScoringPage'
-import { SeasonAwardsPage } from './pages/SeasonAwardsPage'
 import { AdminUsersPage } from './pages/AdminUsersPage'
 
 export default function App() {
@@ -58,14 +57,6 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <EpisodeScoringPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/leagues/:leagueId/seasons/:seasonId/awards"
-            element={
-              <ProtectedRoute>
-                <SeasonAwardsPage />
               </ProtectedRoute>
             }
           />

@@ -152,29 +152,14 @@ A single role that spans the whole app, separate from the per-league roles above
 
 **3.2.5 Define Scoring Rules**
 
-- Admins define a set of scoring rules per season. Three rule types are supported:
-
-  | Rule Type       | Description                                            | Example                           |
-  | --------------- | ------------------------------------------------------ | --------------------------------- |
-  | Binary event    | A named yes/no outcome worth a fixed point value       | "Star Baker" = +3 pts             |
-  | Numeric value   | Admin rates a contestant on a named scale each episode | "Performance score" 1–5 = raw pts |
-  | Bonus challenge | A named event awarding points to one contestant        | "Technical win" = +2 pts          |
-
+- Admins define a set of scoring rules per season. A rule is a named yes/no outcome worth a fixed point value — "Star Baker" = +3 pts. Each episode, the admin ticks the rules that applied to each contestant.
+- One rule type, deliberately. Numeric ratings and bonus challenges were specified here and cut before the MVP: each carried its own scoring input, its own scope and its own explanation, for leagues that only ever wanted to tick boxes.
 - Rules can have positive or negative point values.
-- **Editing lives in the season's Edit dialog**, alongside its label, episode count and accent colour, and appears there only while the rules are still open to change. Once the first episode is scored the dialog drops the section rather than showing forms that cannot be used.
-- **Reading is open to everyone.** The season page carries the rules in an expandable panel, collapsed by default, visible to every member of the season regardless of role — how points are earned is something a player checks mid-episode and otherwise ignores.
+- **Editing lives in one place at a time**: the Season Setup panel while the season is being set up, and the season's Edit dialog once the draft has opened. Either way it appears only while the rules are still open to change — once the first episode is scored both drop the section rather than showing forms that cannot be used.
+- **Reading opens once the draft is done.** From `active` onward the season page carries the rules in an expandable panel, collapsed by default, visible to every member of the season regardless of role — how points are earned is something a player checks mid-episode and otherwise ignores. Before that the rules are still being written, and a half-finished list read as settled is worse than none.
 - **Rules stay editable until the first episode is scored.** Admins can view, add, edit and remove scoring rules through setup, through the draft, and into an active season that has not been scored yet — a rule everyone agreed on but nobody wrote down is usually noticed late. Once any episode has been scored the rules are fixed: changing a point value afterwards would silently restate every score already recorded under the old value, and team totals are recomputed from these rules. After that point the rules remain readable to everyone on the season page, but nobody can change them.
 - The cutoff is enforced by a security rule, not only by the UI: writes to `scoringRules` require the season's `firstEpisodeScoredAt` to be unset.
-- **Bonus challenge scope**: Each bonus challenge rule has a configurable scope that determines when it applies:
-
-  | Scope            | Description                                                | Example                                   |
-  | ---------------- | ---------------------------------------------------------- | ----------------------------------------- |
-  | Per-episode      | Available to award every episode                           | "Technical win" each week                 |
-  | Specific episode | Applies only to one or more designated episode numbers     | "Bread Week Star Baker" on episode 4 only |
-  | Season-level     | Awarded once for the entire season, not tied to an episode | "Series winner" = +10 pts at season end   |
-
-- Season-level challenges are entered separately from the weekly episode scoring interface, in a dedicated "Season Awards" section.
-- Rules are locked once the season moves to `active` (to preserve score integrity). Admins can unlock and re-edit with a confirmation dialog.
+- Every rule applies to every episode. There is no per-rule scope: a rule either applied to a contestant that week or it did not.
 
 ---
 
@@ -251,12 +236,7 @@ A single role that spans the whole app, separate from the per-league roles above
 **3.4.1 Enter Episode Scores**
 
 - After each episode airs, an Admin opens the scoring interface for that episode number.
-- For each non-eliminated contestant, the Admin fills in values for each scoring rule scoped to that episode:
-  - Binary events: checkbox per contestant.
-  - Numeric values: number input per contestant.
-  - Per-episode bonus challenges: dropdown to select which contestant earned it.
-  - Specific-episode bonus challenges: shown only when the current episode number matches the rule's designated episode(s).
-- Season-level bonus challenges are entered separately in the "Season Awards" section and are not part of the weekly episode flow.
+- For each non-eliminated contestant, the Admin ticks the scoring rules that applied: one checkbox per rule per contestant. Every rule applies to every episode.
 - Once submitted, scores are locked. Admins can unlock and re-edit with a confirmation step.
 - Once the first episode's scores are submitted, all team names in the season are permanently locked.
 
@@ -269,7 +249,7 @@ A single role that spans the whole app, separate from the per-league roles above
 **3.4.3 Score Calculation**
 
 - The app automatically sums point contributions across all scoring rules for each contestant per episode.
-- Team score = sum of all points earned by all contestants on that team across all episodes and season-level awards to date.
+- Team score = sum of all points earned by all contestants on that team across all episodes to date.
 
 ---
 
@@ -287,7 +267,7 @@ A single role that spans the whole app, separate from the per-league roles above
 
 - **Draft format**: The draft engine is implemented behind an interface; snake draft is the default. Other formats (randomized, async, auction) can be added as alternative implementations without changing core data structures.
 - **Pick order methodology**: Stored as a typed enum on the season; new methods can be added without restructuring the draft session.
-- **Scoring rule types**: New rule types and scopes can be added by extending the rule type enum and the score-calculation function.
+- **Scoring rule types**: MVP ships a single yes/no rule type. New types can be added by extending the rule type enum and the score-calculation function.
 - **Show type**: Leagues are not GBBO-specific; the show and the scoring structure are fully parameterized.
 
 ---
@@ -305,7 +285,6 @@ A single role that spans the whole app, separate from the per-league roles above
 /leagues/:leagueId/seasons/:seasonId                        → Season detail
 /leagues/:leagueId/seasons/:seasonId/draft                  → Draft room
 /leagues/:leagueId/seasons/:seasonId/score/:episodeNumber   → Episode scoring (admin)
-/leagues/:leagueId/seasons/:seasonId/awards                 → Season awards (admin)
 /admin/users                                                → User directory (superadmin)
 ```
 
@@ -367,7 +346,7 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 1. Admin enters: season label, episode count. (The show comes from the league.)
 2. **Players**: every current league member is enrolled in the season automatically, as is anyone admitted to the league while the season is still in `setup`. There is no per-season invite.
 3. Admin adds contestants (name + optional photo + bio). Minimum 2 required to proceed to draft.
-4. Admin defines scoring rules (type, point value, scope). Minimum 1 required.
+4. Admin defines scoring rules (name + point value), in the Season Setup panel. Minimum 1 required.
 5. Admin configures draft settings:
    - Pick order methodology (Randomized default / Admin-set).
    - If Admin-set: a drag-to-reorder list of league members.
@@ -418,7 +397,6 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 - **Roster tab**: all contestants with owner name, status (active/eliminated), and cumulative points.
 - **Free Agents tab**: unowned contestants (Admin sees "Assign to team" action).
 - **Episodes tab**: list of episodes with scoring status (scored / not yet scored). Admin sees "Score Episode" and "Unlock" actions.
-- **Season Awards tab**: season-level bonus challenges, with "Award" action for Admin.
 
 ---
 
@@ -426,7 +404,7 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 
 1. Admin navigates to an unscored episode and clicks "Score Episode."
 2. A form lists each non-eliminated contestant as a row, with columns for each applicable scoring rule.
-3. Admin fills in values (checkboxes for binary, number inputs for numeric, contestant dropdowns for bonus challenges).
+3. Admin ticks the checkbox for each rule that applied to each contestant.
 4. Admin optionally marks one or more contestants as eliminated using a toggle in their row. A confirmation prompt appears: "Mark [name] as eliminated? They will not be eligible for future episode points."
 5. Admin clicks "Submit Scores." A summary preview is shown before final confirmation.
 6. On confirm: scores are saved, team totals recalculate, leaderboard updates in real time for all users.
@@ -680,27 +658,21 @@ Fantasy With Friends is built show-agnostic from day one. No GBBO-specific logic
 
 ### 8.4 Scoring Rule Types
 
-- Scoring rules are evaluated by a `RuleEvaluator` per rule type.
-- Current types: `binary`, `numeric`, `bonus_challenge`.
-- New rule types (e.g. team-level bonuses, multi-contestant events) are added by defining a new type enum value, a corresponding evaluator, and a form component for the scoring UI.
-- The score calculation pipeline iterates over all rules for a season and delegates to the appropriate evaluator — no changes needed to the pipeline itself when adding a type.
+- One type, `binary`: a named outcome that either applied to a contestant in an episode or did not, worth a fixed number of points when it did.
+- `ScoringRuleDoc.type` is kept as a field even with a single value, so a second type can be added without a migration of every stored rule.
+- A new type (e.g. a numeric rating, or a team-level bonus) means a new enum value, an evaluator branch in `evaluateRule`, and an input in the scoring UI. The rest of the pipeline iterates rules and sums what the evaluator returns, so it needs no change.
 
-### 8.5 Bonus Challenge Scope
-
-- Challenge scope (`per_episode`, `specific_episodes`, `season_level`) is a first-class field on every bonus challenge rule.
-- New scope types can be added (e.g. `per_round`, `finale_only`) by extending the scope enum and updating the scoring UI filter logic.
-
-### 8.6 Show / Season Configuration
+### 8.5 Show / Season Configuration
 
 - Shows and seasons are fully parameterized. There is no hardcoded reference to any specific show in the codebase.
 - The accent color system (Section 5.2) allows each show and season to have its own visual identity without code changes.
 - Future consideration: a "show template" feature could allow admins to save and reuse contestant structures and scoring rules across seasons of the same show.
 
-### 8.7 Auth Methods
+### 8.6 Auth Methods
 
 - The auth layer is abstracted so additional methods (user-provided passwords, OAuth providers) can be added alongside PIN auth without replacing it.
 
-### 8.8 What Is Not Extensible in MVP
+### 8.7 What Is Not Extensible in MVP
 
 - The database schema is Firebase/Firestore-specific. Migrating to a different backend would require a data layer rewrite.
 - The real-time draft sync is tightly coupled to Firestore `onSnapshot`. Swapping to WebSockets or another real-time provider is non-trivial.
@@ -746,7 +718,6 @@ The following actions are recorded with a timestamp and the acting user's ID:
 | Contestant marked eliminated       | Season ID, contestant ID, episode number, admin ID                 |
 | Draft pick made                    | Season ID, picker user ID, contestant ID, round                    |
 | Admin proxy pick                   | Season ID, acting admin ID, target member ID, pick                 |
-| Season Awards submitted/edited     | Season ID, admin user ID                                           |
 | Admin role granted/revoked         | League ID, granting user ID, target user ID                        |
 | Free agent assigned to team        | Season ID, admin user ID, contestant ID, team ID                   |
 | Team renamed                       | Season ID, user ID, old name, new name                             |
@@ -852,7 +823,6 @@ Lightweight and pragmatic for MVP. The goal is basic visibility into usage — n
   - Season setup (contestants + scoring rules + draft config)
   - Full draft session (picks, proxy pick, timer expiry)
   - Episode scoring and leaderboard update
-  - Season award submission
 - E2E tests run against a Firebase emulator suite (not production data).
 - Full coverage is not the goal — critical paths only.
 

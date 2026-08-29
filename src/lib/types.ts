@@ -33,8 +33,14 @@ export type TimerExpiry = 'auto-pick' | 'admin-picks' | 'skip'
  * from the bench, and must confirm before the draft closes.
  */
 export type DraftStatus = 'lobby' | 'active' | 'paused' | 'awaiting-close' | 'complete'
-export type ScoringRuleType = 'binary' | 'numeric' | 'bonus_challenge'
-export type BonusChallengeScope = 'per_episode' | 'specific_episodes' | 'season_level'
+/**
+ * One kind, deliberately. A rule names something that either happened to a
+ * contestant in an episode or did not, and pays its points when it did.
+ * Numeric and bonus-challenge rules existed alongside it and were dropped: each
+ * needed its own scoring input, its own scope, and its own explanation, for a
+ * league that only ever wanted to tick boxes.
+ */
+export type ScoringRuleType = 'binary'
 export type AccentColor =
   | 'violet'
   | 'purple'
@@ -168,8 +174,6 @@ export interface ScoringRuleDoc {
   type: ScoringRuleType
   name: string
   points: number
-  scope: BonusChallengeScope | null // only relevant for bonus_challenge type
-  episodeNumbers: number[] | null // only when scope = specific_episodes
 }
 
 export interface EpisodeScoreDoc {
@@ -178,19 +182,12 @@ export interface EpisodeScoreDoc {
   locked: boolean
 }
 
-// ruleId → value (boolean for binary, number for numeric, contestantId for bonus_challenge)
-export type ContestantScoreEntry = Record<string, boolean | number | string>
+// ruleId → whether that rule applied to this contestant in this episode
+export type ContestantScoreEntry = Record<string, boolean>
 
 export interface ContestantScoreDoc {
   scores: ContestantScoreEntry
   totalPoints: number
-}
-
-export interface SeasonAwardDoc {
-  ruleId: string
-  contestantId: string
-  awardedAt: number
-  awardedBy: string
 }
 
 export interface DraftDoc {

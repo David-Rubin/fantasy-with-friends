@@ -50,3 +50,28 @@ export function episodeCountProblem(
   if (episodeCount < highestScoredEpisode(scoredEpisodeNumbers)) return 'below-scored'
   return null
 }
+
+/**
+ * The bounds on a draft pick timer, in seconds.
+ *
+ * Five is the floor because a turn has to be long enough to read the board and
+ * click once; ten minutes is the ceiling because a draft everyone is sitting
+ * through has to keep moving. Exported so the input's min/max and the clamp
+ * below cannot drift apart.
+ */
+export const TIMER_SECONDS_MIN = 5
+export const TIMER_SECONDS_MAX = 600
+
+/**
+ * A pick timer brought inside its bounds.
+ *
+ * The min/max on a number input only bind the stepper and native form
+ * validation, and the setup panel's buttons are plain clicks rather than a
+ * submit — so a typed 9999 would otherwise be saved as written. Applied when
+ * the field loses focus, never mid-keystroke: clamping as you type turns the
+ * "1" on the way to "15" into a "5".
+ */
+export function clampTimerSeconds(seconds: number): number {
+  if (!Number.isFinite(seconds)) return TIMER_SECONDS_MIN
+  return Math.min(TIMER_SECONDS_MAX, Math.max(TIMER_SECONDS_MIN, Math.round(seconds)))
+}

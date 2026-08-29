@@ -8,7 +8,7 @@ import { t } from '../lib/i18n'
  * How points are earned is the thing a player checks mid-episode and otherwise
  * never thinks about, so it sits on the season page collapsed: present on every
  * screen, in the way on none of them. Read-only regardless of who is looking —
- * admins change the rules from the season's Edit dialog.
+ * admins change the rules from the setup panel or the season's Edit dialog.
  *
  * A native <details>, which gets the toggle, the keyboard behaviour and the
  * open/closed semantics without any state or ARIA of our own.
