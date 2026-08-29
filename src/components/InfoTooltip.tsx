@@ -1,40 +1,14 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useTooltipDisclosure } from '../lib/useTooltipDisclosure'
 
 /**
  * A note about a field, behind an info icon.
  *
- * Two ways in, tracked separately, because one state cannot serve both: a
- * pointer *peeks* — open while hovering, gone when it leaves — and a click
- * *pins*, so the tip survives the mouse moving away and touch has any way in at
- * all. Folding both into one flag made a click land on an already-open tip and
- * read as closing it.
- *
- * The bubble is absolutely positioned so opening it never moves the form.
+ * The bubble is absolutely positioned so opening it never moves the form. How
+ * it opens and closes lives in useTooltipDisclosure, shared with the bio
+ * tooltip on a contestant card.
  */
 export function InfoTooltip({ text, label }: { text: string; label: string }) {
-  const [pinned, setPinned] = useState(false)
-  const [peeking, setPeeking] = useState(false)
-  const open = pinned || peeking
-  const id = useId()
-  const wrapRef = useRef<HTMLSpanElement>(null)
-
-  // Escape closes it, and so does a click anywhere else — the same two ways out
-  // every other dismissible thing in a browser offers.
-  useEffect(() => {
-    if (!pinned) return
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setPinned(false)
-    }
-    function onPointerDown(e: PointerEvent) {
-      if (!wrapRef.current?.contains(e.target as Node)) setPinned(false)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      document.removeEventListener('pointerdown', onPointerDown)
-    }
-  }, [pinned])
+  const { open, id, wrapRef, triggerProps } = useTooltipDisclosure<HTMLSpanElement>()
 
   return (
     <span ref={wrapRef} className="relative inline-flex">
@@ -45,11 +19,7 @@ export function InfoTooltip({ text, label }: { text: string; label: string }) {
         aria-label={label}
         aria-expanded={open}
         aria-describedby={open ? id : undefined}
-        onClick={() => setPinned((p) => !p)}
-        onMouseEnter={() => setPeeking(true)}
-        onMouseLeave={() => setPeeking(false)}
-        onFocus={() => setPeeking(true)}
-        onBlur={() => setPeeking(false)}
+        {...triggerProps}
         className="inline-flex h-4 w-4 items-center justify-center rounded-full text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
       >
         <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className="h-4 w-4">

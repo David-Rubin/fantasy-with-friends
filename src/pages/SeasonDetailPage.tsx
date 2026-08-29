@@ -39,6 +39,13 @@ import {
   TIMER_SECONDS_MIN,
 } from '../lib/seasonDetails'
 import { updateSeasonDetails } from '../lib/seasonApi'
+import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
+import { ContestantCard } from '../components/ContestantCard'
+import {
+  ContestantFields,
+  emptyContestantForm,
+  type ContestantFormValues,
+} from '../components/ContestantFields'
 
 type Tab = 'leaderboard' | 'roster' | 'freeAgents' | 'episodes'
 
@@ -61,8 +68,15 @@ export function SeasonDetailPage() {
   const { leagueName, showName } = useTrailNames(leagueId)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
   // Setup form state
-  const [contestantForm, setContestantForm] = useState({ name: '', photoUrl: '', bio: '' })
+  const [contestantForm, setContestantForm] = useState<ContestantFormValues>(emptyContestantForm)
   const [addingContestant, setAddingContestant] = useState(false)
+  const [contestantError, setContestantError] = useState('')
+  // The contestant being edited, if any, alongside the form holding the edits.
+  const [editingContestantId, setEditingContestantId] = useState<string | null>(null)
+  const [editContestantForm, setEditContestantForm] =
+    useState<ContestantFormValues>(emptyContestantForm)
+  const [savingContestant, setSavingContestant] = useState(false)
+  const [editContestantError, setEditContestantError] = useState('')
   const [savingSetup, setSavingSetup] = useState(false)
   const [openingDraft, setOpeningDraft] = useState(false)
   const [assignFreeAgentOpen, setAssignFreeAgentOpen] = useState<string | null>(null)
@@ -181,12 +195,20 @@ export function SeasonDetailPage() {
   async function handleAddContestant(e: React.FormEvent) {
     e.preventDefault()
     if (!seasonId) return
+    // The textarea's maxLength stops typing past the limit, but not a value
+    // that only crosses it once the ends are trimmed, nor an old browser
+    // ignoring the attribute on paste.
+    if (bioProblem(contestantForm.bio)) {
+      setContestantError(t('contestant.errors.bioTooLong', { max: BIO_MAX_LENGTH }))
+      return
+    }
+    setContestantError('')
     setAddingContestant(true)
     try {
       await addDoc(collection(db, 'seasons', seasonId, 'contestants'), {
         name: contestantForm.name.trim(),
         photoUrl: contestantForm.photoUrl.trim(),
-        bio: contestantForm.bio.trim(),
+        bio: normaliseBio(contestantForm.bio),
         draftedByUid: null,
         draftedRound: null,
         eliminatedEpisode: null,
@@ -194,6 +216,40 @@ export function SeasonDetailPage() {
       setContestantForm({ name: '', photoUrl: '', bio: '' })
     } finally {
       setAddingContestant(false)
+    }
+  }
+
+  function openEditContestant(contestant: Contestant) {
+    setEditContestantError('')
+    setEditContestantForm({
+      name: contestant.name,
+      photoUrl: contestant.photoUrl,
+      bio: contestant.bio,
+    })
+    setEditingContestantId(contestant.id)
+  }
+
+  async function handleSaveContestant(e: React.FormEvent) {
+    e.preventDefault()
+    if (!seasonId || !editingContestantId) return
+    if (bioProblem(editContestantForm.bio)) {
+      setEditContestantError(t('contestant.errors.bioTooLong', { max: BIO_MAX_LENGTH }))
+      return
+    }
+    setEditContestantError('')
+    setSavingContestant(true)
+    try {
+      // Only the three fields the form owns. A contestant document also carries
+      // who drafted them and when they went out, and spreading the form over
+      // the document would take those with it.
+      await updateDoc(doc(db, 'seasons', seasonId, 'contestants', editingContestantId), {
+        name: editContestantForm.name.trim(),
+        photoUrl: editContestantForm.photoUrl.trim(),
+        bio: normaliseBio(editContestantForm.bio),
+      })
+      setEditingContestantId(null)
+    } finally {
+      setSavingContestant(false)
     }
   }
 
@@ -348,35 +404,28 @@ export function SeasonDetailPage() {
           <section className="mb-6">
             <h3 className="font-medium text-gray-700 mb-3">Contestants ({contestants.length})</h3>
             {contestants.length > 0 && (
-              <ul className="mb-3 flex flex-col gap-1">
+              // The same card the draft board uses, scaled down: the cast is
+              // checked over as a whole here, so the photo and the opening of
+              // the bio are what matter, not one line of text per name.
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
                 {contestants.map((c) => (
-                  <li key={c.id} className="flex items-center gap-2 text-sm text-gray-700">
-                    <span>{c.name}</span>
-                    {c.bio && <span className="text-gray-400">— {c.bio.slice(0, 40)}…</span>}
-                  </li>
+                  <ContestantCard
+                    key={c.id}
+                    contestant={c}
+                    compact
+                    onEdit={() => openEditContestant(c)}
+                  />
                 ))}
-              </ul>
+              </div>
             )}
-            <form onSubmit={handleAddContestant} className="flex flex-col sm:flex-row gap-2">
-              <Input
-                label={t('contestant.name')}
-                value={contestantForm.name}
-                onChange={(e) => setContestantForm((f) => ({ ...f, name: e.target.value }))}
-                required
-                className="flex-1"
-              />
-              <Input
-                label={t('contestant.photo')}
-                value={contestantForm.photoUrl}
-                onChange={(e) => setContestantForm((f) => ({ ...f, photoUrl: e.target.value }))}
-                placeholder="https://…"
-                className="flex-1"
-              />
-              <div className="flex items-end">
+            <form onSubmit={handleAddContestant} className="flex flex-col gap-2">
+              <ContestantFields values={contestantForm} onChange={setContestantForm} />
+              <div className="flex items-center justify-end gap-2">
                 <Button type="submit" loading={addingContestant} variant="secondary">
                   {t('contestant.add')}
                 </Button>
               </div>
+              {contestantError && <p className="text-sm text-red-600">{contestantError}</p>}
             </form>
           </section>
 
@@ -705,6 +754,36 @@ export function SeasonDetailPage() {
           )}
         </>
       )}
+
+      {/* Edit contestant */}
+      <Modal
+        open={!!editingContestantId}
+        onClose={() => setEditingContestantId(null)}
+        title={t('contestant.edit')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditingContestantId(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button form="edit-contestant-form" type="submit" loading={savingContestant}>
+              {t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="edit-contestant-form"
+          onSubmit={handleSaveContestant}
+          className="flex flex-col gap-2"
+        >
+          <ContestantFields
+            values={editContestantForm}
+            onChange={setEditContestantForm}
+            autoFocus
+          />
+          {editContestantError && <p className="text-sm text-red-600">{editContestantError}</p>}
+        </form>
+      </Modal>
 
       {/* Assign free agent modal */}
       {/* Edit season details */}
