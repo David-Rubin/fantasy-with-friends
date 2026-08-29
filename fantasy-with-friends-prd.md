@@ -159,7 +159,8 @@ A single role that spans the whole app, separate from the per-league roles above
 - **Reading opens once the draft is done.** From `active` onward the season page carries the rules in an expandable panel, collapsed by default, visible to every member of the season regardless of role — how points are earned is something a player checks mid-episode and otherwise ignores. Before that the rules are still being written, and a half-finished list read as settled is worse than none.
 - **Rules stay editable until the first episode is scored.** Admins can view, add, edit and remove scoring rules through setup, through the draft, and into an active season that has not been scored yet — a rule everyone agreed on but nobody wrote down is usually noticed late. Once any episode has been scored the rules are fixed: changing a point value afterwards would silently restate every score already recorded under the old value, and team totals are recomputed from these rules. After that point the rules remain readable to everyone on the season page, but nobody can change them.
 - The cutoff is enforced by a security rule, not only by the UI: writes to `scoringRules` require the season's `firstEpisodeScoredAt` to be unset.
-- Every rule applies to every episode. There is no per-rule scope: a rule either applied to a contestant that week or it did not.
+- **Each rule names the episodes it applies to.** A multi-select lists every episode in the season, with Select all and Deselect all; every episode is ticked by default. At least one is required — a rule scored nowhere cannot be saved. The rule appears as a column in the episode scoring table only for the episodes it names.
+- A rule covering the whole season is stored as "all episodes" rather than a frozen list, so raising the season's episode count extends it automatically. A partial selection is stored as written and stays as written. Rules created before this field existed are read as covering every episode.
 
 ---
 
@@ -236,7 +237,7 @@ A single role that spans the whole app, separate from the per-league roles above
 **3.4.1 Enter Episode Scores**
 
 - After each episode airs, an Admin opens the scoring interface for that episode number.
-- For each non-eliminated contestant, the Admin ticks the scoring rules that applied: one checkbox per rule per contestant. Every rule applies to every episode.
+- For each non-eliminated contestant, the Admin ticks the scoring rules that applied: one checkbox per rule per contestant. The columns are the rules that name this episode.
 - Once submitted, scores are locked. Admins can unlock and re-edit with a confirmation step.
 - Once the first episode's scores are submitted, all team names in the season are permanently locked.
 
@@ -346,7 +347,7 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 1. Admin enters: season label, episode count. (The show comes from the league.)
 2. **Players**: every current league member is enrolled in the season automatically, as is anyone admitted to the league while the season is still in `setup`. There is no per-season invite.
 3. Admin adds contestants (name + optional photo + bio). Minimum 2 required to proceed to draft.
-4. Admin defines scoring rules (name + point value), in the Season Setup panel. Minimum 1 required.
+4. Admin defines scoring rules (name + point value + the episodes they apply to), in the Season Setup panel. Minimum 1 required.
 5. Admin configures draft settings:
    - Pick order methodology (Randomized default / Admin-set).
    - If Admin-set: a drag-to-reorder list of league members.

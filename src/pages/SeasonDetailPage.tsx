@@ -386,7 +386,12 @@ export function SeasonDetailPage() {
               Unlike in the dialog there is no nested-form hazard, since nothing
               else in this panel is a form. */}
           <section className="mb-6">
-            <ScoringRulesPanel seasonId={seasonId!} leagueId={leagueId!} rules={rules} />
+            <ScoringRulesPanel
+              seasonId={seasonId!}
+              leagueId={leagueId!}
+              rules={rules}
+              episodeCount={season.episodeCount}
+            />
           </section>
 
           {/* Draft settings */}
@@ -758,7 +763,12 @@ export function SeasonDetailPage() {
             and everyone reads them from the season page instead. */}
         {season.state !== 'setup' && rulesAreEditable(season.firstEpisodeScoredAt) && (
           <div className="mt-6 border-t border-gray-200 pt-6">
-            <ScoringRulesPanel seasonId={seasonId!} leagueId={leagueId!} rules={rules} />
+            <ScoringRulesPanel
+              seasonId={seasonId!}
+              leagueId={leagueId!}
+              rules={rules}
+              episodeCount={season.episodeCount}
+            />
           </div>
         )}
       </Modal>

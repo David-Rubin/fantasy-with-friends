@@ -174,6 +174,19 @@ export interface ScoringRuleDoc {
   type: ScoringRuleType
   name: string
   points: number
+  /**
+   * The episodes this rule applies to, or `null` for all of them.
+   *
+   * `null` is not shorthand for "1..episodeCount frozen at save time" — it
+   * follows the season. A rule saved covering every episode of a five-episode
+   * season still covers every episode after the count goes to eight, which is
+   * what an admin who ticked them all meant. A partial selection is stored as
+   * written and stays as written.
+   *
+   * Optional because rules written before this field existed do not carry it;
+   * reads treat an absent value the same as `null`. See ruleCoversEpisode.
+   */
+  episodeNumbers?: number[] | null
 }
 
 export interface EpisodeScoreDoc {

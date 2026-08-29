@@ -22,6 +22,7 @@ import type {
   Contestant,
 } from '../lib/types'
 import { evaluateRule } from '../lib/scoring'
+import { ruleCoversEpisode } from '../lib/scoringRules'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
@@ -134,9 +135,9 @@ export function EpisodeScoringPage() {
     (c) => c.eliminatedEpisode === null || c.eliminatedEpisode >= epNum
   )
 
-  // Every rule applies to every episode: a rule is a thing that either happened
-  // or did not, and there is no scope to narrow it any more.
-  const episodeRules = rules
+  // Only the rules that name this episode — a rule scoped to the finale has no
+  // business as a column in week two.
+  const episodeRules = rules.filter((rule) => ruleCoversEpisode(rule, epNum))
 
   function setScore(contestantId: string, ruleId: string, value: boolean) {
     setScores((prev) => ({
