@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import { Layout } from '../components/Layout'
 import { adminUsersTrail } from '../lib/breadcrumbs'
 import { listAllUsers } from '../lib/adminApi'
+import { deleteUser, deletionErrorMessage } from '../lib/deleteApi'
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal'
+import { Button } from '../components/Button'
+import { useAuth } from '../contexts/AuthContext'
 import type { AppUser } from '../lib/types'
 import { t } from '../lib/i18n'
 
@@ -11,10 +15,38 @@ import { t } from '../lib/i18n'
  * the listAllUsers function, so reaching the URL without the role shows nothing.
  */
 export function AdminUsersPage() {
+  const { user: signedInUser } = useAuth()
   const [users, setUsers] = useState<AppUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleted, setDeleted] = useState('')
+
+  /**
+   * Drop the row rather than reloading the directory. listAllUsers writes an
+   * audit entry every time it is called, so re-fetching to learn something the
+   * call already told us would put a spurious "directory viewed" in the log
+   * after every deletion.
+   */
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await deleteUser({ uid: deleteTarget.uid })
+      setUsers((current) => current.filter((u) => u.uid !== deleteTarget.uid))
+      setDeleted(t('admin.users.deleted', { name: deleteTarget.displayName || deleteTarget.email }))
+      setDeleteTarget(null)
+    } catch (err) {
+      console.error('Could not delete the account', err)
+      setDeleteError(deletionErrorMessage(err, t('admin.users.deleteFailed')))
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   useEffect(() => {
     listAllUsers()
@@ -71,6 +103,15 @@ export function AdminUsersPage() {
         </p>
       )}
 
+      {deleted && (
+        <p
+          role="status"
+          className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-green-800"
+        >
+          {deleted}
+        </p>
+      )}
+
       {!loading && !error && shown.length === 0 && (
         <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
           <p className="text-gray-500">
@@ -93,6 +134,9 @@ export function AdminUsersPage() {
                 <th scope="col" className="px-5 py-3 font-semibold text-gray-700">
                   {t('admin.users.joined')}
                 </th>
+                <th scope="col" className="px-5 py-3 text-right font-semibold text-gray-700">
+                  {t('admin.users.actions')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -103,12 +147,48 @@ export function AdminUsersPage() {
                   <td className="px-5 py-3 text-gray-500 tabular-nums">
                     {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
                   </td>
+                  <td className="px-5 py-3 text-right">
+                    {/* Their own row has no button rather than a disabled one:
+                        deleting yourself is not a thing you are briefly unable
+                        to do, it is not on offer. The function refuses it too. */}
+                    {u.uid !== signedInUser?.uid && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setDeleteError('')
+                          setDeleted('')
+                          setDeleteTarget(u)
+                        }}
+                        className="!min-h-0 !px-3 !py-1 text-xs !text-red-700 hover:!bg-red-50"
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <ConfirmDeleteModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={t('admin.users.deleteTitle', {
+          name: deleteTarget?.displayName || deleteTarget?.email || '',
+        })}
+        // The display name is what the directory shows and what the dialog
+        // titles itself with, so that is what there is to read and retype. An
+        // account with no name falls back to the email, which is never empty.
+        name={deleteTarget?.displayName || deleteTarget?.email || ''}
+        consequences={[t('admin.users.deleteAccount'), t('admin.users.deleteMemberships')]}
+        note={t('admin.users.deleteKeeps')}
+        confirmLabel={t('admin.users.delete')}
+        busy={deleting}
+        error={deleteError}
+        onConfirm={handleDelete}
+      />
     </Layout>
   )
 }

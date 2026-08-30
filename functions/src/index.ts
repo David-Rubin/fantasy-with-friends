@@ -3,6 +3,7 @@ import * as functions from 'firebase-functions/v1'
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
 import { nextSlot, pickerAt, draftOutcome, openSlots, skipLimitReached } from './draft'
 import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
+import { userDeletionProblem, userDeletionMessage } from './deletion'
 import type { ContestantScoreDoc } from './scoring'
 
 admin.initializeApp()
@@ -1037,6 +1038,262 @@ export const listAllUsers = functions.https.onCall(
     })
 
     return { users }
+  }
+)
+
+// ── Deletion ──────────────────────────────────────────────────────────────────
+
+/**
+ * Deleting a user, a league or a season.
+ *
+ * All three are callables, with the client's own delete path closed in the
+ * rules, because none of this can be expressed as a security rule. Each target
+ * is a document *tree*, not a document: a season carries members, contestants,
+ * scoring rules, episode scores and a draft with its picks, and a league
+ * carries every season under it. Rules cannot delete what they cannot
+ * enumerate, and the guards — which leagues does this user own, is any of
+ * their seasons underway — are queries across collections.
+ *
+ * Doing the cascade from the client was the other option and is worse: it is a
+ * few hundred writes with no transaction around them, so the first closed tab
+ * or dropped connection leaves a half-deleted tree that nothing will ever
+ * finish. recursiveDelete runs server-side and resumes on retry.
+ */
+
+/** Both delete paths accept the league's owner or any superadmin. */
+async function assertLeagueOwnerOrSuperadmin(leagueId: string, uid: string, action: string) {
+  const leagueSnap = await db.doc(`leagues/${leagueId}`).get()
+  if (!leagueSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'League not found')
+  }
+  if (leagueSnap.data()?.ownerId !== uid && !(await isSuperadmin(uid))) {
+    throw new functions.https.HttpsError('permission-denied', action)
+  }
+  return leagueSnap
+}
+
+/**
+ * Delete a league and everything under it.
+ *
+ * The owner or a superadmin, deliberately not a league admin: an admin runs a
+ * league day to day, and destroying one stays with the person whose league it
+ * is. That matches removeLeagueMember, which is owner-only for the same reason.
+ */
+export const deleteLeague = functions.https.onCall(
+  async (
+    data: { leagueId: string },
+    context
+  ): Promise<{ seasonsDeleted: number; membersDeleted: number }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const { leagueId } = data
+    if (!leagueId) {
+      throw new functions.https.HttpsError('invalid-argument', 'leagueId is required')
+    }
+
+    const actingUid = context.auth.uid
+    const leagueSnap = await assertLeagueOwnerOrSuperadmin(
+      leagueId,
+      actingUid,
+      'Only the league owner can delete a league'
+    )
+
+    const seasonsSnap = await db.collection('seasons').where('leagueId', '==', leagueId).get()
+    const membersSnap = await db.collection(`leagues/${leagueId}/members`).get()
+
+    // Seasons live in a top-level collection keyed by leagueId rather than
+    // under the league, so deleting the league document does not reach them.
+    for (const season of seasonsSnap.docs) {
+      await db.recursiveDelete(season.ref)
+    }
+    // Takes the members and joinRequests subcollections with it.
+    await db.recursiveDelete(db.doc(`leagues/${leagueId}`))
+
+    await db.collection('auditLogs').add({
+      action: 'league_deleted',
+      actorUid: actingUid,
+      leagueId,
+      oldValue: {
+        name: leagueSnap.data()?.name ?? '',
+        showName: leagueSnap.data()?.showName ?? '',
+        seasonIds: seasonsSnap.docs.map((d) => d.id),
+        memberCount: membersSnap.size,
+      },
+      timestamp: Date.now(),
+    })
+
+    return { seasonsDeleted: seasonsSnap.size, membersDeleted: membersSnap.size }
+  }
+)
+
+/**
+ * Delete one season and everything under it.
+ *
+ * Any admin of the owning league, which is what isSeasonAdmin means in the
+ * rules — a season has no separate admin list of its own. Wider than
+ * deleteLeague on purpose: a season is the unit an admin is expected to manage,
+ * and a botched setup is exactly the thing they need to be able to throw away.
+ */
+export const deleteSeason = functions.https.onCall(
+  async (data: { seasonId: string }, context): Promise<{ leagueId: string }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const { seasonId } = data
+    if (!seasonId) {
+      throw new functions.https.HttpsError('invalid-argument', 'seasonId is required')
+    }
+
+    const actingUid = context.auth.uid
+    const seasonSnap = await db.doc(`seasons/${seasonId}`).get()
+    if (!seasonSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Season not found')
+    }
+    const leagueId = seasonSnap.data()?.leagueId as string
+
+    const memberSnap = await db.doc(`leagues/${leagueId}/members/${actingUid}`).get()
+    const role = memberSnap.data()?.role
+    if (role !== 'owner' && role !== 'admin' && !(await isSuperadmin(actingUid))) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only a league admin can delete a season'
+      )
+    }
+
+    await db.recursiveDelete(db.doc(`seasons/${seasonId}`))
+
+    await db.collection('auditLogs').add({
+      action: 'season_deleted',
+      actorUid: actingUid,
+      leagueId,
+      seasonId,
+      oldValue: {
+        label: seasonSnap.data()?.label ?? '',
+        state: seasonSnap.data()?.state ?? '',
+      },
+      timestamp: Date.now(),
+    })
+
+    return { leagueId }
+  }
+)
+
+/**
+ * Delete a user account.
+ *
+ * Superadmins only, and refused outright in the three cases userDeletionProblem
+ * describes — see that function for why each one blocks.
+ *
+ * What survives is their membership of *completed* seasons. Those documents
+ * carry a denormalised displayName, so a finished leaderboard still reads
+ * correctly with the account gone. Erasing them instead would rewrite a
+ * standing other people played for, which is the same reason removeLeagueMember
+ * leaves completed seasons alone.
+ */
+export const deleteUser = functions.https.onCall(
+  async (
+    data: { uid: string },
+    context
+  ): Promise<{ leaguesLeft: number; seasonsLeft: number; seasonsKept: number }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const actingUid = context.auth.uid
+    if (!(await isSuperadmin(actingUid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Superadmins only')
+    }
+
+    const { uid } = data
+    if (!uid) {
+      throw new functions.https.HttpsError('invalid-argument', 'uid is required')
+    }
+
+    const userSnap = await db.doc(`users/${uid}`).get()
+    if (!userSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'User not found')
+    }
+
+    const ownedSnap = await db.collection('leagues').where('ownerId', '==', uid).get()
+
+    // One collection-group query finds every membership document this user has,
+    // league and season alike — both denormalise `uid` for exactly this kind of
+    // lookup. They are told apart by the collection their grandparent sits in.
+    const membershipSnap = await db.collectionGroup('members').where('uid', '==', uid).get()
+    const leagueMemberDocs = membershipSnap.docs.filter(
+      (d) => d.ref.parent.parent?.parent.id === 'leagues'
+    )
+    const seasonMemberDocs = membershipSnap.docs.filter(
+      (d) => d.ref.parent.parent?.parent.id === 'seasons'
+    )
+
+    const seasons = await Promise.all(
+      seasonMemberDocs.map(async (d): Promise<MemberSeason> => {
+        const seasonRef = d.ref.parent.parent!
+        const season = (await seasonRef.get()).data()
+        return {
+          id: seasonRef.id,
+          state: season?.state,
+          label: (season?.label as string) ?? seasonRef.id,
+        }
+      })
+    )
+
+    const problem = userDeletionProblem({
+      isSelf: uid === actingUid,
+      ownedLeagues: ownedSnap.docs.map((d) => ({
+        id: d.id,
+        name: (d.data().name as string) ?? d.id,
+      })),
+      seasons,
+    })
+    if (problem) {
+      throw new functions.https.HttpsError('failed-precondition', userDeletionMessage(problem))
+    }
+
+    const plan = planRemoval(seasons)
+
+    const batch = db.batch()
+    for (const d of leagueMemberDocs) batch.delete(d.ref)
+    for (const season of plan.leaving) {
+      batch.delete(db.doc(`seasons/${season.id}/members/${uid}`))
+    }
+    for (const league of leagueMemberDocs) {
+      const leagueId = league.ref.parent.parent!.id
+      batch.delete(db.doc(`leagues/${leagueId}/joinRequests/${uid}`))
+    }
+    batch.delete(db.doc(`superadmins/${uid}`))
+    batch.delete(db.doc(`users/${uid}`))
+    await batch.commit()
+
+    // Last, and tolerant of being already gone: an account with no auth record
+    // but a user document is exactly the state this call exists to clean up, so
+    // a missing record must not fail the whole deletion.
+    try {
+      await admin.auth().deleteUser(uid)
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'auth/user-not-found') throw err
+    }
+
+    await db.collection('auditLogs').add({
+      action: 'user_deleted',
+      actorUid: actingUid,
+      targetUid: uid,
+      oldValue: {
+        displayName: userSnap.data()?.displayName ?? '',
+        email: userSnap.data()?.email ?? '',
+        leaguesLeft: leagueMemberDocs.map((d) => d.ref.parent.parent!.id),
+        seasonsLeft: plan.leaving.map((s) => s.id),
+        seasonsKept: plan.keeping.map((s) => s.id),
+      },
+      timestamp: Date.now(),
+    })
+
+    return {
+      leaguesLeft: leagueMemberDocs.length,
+      seasonsLeft: plan.leaving.length,
+      seasonsKept: plan.keeping.length,
+    }
   }
 )
 
