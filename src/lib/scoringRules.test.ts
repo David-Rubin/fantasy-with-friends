@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   allEpisodeNumbers,
+  diffRuleSets,
+  fingerprintOf,
+  rulesFingerprint,
   validateRuleDraft,
   draftToRule,
   ruleCoversEpisode,
   ruleToDraft,
-  rulesAreEditable,
   emptyRuleDraft,
   type RuleDraft,
 } from './scoringRules'
@@ -168,13 +170,102 @@ describe('ruleCoversEpisode', () => {
   })
 })
 
-describe('rulesAreEditable', () => {
-  it('is open until an episode has been scored', () => {
-    expect(rulesAreEditable(null)).toBe(true)
-    expect(rulesAreEditable(undefined)).toBe(true)
+const rule = (id: string, points: number, episodeNumbers: number[] | null = null) => ({
+  id,
+  type: 'binary' as const,
+  name: `Rule ${id}`,
+  points,
+  episodeNumbers,
+})
+
+describe('rulesFingerprint', () => {
+  it('is stable however the rules are ordered', () => {
+    const a = [rule('r1', 3), rule('r2', 5)]
+    const b = [rule('r2', 5), rule('r1', 3)]
+    expect(rulesFingerprint(a, 1)).toBe(rulesFingerprint(b, 1))
   })
 
-  it('closes once the first episode is scored', () => {
-    expect(rulesAreEditable(1735689600000)).toBe(false)
+  it('changes when a point value changes', () => {
+    expect(rulesFingerprint([rule('r1', 3)], 1)).not.toBe(rulesFingerprint([rule('r1', 4)], 1))
+  })
+
+  it('does not change when a rule is only renamed', () => {
+    // A name is what the column says, not what it is worth.
+    const renamed = { ...rule('r1', 3), name: 'Something else' }
+    expect(rulesFingerprint([renamed], 1)).toBe(rulesFingerprint([rule('r1', 3)], 1))
+  })
+
+  it('changes when a rule stops covering the episode', () => {
+    expect(rulesFingerprint([rule('r1', 3, [1, 2])], 1)).not.toBe(
+      rulesFingerprint([rule('r1', 3, [2])], 1)
+    )
+  })
+
+  it('ignores rules that never covered the episode', () => {
+    const withFinaleRule = [rule('r1', 3), rule('r2', 9, [10])]
+    expect(rulesFingerprint(withFinaleRule, 1)).toBe(rulesFingerprint([rule('r1', 3)], 1))
+  })
+
+  it('changes when a rule is added or removed', () => {
+    const one = rulesFingerprint([rule('r1', 3)], 1)
+    expect(rulesFingerprint([rule('r1', 3), rule('r2', 1)], 1)).not.toBe(one)
+    expect(rulesFingerprint([], 1)).not.toBe(one)
+  })
+})
+
+describe('diffRuleSets', () => {
+  const original = [rule('r1', 3), rule('r2', 5)]
+
+  it('finds nothing to write when nothing changed', () => {
+    const d = diffRuleSets(original, [...original])
+    expect(d).toEqual({ added: [], updated: [], deleted: [] })
+  })
+
+  it('treats a rule with no id as new', () => {
+    const d = diffRuleSets(original, [...original, { type: 'binary', name: 'New', points: 2 }])
+    expect(d.added).toEqual([{ type: 'binary', name: 'New', points: 2 }])
+    expect(d.updated).toHaveLength(0)
+    expect(d.deleted).toHaveLength(0)
+  })
+
+  it('finds a changed point value', () => {
+    const d = diffRuleSets(original, [{ ...rule('r1', 8) }, rule('r2', 5)])
+    expect(d.updated.map((r) => [r.id, r.points])).toEqual([['r1', 8]])
+  })
+
+  it('finds a changed episode selection', () => {
+    const d = diffRuleSets(original, [rule('r1', 3, [2]), rule('r2', 5)])
+    expect(d.updated.map((r) => r.id)).toEqual(['r1'])
+  })
+
+  it('finds a rule that is gone', () => {
+    const d = diffRuleSets(original, [rule('r1', 3)])
+    expect(d.deleted.map((r) => r.id)).toEqual(['r2'])
+  })
+
+  it('never writes a rule added and removed before saving', () => {
+    // It has no id, so there is no document to create or delete.
+    const d = diffRuleSets(original, [...original])
+    expect(d.added).toHaveLength(0)
+    expect(d.deleted).toHaveLength(0)
+  })
+})
+
+describe('fingerprintOf', () => {
+  it('matches rulesFingerprint for the same set', () => {
+    // A stored snapshot carries no episode numbers, having already been
+    // narrowed to one episode — the two must still agree.
+    const live = [rule('r1', 3), rule('r2', 5, [1])]
+    const snapshot = [
+      { id: 'r1', name: 'Rule r1', points: 3 },
+      { id: 'r2', name: 'Rule r2', points: 5 },
+    ]
+    expect(fingerprintOf(snapshot)).toBe(rulesFingerprint(live, 1))
+  })
+
+  it('ignores a rename, and notices a new point value', () => {
+    const base = [{ id: 'r1', name: 'Original', points: 3 }]
+    expect(fingerprintOf([{ id: 'r1', name: 'Renamed', points: 3 }])).toBe(fingerprintOf(base))
+    expect(fingerprintOf([{ id: 'r1', name: 'Original', points: 4 }])).not.toBe(fingerprintOf(base))
   })
 })

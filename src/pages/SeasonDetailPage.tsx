@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { doc, getDoc, collection, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery, guarded } from '../lib/listen'
@@ -30,8 +30,7 @@ import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { ScoringRulesPanel } from '../components/ScoringRulesPanel'
-import { ScoringRulesDisclosure } from '../components/ScoringRulesDisclosure'
-import { rulesAreEditable } from '../lib/scoringRules'
+import { ScoringRulesCard } from '../components/ScoringRulesCard'
 import {
   clampTimerSeconds,
   episodeCountProblem,
@@ -49,7 +48,8 @@ import {
   type ContestantFormValues,
 } from '../components/ContestantFields'
 
-type Tab = 'leaderboard' | 'roster' | 'freeAgents' | 'episodes'
+const TABS = ['leaderboard', 'roster', 'freeAgents', 'episodes'] as const
+type Tab = (typeof TABS)[number]
 
 interface MemberDoc extends SeasonMemberDoc {
   uid: string
@@ -60,7 +60,14 @@ export function SeasonDetailPage() {
   const { leagueId, seasonId } = useParams<{ leagueId: string; seasonId: string }>()
   const { user, isSuperadmin } = useAuth()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<Tab>('leaderboard')
+  // In the URL rather than component state, so a breadcrumb or a shared link
+  // can open the page on the tab it means. An unknown or absent value falls
+  // back to the leaderboard rather than showing nothing.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'leaderboard'
+  const setTab = (next: Tab) =>
+    setSearchParams(next === 'leaderboard' ? {} : { tab: next }, { replace: true })
   const [season, setSeason] = useState<(SeasonDoc & { id: string }) | null>(null)
   const [members, setMembers] = useState<MemberDoc[]>([])
   const [contestants, setContestants] = useState<Contestant[]>([])
@@ -587,7 +594,15 @@ export function SeasonDetailPage() {
       {/* Only once the draft has closed. Before that the rules are still being
           written, and a half-finished list read as settled is worse than none;
           the admin has the editable panel above instead. */}
-      {['active', 'complete'].includes(season.state) && <ScoringRulesDisclosure rules={rules} />}
+      {['active', 'complete'].includes(season.state) && (
+        <ScoringRulesCard
+          seasonId={seasonId!}
+          leagueId={leagueId!}
+          rules={rules}
+          episodeCount={season.episodeCount}
+          canEdit={isAdmin}
+        />
+      )}
 
       {/* A member who arrives before the season is ready — from a bookmark, or
           a link shared before the draft opened. The admin panel above is not
@@ -874,27 +889,6 @@ export function SeasonDetailPage() {
           />
           {editError && <p className="text-sm text-red-600">{editError}</p>}
         </form>
-
-        {/* A sibling of the form above, not a child: this panel has its own
-            form for adding a rule, and nested forms are not valid markup.
-            Its edits save as they are made — the footer's Save applies to the
-            season details only.
-
-            Absent during setup, where the editor lives on the setup panel
-            instead — one place to edit rules at a time, never two.
-
-            Gone once the first episode is scored: the rules are settled then,
-            and everyone reads them from the season page instead. */}
-        {season.state !== 'setup' && rulesAreEditable(season.firstEpisodeScoredAt) && (
-          <div className="mt-6 border-t border-gray-200 pt-6">
-            <ScoringRulesPanel
-              seasonId={seasonId!}
-              leagueId={leagueId!}
-              rules={rules}
-              episodeCount={season.episodeCount}
-            />
-          </div>
-        )}
       </Modal>
 
       <Modal

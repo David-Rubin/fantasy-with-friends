@@ -111,17 +111,80 @@ export function ruleToDraft(rule: ScoringRuleDoc, episodeCount: number): RuleDra
 }
 
 /**
- * Whether the scoring rules may still be changed.
+ * A working copy of one rule while an admin edits the set.
  *
- * The cutoff is the first episode being scored, not the season's state: rules
- * stay editable through setup, the draft, and a season that has started but has
- * no scores yet. Once any episode is scored, changing a point value would
- * silently restate every score already recorded under the old one, so the rules
- * are fixed for the rest of the season.
- *
- * The security rules enforce the same thing — this is what the UI reads to know
- * whether to offer the forms at all.
+ * `id` is absent on a rule that has not been written yet — the editor holds
+ * every change locally until Save, so a new rule has no document to name.
  */
-export function rulesAreEditable(firstEpisodeScoredAt: number | null | undefined): boolean {
-  return !firstEpisodeScoredAt
+export type EditableRule = ScoringRuleDoc & { id?: string }
+
+/**
+ * The scoring-relevant identity of the rules that apply to one episode.
+ *
+ * Only what changes a score goes in: which rules cover the episode and what
+ * each is worth. A rule renamed, or one whose episodes changed so it no longer
+ * covers this one, both land correctly — the first is not a scoring change and
+ * leaves the fingerprint alone, the second drops out of it.
+ *
+ * Stored on an episode when its scores are submitted, then compared against the
+ * live rules to tell whether that episode's recorded totals still reflect them.
+ */
+export function rulesFingerprint(
+  rules: Array<Pick<ScoringRuleDoc, 'points' | 'episodeNumbers'> & { id: string }>,
+  episodeNumber: number
+): string {
+  return fingerprintOf(rules.filter((r) => ruleCoversEpisode(r, episodeNumber)))
+}
+
+/**
+ * The same identity, for a set already narrowed to one episode — a stored
+ * snapshot, say, which carries no episode numbers because every rule in it
+ * covered the episode by definition.
+ */
+export function fingerprintOf(rules: Array<{ id: string; points: number }>): string {
+  return rules
+    .map((r) => `${r.id}:${r.points}`)
+    .sort()
+    .join('|')
+}
+
+/**
+ * What has to be written to turn the stored rules into the edited ones.
+ *
+ * Deletions are worked out from the original set rather than tracked as the
+ * admin clicks, so a rule added and then removed before saving never reaches
+ * Firestore at all.
+ */
+export function diffRuleSets(
+  original: Array<ScoringRuleDoc & { id: string }>,
+  edited: EditableRule[]
+): {
+  added: ScoringRuleDoc[]
+  updated: Array<ScoringRuleDoc & { id: string }>
+  deleted: Array<ScoringRuleDoc & { id: string }>
+} {
+  const keptIds = new Set(edited.map((r) => r.id).filter(Boolean))
+  const byId = new Map(original.map((r) => [r.id, r]))
+  const same = (a: ScoringRuleDoc, b: ScoringRuleDoc) =>
+    a.name === b.name &&
+    a.points === b.points &&
+    a.type === b.type &&
+    JSON.stringify(a.episodeNumbers ?? null) === JSON.stringify(b.episodeNumbers ?? null)
+
+  const added: ScoringRuleDoc[] = []
+  const updated: Array<ScoringRuleDoc & { id: string }> = []
+  for (const rule of edited) {
+    const { id, ...doc } = rule
+    if (!id) {
+      added.push(doc)
+      continue
+    }
+    const before = byId.get(id)
+    if (before && !same(before, doc)) updated.push({ id, ...doc })
+  }
+  return {
+    added,
+    updated,
+    deleted: original.filter((r) => !keptIds.has(r.id)),
+  }
 }

@@ -71,7 +71,7 @@ interface ScoringRulesPanelProps {
   episodeCount: number
 }
 
-function RuleFields({
+export function RuleFields({
   draft,
   onChange,
   episodeNumbers,

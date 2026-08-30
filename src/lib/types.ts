@@ -193,6 +193,31 @@ export interface EpisodeScoreDoc {
   submittedAt: number
   submittedBy: string
   locked: boolean
+  /**
+   * The rules as they stood when these scores were submitted — enough to draw
+   * the table again exactly as it was, not merely to notice it has changed.
+   *
+   * A scored episode is a record. Its columns, their point values and the
+   * totals beside them have to keep saying what was actually recorded, however
+   * the season's rules move afterwards. Rendering a locked episode from the
+   * live rules showed a column worth one thing and a stored total worked out
+   * from another.
+   *
+   * Only the rules that covered this episode are kept, which is precisely the
+   * set the table draws.
+   *
+   * Optional: episodes submitted before this field existed have no snapshot,
+   * and fall back to the live rules — the stored totals are still shown as
+   * recorded, but the column headings cannot be recovered.
+   */
+  appliedRules?: AppliedRule[]
+}
+
+/** One rule, frozen as it applied to an episode. See EpisodeScoreDoc.appliedRules. */
+export interface AppliedRule {
+  id: string
+  name: string
+  points: number
 }
 
 // ruleId → whether that rule applied to this contestant in this episode
