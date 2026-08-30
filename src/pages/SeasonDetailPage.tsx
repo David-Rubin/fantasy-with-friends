@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { doc, getDoc, collection, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -42,6 +42,15 @@ import { updateSeasonDetails } from '../lib/seasonApi'
 import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
 import { ContestantCard } from '../components/ContestantCard'
+import { ContestantAvatar } from '../components/ContestantAvatar'
+import {
+  DEFAULT_ROSTER_SORT,
+  nextRosterSort,
+  ROSTER_COLUMNS,
+  sortRosterRows,
+  type RosterColumn,
+  type RosterSort,
+} from '../lib/roster'
 import {
   ContestantFields,
   emptyContestantForm,
@@ -54,6 +63,57 @@ type Tab = (typeof TABS)[number]
 interface MemberDoc extends SeasonMemberDoc {
   uid: string
   displayName: string
+}
+
+/**
+ * A roster column heading that sorts the table.
+ *
+ * The whole heading is the button, not an icon beside it: a header that sorts
+ * on click has to look clickable across its whole width, or half the clicks
+ * land on dead space next to the word.
+ *
+ * `aria-sort` on the cell is what tells a screen reader the table is ordered
+ * and by which column; the arrow says the same thing to everyone else, and the
+ * button's own label says which way the next click will take it.
+ */
+function RosterHeader({
+  column,
+  label,
+  sort,
+  onSort,
+}: {
+  column: RosterColumn
+  label: string
+  sort: RosterSort
+  onSort: (column: RosterColumn) => void
+}) {
+  const active = sort.column === column
+  const ascending = active && sort.direction === 'asc'
+  const nextDirection = nextRosterSort(sort, column).direction
+
+  return (
+    <th
+      className="pb-3 font-medium"
+      aria-sort={active ? (ascending ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        aria-label={t(
+          nextDirection === 'asc' ? 'season.roster.sortAscending' : 'season.roster.sortDescending',
+          { column: label }
+        )}
+        className="flex items-center gap-1 rounded text-left hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
+        {label}
+        {/* Held open at a fixed width whether or not this column is the sorted
+            one, so the headings do not jump sideways as the sort moves. */}
+        <span aria-hidden="true" className="w-3 text-xs">
+          {active ? (ascending ? '\u25b2' : '\u25bc') : ''}
+        </span>
+      </button>
+    </th>
+  )
 }
 
 export function SeasonDetailPage() {
@@ -71,6 +131,7 @@ export function SeasonDetailPage() {
   const [season, setSeason] = useState<(SeasonDoc & { id: string }) | null>(null)
   const [members, setMembers] = useState<MemberDoc[]>([])
   const [contestants, setContestants] = useState<Contestant[]>([])
+  const [rosterSort, setRosterSort] = useState<RosterSort>(DEFAULT_ROSTER_SORT)
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
@@ -338,6 +399,25 @@ export function SeasonDetailPage() {
   const canOpenDraft = contestants.length >= 2 && rules.length >= 1
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
   const memberUidMap = Object.fromEntries(members.map((m) => [m.uid, m]))
+  // The roster's rows, resolved to the text each cell shows before they are
+  // sorted — see sortRosterRows for why the sort works on that text and not on
+  // the contestant documents behind it.
+  const rosterRows = useMemo(() => {
+    const rows = contestants.map((c) => ({
+      id: c.id,
+      photoUrl: c.photoUrl,
+      eliminated: c.eliminatedEpisode !== null,
+      contestant: c.name,
+      owner: c.draftedByUid
+        ? (memberUidMap[c.draftedByUid]?.displayName ?? '\u2014')
+        : t('contestant.freeAgent'),
+      status: c.eliminatedEpisode !== null ? t('contestant.eliminated') : t('contestant.active'),
+    }))
+    return sortRosterRows(rows, rosterSort)
+    // memberUidMap is rebuilt on every render, so `members` is the real
+    // dependency; listing the map itself would defeat the memo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contestants, members, rosterSort])
   const episodeNumbers = Array.from({ length: season?.episodeCount ?? 0 }, (_, i) => i + 1)
   // Episode numbers that already have a scores document, whatever the season's
   // state — the one thing that constrains an edit.
@@ -704,26 +784,48 @@ export function SeasonDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-gray-400 border-b border-gray-200">
-                    <th className="pb-3 font-medium">Contestant</th>
-                    <th className="pb-3 font-medium">Owner</th>
-                    <th className="pb-3 font-medium">Status</th>
+                    {ROSTER_COLUMNS.map((column) => (
+                      <RosterHeader
+                        key={column}
+                        column={column}
+                        label={t(`season.roster.${column}`)}
+                        sort={rosterSort}
+                        onSort={(next) => setRosterSort((current) => nextRosterSort(current, next))}
+                      />
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {contestants.map((c) => (
-                    <tr key={c.id} className={c.eliminatedEpisode !== null ? 'opacity-50' : ''}>
-                      <td className="py-3 font-medium text-gray-900">{c.name}</td>
-                      <td className="py-3 text-gray-500">
-                        {c.draftedByUid
-                          ? (memberUidMap[c.draftedByUid]?.displayName ?? '—')
-                          : t('contestant.freeAgent')}
+                  {rosterRows.map((row) => (
+                    // Eliminated is carried by red text across all three cells
+                    // rather than by the dimming this row used to have: a
+                    // whole roster of grey rows is hard to pick out of, and a
+                    // dimmed red would only fight itself.
+                    <tr key={row.id}>
+                      <td
+                        className={[
+                          'py-3 font-medium',
+                          row.eliminated ? 'text-red-600' : 'text-gray-900',
+                        ].join(' ')}
+                      >
+                        <span className="flex items-center gap-3">
+                          <ContestantAvatar photoUrl={row.photoUrl} />
+                          {row.contestant}
+                        </span>
                       </td>
-                      <td className="py-3">
-                        {c.eliminatedEpisode !== null ? (
-                          <Badge variant="eliminated">{t('contestant.eliminated')}</Badge>
-                        ) : (
-                          <span className="text-gray-400">Active</span>
+                      <td
+                        className={['py-3', row.eliminated ? 'text-red-600' : 'text-gray-500'].join(
+                          ' '
                         )}
+                      >
+                        {row.owner}
+                      </td>
+                      <td
+                        className={['py-3', row.eliminated ? 'text-red-600' : 'text-gray-400'].join(
+                          ' '
+                        )}
+                      >
+                        {row.status}
                       </td>
                     </tr>
                   ))}
