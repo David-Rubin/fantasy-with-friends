@@ -17,10 +17,11 @@ export function calcContestantEpisodePoints(
 
 export function calcContestantTotal(
   contestantId: string,
+  // `locked` is deliberately not required: a locked episode counts the same as
+  // an unlocked one, and demanding the field makes callers invent a value.
   episodeScoreDocs: Array<{
     episodeNumber: number
     scores: Record<string, ContestantScoreDoc>
-    locked: boolean
   }>
 ): number {
   return episodeScoreDocs.reduce((sum, ep) => {
@@ -68,4 +69,27 @@ export function calcTeamEpisodeTotals(
   }
 
   return result
+}
+
+/**
+ * What a contestant scored in the most recently scored episode.
+ *
+ * "Most recent" is the highest episode number with a scores document, not the
+ * last element of the array — episodes arrive from a listener in whatever order
+ * Firestore hands them over, and a season can be scored out of order when an
+ * admin goes back to fill one in.
+ *
+ * Null when nothing has been scored yet, which is different from a contestant
+ * who was on screen and scored nothing: that is a real zero.
+ */
+export function latestEpisodePoints(
+  episodeScoreDocs: Array<{
+    episodeNumber: number
+    scores: Record<string, ContestantScoreDoc>
+  }>,
+  contestantId: string
+): number | null {
+  if (episodeScoreDocs.length === 0) return null
+  const latest = episodeScoreDocs.reduce((a, b) => (b.episodeNumber > a.episodeNumber ? b : a))
+  return latest.scores[contestantId]?.totalPoints ?? 0
 }
