@@ -28,6 +28,8 @@ import { trackEvent } from '../lib/analytics'
 import { logAuditEvent } from '../lib/audit'
 import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal'
+import { deleteSeason, deletionErrorMessage } from '../lib/deleteApi'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { ScoringRulesPanel } from '../components/ScoringRulesPanel'
 import { ScoringRulesCard } from '../components/ScoringRulesCard'
@@ -132,6 +134,9 @@ export function SeasonDetailPage() {
   const [members, setMembers] = useState<MemberDoc[]>([])
   const [contestants, setContestants] = useState<Contestant[]>([])
   const [rosterSort, setRosterSort] = useState<RosterSort>(DEFAULT_ROSTER_SORT)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deletingSeason, setDeletingSeason] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
@@ -394,6 +399,25 @@ export function SeasonDetailPage() {
       targetUid: memberUid,
     })
     setAssignFreeAgentOpen(null)
+  }
+
+  /**
+   * Back to the league on success: this page is built on a season document that
+   * no longer exists, so staying would leave every listener on it reporting a
+   * missing document.
+   */
+  async function handleDeleteSeason() {
+    if (!seasonId || !leagueId) return
+    setDeletingSeason(true)
+    setDeleteError('')
+    try {
+      await deleteSeason({ seasonId })
+      navigate(`/leagues/${leagueId}`)
+    } catch (err) {
+      console.error('Could not delete the season', err)
+      setDeleteError(deletionErrorMessage(err, t('season.deleteFailed')))
+      setDeletingSeason(false)
+    }
   }
 
   const canOpenDraft = contestants.length >= 2 && rules.length >= 1
@@ -946,6 +970,39 @@ export function SeasonDetailPage() {
           {editContestantError && <p className="text-sm text-red-600">{editContestantError}</p>}
         </form>
       </Modal>
+
+      {isAdmin && (
+        <section className="mt-8 rounded-2xl border border-red-200 bg-white p-6">
+          <h2 className="text-lg font-semibold text-red-800">{t('delete.dangerZone')}</h2>
+          <p className="mt-1 text-sm text-gray-600">{t('season.deleteExplain')}</p>
+          <Button
+            variant="danger"
+            className="mt-4"
+            onClick={() => {
+              setDeleteError('')
+              setDeleteOpen(true)
+            }}
+          >
+            {t('season.delete')}
+          </Button>
+        </section>
+      )}
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title={t('season.deleteTitle', { name: season.label })}
+        name={season.label}
+        consequences={[
+          t('season.deleteContestants', { n: contestants.length }),
+          t('season.deleteMembers', { n: members.length }),
+          t('season.deleteScores'),
+        ]}
+        confirmLabel={t('season.delete')}
+        busy={deletingSeason}
+        error={deleteError}
+        onConfirm={handleDeleteSeason}
+      />
 
       {/* Assign free agent modal */}
       {/* Edit season details */}

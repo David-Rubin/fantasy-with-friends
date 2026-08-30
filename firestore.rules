@@ -58,8 +58,13 @@ service cloud.firestore {
     // ── Users ─────────────────────────────────────────────────────────────────
     match /users/{uid} {
       allow read: if request.auth.uid == uid;
-      allow write: if request.auth.uid == uid
+      // Own document only, and no delete for anyone — a superadmin deletes an
+      // account through the deleteUser function, which also has to reach the
+      // Auth record, the superadmins document, and every membership the user
+      // holds across leagues and seasons. None of that is visible from here.
+      allow create, update: if request.auth.uid == uid
         && !('pinHash' in request.resource.data);
+      allow delete: if false;
     }
 
     // ── Superadmins ───────────────────────────────────────────────────────────
@@ -115,7 +120,13 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.memberCount == 0;
       allow update: if isLeagueAdmin(leagueId)
         && request.resource.data.memberCount == resource.data.memberCount;
-      allow delete: if isLeagueOwner(leagueId);
+      // Closed to clients even for the owner, who *can* delete a league — but
+      // only through the deleteLeague function. A league is a tree: members,
+      // joinRequests, and every season keyed by leagueId in a separate
+      // top-level collection. Deleting just this document from the client left
+      // all of it orphaned and unreachable, since every rule below reads this
+      // document to decide who may see them.
+      allow delete: if false;
 
       match /members/{uid} {
         allow read: if isLeagueMember(leagueId);
@@ -202,7 +213,11 @@ service cloud.firestore {
         isLeagueAdmin(request.resource.data.leagueId);
       // teamTotals / teamEpisodeTotals are written only by Cloud Functions (Admin SDK)
       allow update: if isSeasonAdmin(seasonId);
-      allow delete: if false; // seasons are never deleted in MVP
+      // Closed to clients for the same reason as the league above: a season
+      // owns members, contestants, scoringRules, episodeScores with their
+      // nested contestantScores, and a draft with its picks. A rule cannot
+      // enumerate them, so the cascade belongs to the deleteSeason function.
+      allow delete: if false;
 
       match /members/{uid} {
         allow read: if isSeasonMember(seasonId);

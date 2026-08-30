@@ -17,6 +17,8 @@ import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { Modal } from '../components/Modal'
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal'
+import { deleteLeague, deleteSeason, deletionErrorMessage } from '../lib/deleteApi'
 import { Input, Textarea } from '../components/Input'
 import { AccentColorPicker } from '../components/AccentColorPicker'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
@@ -74,6 +76,14 @@ export function LeagueDetailPage() {
   const [removing, setRemoving] = useState(false)
   // The refusal from removeLeagueMember, which names the seasons in the way.
   const [removeError, setRemoveError] = useState('')
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [seasonDeleteTarget, setSeasonDeleteTarget] = useState<(SeasonDoc & { id: string }) | null>(
+    null
+  )
+  const [deletingSeason, setDeletingSeason] = useState(false)
+  const [seasonDeleteError, setSeasonDeleteError] = useState('')
+  const [deletingLeague, setDeletingLeague] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     if (!leagueId) return
@@ -156,10 +166,50 @@ export function LeagueDetailPage() {
   // is nothing on its page for anyone but the admins building it, so members do
   // not get a link to it until it opens.
   const canOpenUnreadySeason = isAdmin || isSuperadmin
+  // Deleting a season is an admin's job, not only the owner's: a season is the
+  // unit an admin manages, and a botched setup is exactly what they need to be
+  // able to throw away. deleteSeason enforces the same pair.
+  const canDeleteSeasons = isAdmin || isSuperadmin
   // Derived rather than cleared in the listener: a demoted owner stops seeing
   // the queue on the next render, without an extra state write.
   const pendingRequests = canManageLeague ? joinRequests : []
   const myRequestStatus = leagueId ? (joinRequestStatus[leagueId] ?? null) : null
+
+  /**
+   * Leaves for the dashboard rather than waiting for the listeners to notice:
+   * the league document this page is built on has just gone, so every listener
+   * on it is about to report a document that does not exist.
+   */
+  async function handleDeleteLeague() {
+    if (!leagueId) return
+    setDeletingLeague(true)
+    setDeleteError('')
+    try {
+      await deleteLeague({ leagueId })
+      navigate('/dashboard')
+    } catch (err) {
+      console.error('Could not delete the league', err)
+      setDeleteError(deletionErrorMessage(err, t('league.deleteFailed')))
+      setDeletingLeague(false)
+    }
+  }
+
+  async function handleDeleteSeason() {
+    if (!seasonDeleteTarget) return
+    setDeletingSeason(true)
+    setSeasonDeleteError('')
+    try {
+      await deleteSeason({ seasonId: seasonDeleteTarget.id })
+      // The seasons listener drops the row on its own; closing is all that is
+      // left to do here.
+      setSeasonDeleteTarget(null)
+    } catch (err) {
+      console.error('Could not delete the season', err)
+      setSeasonDeleteError(deletionErrorMessage(err, t('season.deleteFailed')))
+    } finally {
+      setDeletingSeason(false)
+    }
+  }
 
   async function handleDecide(request: LeagueJoinRequestDoc, approve: boolean) {
     if (!leagueId || !user) return
@@ -459,6 +509,22 @@ export function LeagueDetailPage() {
                         {joiningSeason === season.id ? t('season.joining') : t('season.join')}
                       </Button>
                     )}
+                    {/* Requirement is that a season can be deleted from either
+                        page. Here it is any league admin, which is what
+                        deleteSeason checks — wider than deleting the league
+                        itself, which stays with the owner. */}
+                    {canDeleteSeasons && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setSeasonDeleteError('')
+                          setSeasonDeleteTarget(season)
+                        }}
+                        className="!min-h-0 !px-3 !py-2 text-xs !text-red-700 hover:!bg-red-50"
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    )}
                   </div>
                 )
               })}
@@ -510,7 +576,51 @@ export function LeagueDetailPage() {
             </div>
           </section>
         )}
+
+        {canManageLeague && (
+          <section className="rounded-2xl border border-red-200 bg-white p-6">
+            <h2 className="text-lg font-semibold text-red-800">{t('delete.dangerZone')}</h2>
+            <p className="mt-1 text-sm text-gray-600">{t('league.deleteExplain')}</p>
+            <Button
+              variant="danger"
+              className="mt-4"
+              onClick={() => {
+                setDeleteError('')
+                setDeleteOpen(true)
+              }}
+            >
+              {t('league.delete')}
+            </Button>
+          </section>
+        )}
       </div>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title={t('league.deleteTitle', { name: league?.name ?? '' })}
+        name={league?.name ?? ''}
+        consequences={[
+          t('league.deleteSeasons', { n: seasons.length }),
+          t('league.deleteMembers', { n: members.length }),
+        ]}
+        confirmLabel={t('league.delete')}
+        busy={deletingLeague}
+        error={deleteError}
+        onConfirm={handleDeleteLeague}
+      />
+
+      <ConfirmDeleteModal
+        open={seasonDeleteTarget !== null}
+        onClose={() => setSeasonDeleteTarget(null)}
+        title={t('season.deleteTitle', { name: seasonDeleteTarget?.label ?? '' })}
+        name={seasonDeleteTarget?.label ?? ''}
+        consequences={[t('season.deleteEverything')]}
+        confirmLabel={t('season.delete')}
+        busy={deletingSeason}
+        error={seasonDeleteError}
+        onConfirm={handleDeleteSeason}
+      />
 
       {/* Edit league details */}
       <Modal
