@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { evaluateRule, calcContestantTotal, calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
+import {
+  evaluateRule,
+  calcContestantTotal,
+  calcTeamTotal,
+  calcTeamEpisodeTotals,
+  latestEpisodePoints,
+} from './scoring'
 import type { ScoringRuleDoc, ContestantScoreDoc } from './types'
 
 const binaryRule: ScoringRuleDoc & { id: string } = {
@@ -99,5 +105,33 @@ describe('calcTeamEpisodeTotals', () => {
     const result = calcTeamEpisodeTotals(['c1'], [episodes[1], episodes[0]])
     expect(result['1']).toBe(4)
     expect(result['2']).toBe(10)
+  })
+})
+
+describe('latestEpisodePoints', () => {
+  const ep = (episodeNumber: number, points: Record<string, number>) => ({
+    episodeNumber,
+    scores: Object.fromEntries(
+      Object.entries(points).map(([cid, totalPoints]) => [cid, { scores: {}, totalPoints }])
+    ) as Record<string, ContestantScoreDoc>,
+  })
+
+  it('reads the highest-numbered episode, not the last one listed', () => {
+    // A listener hands these over in whatever order Firestore chose.
+    const docs = [ep(3, { c1: 7 }), ep(1, { c1: 2 }), ep(2, { c1: 5 })]
+    expect(latestEpisodePoints(docs, 'c1')).toBe(7)
+  })
+
+  it('is null when nothing has been scored', () => {
+    expect(latestEpisodePoints([], 'c1')).toBeNull()
+  })
+
+  it('is zero for a contestant who scored nothing in that episode', () => {
+    // Distinct from null: the episode happened, they just earned nothing.
+    expect(latestEpisodePoints([ep(1, { c2: 4 })], 'c1')).toBe(0)
+  })
+
+  it('counts a negative score', () => {
+    expect(latestEpisodePoints([ep(1, { c1: -2 })], 'c1')).toBe(-2)
   })
 })

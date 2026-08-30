@@ -21,6 +21,7 @@ import type {
   Contestant,
   ScoringRule,
   AccentColor,
+  ContestantScoreDoc,
 } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
@@ -39,6 +40,7 @@ import {
   TIMER_SECONDS_MIN,
 } from '../lib/seasonDetails'
 import { updateSeasonDetails } from '../lib/seasonApi'
+import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
 import { ContestantCard } from '../components/ContestantCard'
 import {
@@ -67,6 +69,15 @@ export function SeasonDetailPage() {
   const { canView, blocked } = useSeasonMembership(seasonId)
   const { leagueName, showName } = useTrailNames(leagueId)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
+  // Per-contestant scores, keyed by episode number. A cache, not the source of
+  // truth for which episodes are scored — that is `episodeStatuses` — so an
+  // episode that disappears is filtered out on read rather than deleted here.
+  // The leaderboard's expanded breakdown is the only thing that needs these;
+  // the team totals on the collapsed row come from `season.teamTotals`, which a
+  // trigger maintains.
+  const [scoresByEpisode, setScoresByEpisode] = useState<
+    Record<string, Record<string, ContestantScoreDoc>>
+  >({})
   // Setup form state
   const [contestantForm, setContestantForm] = useState<ContestantFormValues>(emptyContestantForm)
   const [addingContestant, setAddingContestant] = useState(false)
@@ -186,6 +197,29 @@ export function SeasonDetailPage() {
     return unsub
   }, [seasonId, canView])
 
+  // One listener per scored episode. `contestantScores` is a subcollection of
+  // each episode, and a collection-group query over them would need its own
+  // security rule written against a denormalised field — far more machinery
+  // than a handful of listeners, since a season has as many episodes as it has.
+  const scoredEpisodeKey = Object.keys(episodeStatuses).sort().join(',')
+  useEffect(() => {
+    if (!seasonId || !canView) return
+    const episodes = scoredEpisodeKey ? scoredEpisodeKey.split(',') : []
+    const unsubs = episodes.map((ep) =>
+      listenQuery(
+        collection(db, 'seasons', seasonId, 'episodeScores', ep, 'contestantScores'),
+        'contestant scores',
+        (snap) => {
+          setScoresByEpisode((prev) => ({
+            ...prev,
+            [ep]: Object.fromEntries(snap.docs.map((d) => [d.id, d.data() as ContestantScoreDoc])),
+          }))
+        }
+      )
+    )
+    return () => unsubs.forEach((u) => u())
+  }, [seasonId, canView, scoredEpisodeKey])
+
   // Superadmins are folded in here because the security rules already treat
   // them as an admin of every season (isSeasonAdmin resolves through
   // isLeagueAdmin, which is true for them). Leaving them out only meant the
@@ -300,6 +334,17 @@ export function SeasonDetailPage() {
   const episodeNumbers = Array.from({ length: season?.episodeCount ?? 0 }, (_, i) => i + 1)
   // Episode numbers that already have a scores document, whatever the season's
   // state — the one thing that constrains an edit.
+  // Only the episodes that are still scored, so a cached entry for one that has
+  // gone cannot keep counting towards a season total.
+  const episodeScoreDocs = Object.keys(episodeStatuses)
+    .filter((ep) => scoresByEpisode[ep])
+    .map((ep) => ({ episodeNumber: parseInt(ep, 10), scores: scoresByEpisode[ep] }))
+
+  // Which episode the breakdown's "Latest Episode" column is reporting on.
+  // Null rather than 0 before anything is scored, so the column can say so.
+  const highestScored = highestScoredEpisode(episodeScoreDocs.map((d) => d.episodeNumber))
+  const latestScoredEpisodeNumber = highestScored > 0 ? highestScored : null
+
   const scoredEpisodeNumbers = Object.keys(episodeStatuses)
 
   function openEditSeason() {
@@ -627,10 +672,10 @@ export function SeasonDetailPage() {
                         accentColor={season.accentColor}
                         contestants={teamContestants.map((c) => ({
                           contestant: c,
-                          totalPoints: 0, // per-contestant totals would require fetching sub-collections
-                          episodePoints: {},
+                          seasonTotal: calcContestantTotal(c.id, episodeScoreDocs),
+                          latestEpisodePoints: latestEpisodePoints(episodeScoreDocs, c.id),
                         }))}
-                        episodeNumbers={scoredEpisodes}
+                        latestEpisodeNumber={latestScoredEpisodeNumber}
                       />
                     )
                   })

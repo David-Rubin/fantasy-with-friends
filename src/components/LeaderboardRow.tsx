@@ -20,8 +20,10 @@ const accentBorder: Record<AccentColor, string> = {
 
 interface ContestantBreakdown {
   contestant: Contestant
-  totalPoints: number
-  episodePoints: Record<string, number>
+  /** Everything this contestant has earned their team this season. */
+  seasonTotal: number
+  /** Null when no episode has been scored yet; 0 means they scored nothing. */
+  latestEpisodePoints: number | null
 }
 
 interface LeaderboardRowProps {
@@ -32,7 +34,8 @@ interface LeaderboardRowProps {
   delta: number | null
   accentColor: AccentColor
   contestants: ContestantBreakdown[]
-  episodeNumbers: number[]
+  /** The episode "Latest Episode" refers to, or null before any are scored. */
+  latestEpisodeNumber: number | null
 }
 
 export function LeaderboardRow({
@@ -43,7 +46,7 @@ export function LeaderboardRow({
   delta,
   accentColor,
   contestants,
-  episodeNumbers,
+  latestEpisodeNumber,
 }: LeaderboardRowProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -53,7 +56,7 @@ export function LeaderboardRow({
     >
       <button
         type="button"
-        className="flex w-full items-center gap-4 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 rounded-xl"
+        className="flex w-full cursor-pointer items-center gap-4 px-4 py-3 text-left hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 rounded-xl"
         onClick={() => setExpanded((e) => !e)}
         aria-expanded={expanded}
       >
@@ -87,22 +90,31 @@ export function LeaderboardRow({
       {expanded && (
         <div className="border-t border-gray-100 px-4 py-3">
           {contestants.length === 0 ? (
-            <p className="text-sm text-gray-400">No contestants drafted.</p>
+            <p className="text-sm text-gray-400">{t('leaderboard.noContestants')}</p>
           ) : (
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-gray-400">
-                  <th className="pb-2 font-medium">Contestant</th>
-                  {episodeNumbers.map((n) => (
-                    <th key={n} className="pb-2 px-2 font-medium text-center">
-                      Ep {n}
-                    </th>
-                  ))}
-                  <th className="pb-2 px-2 font-medium text-right">Total</th>
+                  <th className="pb-2 font-medium">{t('leaderboard.contestant')}</th>
+                  {/* One column, not one per episode. A column per episode grew
+                      with the season until the card was unreadable, and what a
+                      reader wants from a breakdown is what just happened and
+                      what it adds up to. */}
+                  <th className="pb-2 px-2 font-medium text-right">
+                    {t('leaderboard.latestEpisode')}
+                    {latestEpisodeNumber !== null && (
+                      <span className="block font-normal text-gray-300">
+                        {t('nav.episode', { n: latestEpisodeNumber })}
+                      </span>
+                    )}
+                  </th>
+                  <th className="pb-2 px-2 font-medium text-right">
+                    {t('leaderboard.seasonTotal')}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {contestants.map(({ contestant, totalPoints: cTotal, episodePoints }) => (
+                {contestants.map(({ contestant, seasonTotal, latestEpisodePoints }) => (
                   <tr
                     key={contestant.id}
                     className={contestant.eliminatedEpisode !== null ? 'opacity-40' : ''}
@@ -115,12 +127,12 @@ export function LeaderboardRow({
                         </Badge>
                       )}
                     </td>
-                    {episodeNumbers.map((n) => (
-                      <td key={n} className="py-1.5 px-2 text-center text-gray-600">
-                        {episodePoints[String(n)] ?? '—'}
-                      </td>
-                    ))}
-                    <td className="py-1.5 px-2 text-right font-semibold text-gray-800">{cTotal}</td>
+                    <td className="py-1.5 px-2 text-right text-gray-600">
+                      {latestEpisodePoints ?? '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-right font-semibold text-gray-800">
+                      {seasonTotal}
+                    </td>
                   </tr>
                 ))}
               </tbody>
