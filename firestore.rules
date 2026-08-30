@@ -178,6 +178,14 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/seasons/$(seasonId)).data.state;
     }
 
+    // Whether a season has anything scored against it yet. Absent on season
+    // documents written before the field existed, which read as unscored.
+    function seasonIsUnscored(seasonId) {
+      return seasonState(seasonId) != 'complete'
+        && get(/databases/$(database)/documents/seasons/$(seasonId))
+             .data.get('firstEpisodeScoredAt', null) == null;
+    }
+
     // ── Seasons ───────────────────────────────────────────────────────────────
     match /seasons/{seasonId} {
       // A league page is readable before joining and lists that league's
@@ -198,9 +206,27 @@ service cloud.firestore {
 
       match /members/{uid} {
         allow read: if isSeasonMember(seasonId);
-        // Team name update — own record only
+        // Team name update — own record only, and only while the season has
+        // nothing scored against it.
+        //
+        // That is the closest durable line to the product rule, which is that
+        // naming happens in the draft room: before the draft opens, while it
+        // runs, and while the "Draft complete!" banner is still up. The draft
+        // ending moves the season to `active` in the same write, so `state`
+        // alone cannot tell a member reading that banner from one who came
+        // back in week six — but a scored episode can, and by then the name is
+        // on a leaderboard people are reading. See src/lib/teamName.ts, which
+        // draws the same line for the field the draft room offers.
+        //
+        // The length bound is enforced here rather than left to the client: a
+        // name too long for a leaderboard row is everyone else's problem, not
+        // only the writer's. It must match TEAM_NAME_MAX_LENGTH.
         allow update: if request.auth.uid == uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamName']);
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamName'])
+          && request.resource.data.teamName is string
+          && request.resource.data.teamName.size() > 0
+          && request.resource.data.teamName.size() <= 40
+          && seasonIsUnscored(seasonId);
 
         // A league member joins a season for themselves, while it is still
         // being set up. No approval: they are already in the league, and pick

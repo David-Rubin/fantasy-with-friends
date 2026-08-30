@@ -11,6 +11,7 @@ import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import { ContestantCard } from '../components/ContestantCard'
+import { TeamNameCard } from '../components/TeamNameCard'
 import { TimerBanner } from '../components/TimerBanner'
 import type {
   SeasonDoc,
@@ -21,6 +22,7 @@ import type {
   Contestant,
 } from '../lib/types'
 import { resolvePickOrder } from '../lib/draft'
+import { canRenameTeam } from '../lib/teamName'
 import {
   reopenSeasonSetup,
   submitPick,
@@ -31,7 +33,6 @@ import {
 } from '../lib/draftApi'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
-import { logAuditEvent } from '../lib/audit'
 
 interface MemberInfo extends SeasonMemberDoc {
   uid: string
@@ -48,8 +49,6 @@ export function DraftRoomPage() {
   const [contestants, setContestants] = useState<Contestant[]>([])
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
-  const [teamName, setTeamName] = useState('')
-  const [savingTeamName, setSavingTeamName] = useState(false)
   const [startingDraft, setStartingDraft] = useState(false)
   const [picking, setPicking] = useState(false)
   const [pickError, setPickError] = useState('')
@@ -77,7 +76,6 @@ export function DraftRoomPage() {
       guarded('draft members', async (snap) => {
         const list: MemberInfo[] = snap.docs.map((d) => {
           const data = d.data() as SeasonMemberDoc
-          if (d.id === user.uid) setTeamName(data.teamName)
           // See LeagueMemberDoc.displayName — cross-user reads are denied.
           return { ...data, uid: d.id, displayName: data.displayName || d.id }
         })
@@ -285,17 +283,6 @@ export function DraftRoomPage() {
     }
   }
 
-  async function handleSaveTeamName() {
-    if (!seasonId || !user) return
-    setSavingTeamName(true)
-    try {
-      await updateDoc(doc(db, 'seasons', seasonId, 'members', user.uid), { teamName })
-      await logAuditEvent({ action: 'team_renamed', seasonId })
-    } finally {
-      setSavingTeamName(false)
-    }
-  }
-
   const currentPickerName = draft?.currentPickerUid
     ? (members.find((m) => m.uid === draft.currentPickerUid)?.displayName ?? 'Unknown')
     : ''
@@ -367,6 +354,19 @@ export function DraftRoomPage() {
             {t('draft.complete.viewSeason')}
           </Button>
         </div>
+      )}
+
+      {/* Above every phase of the draft, and only here: the lobby, the board,
+          and the completion banner are the whole window a member has to name
+          their team. See ../lib/teamName for where it closes. */}
+      {myMember && seasonId && leagueId && (
+        <TeamNameCard
+          seasonId={seasonId}
+          leagueId={leagueId}
+          uid={myMember.uid}
+          teamName={myMember.teamName}
+          canEdit={canRenameTeam(season)}
+        />
       )}
 
       {/* Lobby */}
@@ -606,29 +606,9 @@ export function DraftRoomPage() {
                         key={member.uid}
                         className={`rounded-xl border p-4 ${isCurrentPicker ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}
                       >
-                        {member.uid === user?.uid ? (
-                          <div className="flex gap-2 mb-2">
-                            <input
-                              type="text"
-                              value={teamName}
-                              onChange={(e) => setTeamName(e.target.value)}
-                              className="flex-1 text-sm font-semibold border-b border-gray-300 bg-transparent focus:outline-none focus:border-blue-500"
-                              aria-label={t('draft.active.teamName')}
-                            />
-                            <button
-                              type="button"
-                              onClick={handleSaveTeamName}
-                              disabled={savingTeamName}
-                              className="text-xs text-blue-600 hover:underline disabled:opacity-50"
-                            >
-                              {t('common.save')}
-                            </button>
-                          </div>
-                        ) : (
-                          <p className="text-sm font-semibold text-gray-800 mb-2">
-                            {member.teamName}
-                          </p>
-                        )}
+                        <p className="text-sm font-semibold text-gray-800 mb-2">
+                          {member.teamName}
+                        </p>
                         <p className="text-xs text-gray-400 mb-2">{member.displayName}</p>
                         {teamContestants.length === 0 ? (
                           <p className="text-xs text-gray-300 italic">No picks yet</p>

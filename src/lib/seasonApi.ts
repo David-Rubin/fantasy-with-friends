@@ -2,6 +2,7 @@ import { doc, setDoc, updateDoc } from 'firebase/firestore'
 import { db } from './firebase'
 import { logAuditEvent } from './audit'
 import type { SeasonDetails } from './seasonDetails'
+import { normalizeTeamName } from './teamName'
 import type { SeasonMemberDoc } from './types'
 
 /**
@@ -71,5 +72,39 @@ export async function joinSeason(
     seasonId,
     leagueId,
     targetUid: uid,
+  })
+}
+
+/**
+ * A member naming their own team.
+ *
+ * Whether they may is decided in ./teamName and, as a constraint rather than
+ * advice, by the `update` rule on the season roster — which pins the write to
+ * the caller's own document, to the `teamName` field alone, and to a season
+ * with nothing scored against it yet.
+ *
+ * The name is normalized here so the value that was validated is the value that
+ * gets stored; the rule checks the stored length, so a name padded past the
+ * limit with spaces would otherwise be rejected by the server after the client
+ * had accepted it.
+ */
+export async function renameTeam(
+  seasonId: string,
+  leagueId: string,
+  uid: string,
+  previous: string,
+  next: string
+): Promise<void> {
+  const teamName = normalizeTeamName(next)
+
+  await updateDoc(doc(db, 'seasons', seasonId, 'members', uid), { teamName })
+
+  await logAuditEvent({
+    action: 'team_renamed',
+    seasonId,
+    leagueId,
+    targetUid: uid,
+    oldValue: previous,
+    newValue: teamName,
   })
 }
