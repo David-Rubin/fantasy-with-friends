@@ -22,7 +22,7 @@ import type {
   Contestant,
 } from '../lib/types'
 import { evaluateRule } from '../lib/scoring'
-import { ruleCoversEpisode } from '../lib/scoringRules'
+import { fingerprintOf, ruleCoversEpisode, rulesFingerprint } from '../lib/scoringRules'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
@@ -53,10 +53,14 @@ export function EpisodeScoringPage() {
 
   // Form state: contestantId -> ruleId -> value
   const [scores, setScores] = useState<Record<string, ContestantScoreEntry>>({})
+  const [storedTotals, setStoredTotals] = useState<Record<string, number>>({})
   // Elimination toggles
   const [eliminations, setEliminations] = useState<Record<string, boolean>>({})
   const [eliminationConfirm, setEliminationConfirm] = useState<string | null>(null)
   const [unlockConfirm, setUnlockConfirm] = useState(false)
+  // Set once the admin has taken the rule changes on board, so the notice goes
+  // away for the rest of this visit rather than nagging until they submit.
+  const [ruleChangesApplied, setRuleChangesApplied] = useState(false)
   const [submitConfirm, setSubmitConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
@@ -118,6 +122,12 @@ export function EpisodeScoringPage() {
           map[d.id] = d.data() as ContestantScoreDoc
         })
         setScores(Object.fromEntries(Object.entries(map).map(([cid, sc]) => [cid, sc.scores])))
+        // What was actually recorded, which is what a settled episode shows —
+        // recomputing it from today's rules is how a locked episode started
+        // reporting numbers nobody ever submitted.
+        setStoredTotals(
+          Object.fromEntries(Object.entries(map).map(([cid, sc]) => [cid, sc.totalPoints]))
+        )
       }
     )
 
@@ -139,6 +149,61 @@ export function EpisodeScoringPage() {
   // business as a column in week two.
   const episodeRules = rules.filter((rule) => ruleCoversEpisode(rule, epNum))
 
+  // The rules these totals were recorded under, against the rules in force now.
+  const currentFingerprint = rulesFingerprint(rules, epNum)
+  const isLockedNow = existingScore?.locked ?? false
+  const appliedRules = existingScore?.appliedRules
+  /**
+   * Scored under one set of rules, and the season has moved on since.
+   *
+   * Deliberately not conditioned on the lock: a locked episode with pending
+   * changes still has to *display* as it was recorded — only the offer to do
+   * something about it waits for the unlock.
+   *
+   * An episode with no snapshot predates the field, so there is nothing to
+   * compare and nothing is claimed.
+   */
+  const hasPendingRuleChanges =
+    appliedRules !== undefined &&
+    !ruleChangesApplied &&
+    fingerprintOf(appliedRules) !== currentFingerprint
+
+  /** The offer to bring it in line, which only makes sense once it is editable. */
+  const canApplyRuleChanges = canEdit && !isLockedNow && hasPendingRuleChanges
+
+  /**
+   * Until an admin applies the changes, the episode is drawn as it was
+   * submitted: its own columns, its own point values, its own totals.
+   */
+  const showingAsRecorded = hasPendingRuleChanges && appliedRules !== undefined
+
+  /** The columns to draw — what was recorded, or what applies now. */
+  const displayRules: Array<{ id: string; name: string; points: number }> = showingAsRecorded
+    ? appliedRules
+    : episodeRules
+
+  // A record is not editable, and neither is an episode still showing its old
+  // rules: ticking a box against a column that no longer exists would submit
+  // scores under rules nobody chose. Apply the changes first.
+  const readOnlyTable = isLockedNow || showingAsRecorded
+
+  /** Drop ticks for rules that no longer apply, so a stale one cannot be stored. */
+  function applyRuleChanges() {
+    setScores((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([cid, entry]) => [
+          cid,
+          Object.fromEntries(
+            Object.entries(entry).filter(([ruleId]) =>
+              episodeRules.some((rule) => rule.id === ruleId)
+            )
+          ),
+        ])
+      )
+    )
+    setRuleChangesApplied(true)
+  }
+
   function setScore(contestantId: string, ruleId: string, value: boolean) {
     setScores((prev) => ({
       ...prev,
@@ -147,6 +212,7 @@ export function EpisodeScoringPage() {
   }
 
   function calcTotalForContestant(contestantId: string): number {
+    if (showingAsRecorded) return storedTotals[contestantId] ?? 0
     const entry = scores[contestantId] ?? {}
     return episodeRules.reduce((sum, rule) => sum + evaluateRule(rule, entry), 0)
   }
@@ -162,6 +228,9 @@ export function EpisodeScoringPage() {
         submittedAt: Date.now(),
         submittedBy: user.uid,
         locked: true,
+        // The rules as they stood, so this episode can be drawn again exactly
+        // as it was however the season's rules move afterwards.
+        appliedRules: episodeRules.map((r) => ({ id: r.id, name: r.name, points: r.points })),
       } satisfies EpisodeScoreDoc)
 
       // Write per-contestant scores
@@ -213,8 +282,6 @@ export function EpisodeScoringPage() {
     setUnlockConfirm(false)
   }
 
-  const isLocked = existingScore?.locked ?? false
-
   if (blocked) return <NotASeasonMember leagueId={leagueId} />
 
   return (
@@ -224,7 +291,8 @@ export function EpisodeScoringPage() {
         leagueName,
         seasonId,
         seasonName,
-        t('nav.episode', { n: epNum })
+        t('nav.episode', { n: epNum }),
+        { label: t('season.tabs.episodes'), tab: 'episodes' }
       )}
     >
       <div className="mb-6 flex items-center justify-between">
@@ -233,55 +301,81 @@ export function EpisodeScoringPage() {
             ? t('scoring.scoreEpisode', { n: epNum })
             : t('scoring.episodeScores', { n: epNum })}
         </h1>
-        {canEdit && isLocked && (
+        {canEdit && isLockedNow && (
           <Button variant="secondary" onClick={() => setUnlockConfirm(true)}>
             {t('scoring.unlockEpisode')}
           </Button>
         )}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
+      {canApplyRuleChanges && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">{t('scoring.ruleChangesTitle')}</p>
+          <p className="mt-1 text-sm text-amber-800">{t('scoring.ruleChangesBody')}</p>
+          <Button variant="secondary" className="mt-3" onClick={applyRuleChanges}>
+            {t('scoring.applyRuleChanges')}
+          </Button>
+        </div>
+      )}
+
+      {/* Both axes scroll inside this box rather than the page, which is what
+          lets the header row and the contestant column stay put. `border-separate`
+          matters: with `border-collapse` a browser hands the borders to the table
+          and a stuck cell scrolls out from under its own lines. */}
+      <div className="relative max-h-[70vh] overflow-auto rounded-lg border border-gray-200">
+        <table className="w-full border-separate border-spacing-0 text-sm">
           <thead>
-            <tr className="border-b border-gray-200">
-              <th className="py-3 pr-4 text-left font-medium text-gray-500">Contestant</th>
-              {episodeRules.map((rule) => (
+            <tr>
+              {/* The corner sits above both, so it outranks each of them. */}
+              <th className="sticky left-0 top-0 z-30 border-b border-r border-gray-200 bg-white py-3 px-4 text-left font-medium text-gray-500">
+                {t('scoring.contestant')}
+              </th>
+              {displayRules.map((rule) => (
                 <th
                   key={rule.id}
-                  className="py-3 px-3 text-center font-medium text-gray-500 max-w-[120px]"
+                  className="sticky top-0 z-20 min-w-[7rem] max-w-[9rem] border-b border-gray-200 bg-white py-3 px-3 text-center align-bottom font-medium text-gray-500"
                 >
-                  <span className="block truncate" title={rule.name}>
-                    {rule.name}
-                  </span>
+                  {/* Wrapped, not truncated: a rule name is what the column
+                      means, and half of one is no use to whoever is ticking. */}
+                  <span className="block whitespace-normal break-words">{rule.name}</span>
                   <span className="text-xs text-gray-400">
                     ({rule.points > 0 ? '+' : ''}
                     {rule.points})
                   </span>
                 </th>
               ))}
-              <th className="py-3 pl-3 text-center font-medium text-gray-500">Pts</th>
-              <th className="py-3 pl-3 text-center font-medium text-gray-500">Out</th>
+              <th className="sticky top-0 z-20 border-b border-gray-200 bg-white py-3 px-3 text-center font-medium text-gray-500">
+                {t('scoring.points')}
+              </th>
+              <th className="sticky top-0 z-20 border-b border-gray-200 bg-white py-3 px-3 text-center font-medium text-gray-500">
+                {t('scoring.out')}
+              </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody>
             {activeContestants.map((contestant) => (
               <tr key={contestant.id} className={eliminations[contestant.id] ? 'opacity-50' : ''}>
-                <td className="py-3 pr-4 font-medium text-gray-900">{contestant.name}</td>
-                {episodeRules.map((rule) => {
+                {/* Stuck to the left edge, so a wide rule set scrolls past a
+                    name that stays readable. Opaque, or the cells it covers
+                    show through. */}
+                <td className="sticky left-0 z-10 border-b border-r border-gray-100 bg-white py-3 px-4 font-medium text-gray-900">
+                  {contestant.name}
+                </td>
+                {displayRules.map((rule) => {
                   const val = scores[contestant.id]?.[rule.id]
                   if (!canEdit) {
                     return (
-                      <td key={rule.id} className="py-3 px-3 text-center">
+                      <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
                         <ScoreMark on={val === true} label={`${rule.name} — ${contestant.name}`} />
                       </td>
                     )
                   }
                   return (
-                    <td key={rule.id} className="py-3 px-3 text-center">
+                    <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
                       <input
                         type="checkbox"
                         checked={val === true}
-                        disabled={isLocked}
+                        disabled={readOnlyTable}
                         onChange={(e) => setScore(contestant.id, rule.id, e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         aria-label={`${rule.name} for ${contestant.name}`}
@@ -289,10 +383,10 @@ export function EpisodeScoringPage() {
                     </td>
                   )
                 })}
-                <td className="py-3 pl-3 text-center font-semibold text-gray-800">
+                <td className="border-b border-gray-100 py-3 px-3 text-center font-semibold text-gray-800">
                   {calcTotalForContestant(contestant.id)}
                 </td>
-                <td className="py-3 pl-3 text-center">
+                <td className="border-b border-gray-100 py-3 px-3 text-center">
                   {!canEdit ? (
                     <ScoreMark
                       on={!!eliminations[contestant.id]}
@@ -301,7 +395,7 @@ export function EpisodeScoringPage() {
                   ) : (
                     <button
                       type="button"
-                      disabled={isLocked}
+                      disabled={readOnlyTable}
                       onClick={() => {
                         if (!eliminations[contestant.id]) {
                           setEliminationConfirm(contestant.id)
@@ -327,7 +421,7 @@ export function EpisodeScoringPage() {
         </table>
       </div>
 
-      {canEdit && !isLocked && (
+      {canEdit && !readOnlyTable && (
         <div className="mt-6">
           <Button onClick={() => setSubmitConfirm(true)}>{t('scoring.submitScores')}</Button>
         </div>

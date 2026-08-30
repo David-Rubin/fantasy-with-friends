@@ -59,16 +59,24 @@ export function seasonChildTrail(
   leagueName: string | undefined,
   seasonId: string | undefined,
   seasonName: string | undefined,
-  current: string
+  current: string,
+  /**
+   * An optional step between the season and where you are — the season's
+   * Episodes tab, say. Given a `tab`, it links back to the season page with
+   * that tab already open, so the trail returns you where you came from rather
+   * than to the season's default view.
+   */
+  parent?: { label: string; tab: string }
 ): BreadcrumbItem[] {
   const trail = seasonTrail(leagueId, leagueName, seasonName)
   const season = trail[trail.length - 1]
+  const seasonPath = leagueId && seasonId ? `/leagues/${leagueId}/seasons/${seasonId}` : undefined
   return [
     ...trail.slice(0, -1),
-    {
-      ...season,
-      to: leagueId && seasonId ? `/leagues/${leagueId}/seasons/${seasonId}` : undefined,
-    },
+    { ...season, to: seasonPath },
+    ...(parent
+      ? [{ label: parent.label, to: seasonPath ? `${seasonPath}?tab=${parent.tab}` : undefined }]
+      : []),
     { label: current },
   ]
 }

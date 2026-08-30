@@ -178,11 +178,6 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/seasons/$(seasonId)).data.state;
     }
 
-    function seasonNotYetScored(seasonId) {
-      return get(/databases/$(database)/documents/seasons/$(seasonId))
-        .data.get('firstEpisodeScoredAt', null) == null;
-    }
-
     // ── Seasons ───────────────────────────────────────────────────────────────
     match /seasons/{seasonId} {
       // A league page is readable before joining and lists that league's
@@ -242,11 +237,16 @@ service cloud.firestore {
 
       match /scoringRules/{ruleId} {
         allow read: if isSeasonMember(seasonId);
-        // Editable through setup, the draft, and a season that has started but
-        // has no scores yet — then fixed. Changing a point value after an
-        // episode is scored would silently restate every score already recorded
-        // under the old value, and teamTotals are recomputed from these rules.
-        allow write: if isSeasonAdmin(seasonId) && seasonNotYetScored(seasonId);
+        // Editable at any point in a season. A show changes its own rules
+        // mid-run, so a league has to be able to follow — the old cutoff at the
+        // first scored episode meant a season could be wrong for the rest of its
+        // life.
+        //
+        // What that cutoff protected is handled instead by never rewriting a
+        // recorded score behind anyone's back: an episode already submitted and
+        // locked keeps the totals it was given, and an admin re-applies the new
+        // rules to it deliberately, from that episode's own page.
+        allow write: if isSeasonAdmin(seasonId);
       }
 
       match /episodeScores/{episodeNumber} {
