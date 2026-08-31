@@ -403,39 +403,39 @@ export function LeagueDetailPage() {
         </div>
       )}
 
-      {/* Pending requests, for the owner to decide */}
-      {canManageLeague && (
+      {/* Pending requests, for whoever can decide them. The whole section is
+          absent when the queue is empty rather than showing an empty state:
+          there is nothing to do about no requests, and a standing "No pending
+          requests." line pushes the league's actual content down the page on
+          every visit for the one person who sees it. */}
+      {pendingRequests.length > 0 && (
         <section className="mb-8">
           <h2 className="mb-3 text-lg font-semibold text-gray-900">{t('league.joinRequests')}</h2>
-          {pendingRequests.length === 0 ? (
-            <p className="text-sm text-gray-400">{t('league.noJoinRequests')}</p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {pendingRequests.map((request) => (
-                <div
-                  key={request.uid}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
-                >
-                  <span className="text-sm font-medium text-gray-800">{request.displayName}</span>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      loading={deciding === request.uid}
-                      onClick={() => handleDecide(request, false)}
-                    >
-                      {t('league.reject')}
-                    </Button>
-                    <Button
-                      loading={deciding === request.uid}
-                      onClick={() => handleDecide(request, true)}
-                    >
-                      {t('league.approve')}
-                    </Button>
-                  </div>
+          <div className="flex flex-col gap-2">
+            {pendingRequests.map((request) => (
+              <div
+                key={request.uid}
+                className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
+              >
+                <span className="text-sm font-medium text-gray-800">{request.displayName}</span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    loading={deciding === request.uid}
+                    onClick={() => handleDecide(request, false)}
+                  >
+                    {t('league.reject')}
+                  </Button>
+                  <Button
+                    loading={deciding === request.uid}
+                    onClick={() => handleDecide(request, true)}
+                  >
+                    {t('league.approve')}
+                  </Button>
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
