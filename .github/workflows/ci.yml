@@ -28,8 +28,8 @@ jobs:
       - name: Test
         run: npm test
 
-      # No .env.local exists here, so this compiles against the committed
-      # .env.production — the same bundle the deploy job below ships.
+      # Compiles against the committed .env.production — the same bundle the
+      # deploy job below ships.
       - name: Build
         run: npm run build
 

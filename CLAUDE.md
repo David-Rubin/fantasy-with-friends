@@ -180,11 +180,15 @@ that pin a developer running the emulator would have tests behaving differently
 from CI. **Mocks are for observing behaviour, not for getting a module to load.**
 If a test mocks something only so it will import, the fix belongs in the config.
 
-CI has no `.env.local` — only the committed `.env.production`, so its build is
-the one that ships. A local `.env.local` overrides that file and points
-everything at the emulator, which is what hides env-dependent breakage. So
-before claiming a change is green, run the checks with `.env.local` moved aside:
-that is the build CI performs and the bundle your friends download.
+Vite ranks env files `.env.[mode].local` > `.env.[mode]` > `.env.local` >
+`.env`, so `.env.production` outranks `.env.local` in a production build and
+`npm run build` produces the real bundle even on a machine set up for the
+emulator. `.env.local` wins in `npm run dev`, where the mode is development and
+`.env.production` is not read at all. So the two do not fight: dev is the
+emulator, `build` is production, and no file needs moving aside to deploy.
+
+What `.env.local` does still mask is a variable that exists nowhere else. To see
+what a machine without it sees, move it aside and run the checks.
 
 ### Verify in the browser before saying it works
 
