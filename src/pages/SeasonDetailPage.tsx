@@ -786,6 +786,7 @@ export function SeasonDetailPage() {
                         rank={idx + 1}
                         teamName={member.teamName}
                         playerName={member.displayName}
+                        playerPhotoUrl={member.photoUrl}
                         totalPoints={season.teamTotals[member.uid] ?? 0}
                         delta={delta}
                         accentColor={season.accentColor}

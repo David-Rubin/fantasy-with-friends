@@ -17,6 +17,7 @@ import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { Modal } from '../components/Modal'
+import { UserAvatar } from '../components/UserAvatar'
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal'
 import { deleteLeague, deleteSeason, deletionErrorMessage } from '../lib/deleteApi'
 import { Input, Textarea } from '../components/Input'
@@ -320,7 +321,7 @@ export function LeagueDetailPage() {
     if (!leagueId || !user || !userDoc) return
     setJoiningSeason(seasonId)
     try {
-      await joinSeason(seasonId, leagueId, user.uid, userDoc.displayName)
+      await joinSeason(seasonId, leagueId, user.uid, userDoc.displayName, userDoc.photoUrl)
     } finally {
       setJoiningSeason(null)
     }
@@ -557,8 +558,13 @@ export function LeagueDetailPage() {
                   key={m.uid}
                   className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-4 py-3"
                 >
-                  <span className="text-sm font-medium text-gray-800">{m.displayName}</span>
-                  <div className="flex items-center gap-2">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <UserAvatar displayName={m.displayName} photoUrl={m.photoUrl} />
+                    <span className="truncate text-sm font-medium text-gray-800">
+                      {m.displayName}
+                    </span>
+                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
                     <span className="text-xs text-gray-400 capitalize">{m.role}</span>
                     {isOwner && m.uid !== user?.uid && (
                       <select

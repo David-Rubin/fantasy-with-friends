@@ -19,6 +19,69 @@ import type { ContestantScoreDoc } from './scoring'
 admin.initializeApp()
 const db = admin.firestore()
 
+// ── Users: keep the copies of a profile in step with it ──────────────────────
+
+/**
+ * Fan a changed display name or picture out to every membership the user holds.
+ *
+ * `users/{uid}` is readable only by its owner — it carries the email address,
+ * which PRD §7.3 keeps private between members — so a roster cannot look anyone
+ * up and copies the name and picture onto each member document instead. Those
+ * copies then have to be maintained, and this is what maintains them: without
+ * it, renaming yourself or changing your picture leaves every league roster,
+ * draft room and leaderboard showing what you used to be called.
+ *
+ * A trigger rather than a client fan-out because the client cannot do it. A
+ * member may not write their own league membership at all (the rules give that
+ * to the owner) and may only change `teamName` on a season membership, which is
+ * right — someone who could rewrite their own roster rows could rewrite their
+ * role. The Admin SDK is not bound by those rules, so the work belongs here.
+ *
+ * Only fires on an actual change to one of the two copied fields. Every other
+ * write to a user document — and the trigger's own writes never touch it —
+ * leaves the rosters alone.
+ */
+export const onUserProfileWritten = onDocumentWritten('users/{uid}', async (event) => {
+  const before = event.data?.before.data()
+  const after = event.data?.after.data()
+  // Deleted account: deleteUser removes the memberships itself, so there is
+  // nothing to fan out to.
+  if (!after) return
+
+  const nameChanged = before?.displayName !== after.displayName
+  const photoChanged = (before?.photoUrl ?? '') !== (after.photoUrl ?? '')
+  if (!nameChanged && !photoChanged) return
+
+  const { uid } = event.params
+
+  // Every membership at once. The collection-group index on `uid` is declared
+  // in firestore.indexes.json for the client's own queries; this uses it too.
+  const memberships = await db.collectionGroup('members').where('uid', '==', uid).get()
+  if (memberships.empty) return
+
+  const update: Record<string, unknown> = { displayName: after.displayName }
+  // An empty photoUrl means the picture was removed, and the copies have to
+  // lose it too — writing '' rather than deleting keeps the shape predictable
+  // and reads the same as absent at every call site.
+  update.photoUrl = after.photoUrl ?? ''
+
+  // Firestore caps a batch at 500 writes. A user in more leagues and seasons
+  // than that is not a case worth failing on silently.
+  const CHUNK = 400
+  for (let i = 0; i < memberships.docs.length; i += CHUNK) {
+    const batch = db.batch()
+    for (const membership of memberships.docs.slice(i, i + CHUNK)) {
+      batch.update(membership.ref, update)
+    }
+    await batch.commit()
+  }
+
+  functions.logger.info(
+    `Synced profile for ${uid} to ${memberships.size} membership(s)` +
+      `${nameChanged ? ' [name]' : ''}${photoChanged ? ' [photo]' : ''}`
+  )
+})
+
 // ── Leagues: keep memberCount in step with the roster ────────────────────────
 
 /**

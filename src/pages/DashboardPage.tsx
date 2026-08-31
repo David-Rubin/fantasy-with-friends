@@ -147,6 +147,7 @@ export function DashboardPage() {
       await setDoc(doc(db, 'leagues', leagueRef.id, 'members', user.uid), {
         uid: user.uid,
         displayName: userDoc.displayName,
+        ...(userDoc.photoUrl ? { photoUrl: userDoc.photoUrl } : {}),
         role: 'owner',
         joinedAt: Date.now(),
       } satisfies LeagueMemberDoc)
