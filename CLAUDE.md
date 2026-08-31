@@ -220,6 +220,15 @@ manual `firebase deploy` cannot ship a stale `dist/` or `functions/lib/`.
 Whoever signs up first on a fresh project becomes superadmin
 (`grantFirstUserSuperadmin`), once, and it never re-arms.
 
+A single-field index belongs in `fieldOverrides`, never in `indexes` — the
+`indexes` array is for composite indexes, and Firestore rejects a one-field
+entry there with "this index is not necessary". The emulator does not validate
+`firestore.indexes.json` at all, so the first real deploy is where such a
+mistake surfaces. That is where `uid`'s collection-group indexes live: a nested
+rule does not authorise a collection-group query, so `members` and
+`joinRequests` both carry a denormalised `uid`, and both need collection-group
+scope declared for it.
+
 ---
 
 ## This container (Claude only)

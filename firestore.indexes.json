@@ -15,16 +15,6 @@
       ]
     },
     {
-      "collectionGroup": "members",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        {
-          "fieldPath": "joinedAt",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "seasons",
       "queryScope": "COLLECTION",
       "fields": [
