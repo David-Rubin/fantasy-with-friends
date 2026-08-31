@@ -591,23 +591,6 @@ export function LeagueDetailPage() {
             </div>
           </section>
         )}
-
-        {canManageLeague && (
-          <section className="rounded-2xl border border-red-200 bg-white p-6">
-            <h2 className="text-lg font-semibold text-red-800">{t('delete.dangerZone')}</h2>
-            <p className="mt-1 text-sm text-gray-600">{t('league.deleteExplain')}</p>
-            <Button
-              variant="danger"
-              className="mt-4"
-              onClick={() => {
-                setDeleteError('')
-                setDeleteOpen(true)
-              }}
-            >
-              {t('league.delete')}
-            </Button>
-          </section>
-        )}
       </div>
 
       <ConfirmDeleteModal
@@ -674,6 +657,33 @@ export function LeagueDetailPage() {
             onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
           />
         </form>
+
+        {/* Deleting lives here rather than on the page. It is reached about
+            once in a league's life, and a red panel below the roster was
+            shouting that on every visit. The dialog is already the place you
+            go to change the league, and it is only opened by someone who may
+            delete it — so the audience is the same without a second guard.
+
+            This dialog closes as the confirmation opens. Leaving it up and
+            stacking the two renders them into each other — both take the same
+            z-index, so the confirmation bleeds through this one instead of
+            covering it. Nothing is lost by closing: the confirmation is where
+            the league's name is typed out. */}
+        <div className="mt-6 border-t border-gray-200 pt-4">
+          <h3 className="text-sm font-semibold text-red-800">{t('delete.dangerZone')}</h3>
+          <p className="mt-1 text-sm text-gray-600">{t('league.deleteExplain')}</p>
+          <Button
+            variant="danger"
+            className="mt-3"
+            onClick={() => {
+              setEditOpen(false)
+              setDeleteError('')
+              setDeleteOpen(true)
+            }}
+          >
+            {t('league.delete')}
+          </Button>
+        </div>
       </Modal>
 
       {/* Remove a member */}

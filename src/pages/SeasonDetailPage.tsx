@@ -971,23 +971,6 @@ export function SeasonDetailPage() {
         </form>
       </Modal>
 
-      {isAdmin && (
-        <section className="mt-8 rounded-2xl border border-red-200 bg-white p-6">
-          <h2 className="text-lg font-semibold text-red-800">{t('delete.dangerZone')}</h2>
-          <p className="mt-1 text-sm text-gray-600">{t('season.deleteExplain')}</p>
-          <Button
-            variant="danger"
-            className="mt-4"
-            onClick={() => {
-              setDeleteError('')
-              setDeleteOpen(true)
-            }}
-          >
-            {t('season.delete')}
-          </Button>
-        </section>
-      )}
-
       <ConfirmDeleteModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
@@ -1048,6 +1031,33 @@ export function SeasonDetailPage() {
           />
           {editError && <p className="text-sm text-red-600">{editError}</p>}
         </form>
+
+        {/* Deleting lives here rather than on the page, for the same reason as
+            the league's: it is reached about once in a season's life, and a red
+            panel under the leaderboard was announcing that every week. The
+            dialog is already where a season is changed and only an admin opens
+            it, so the audience is unchanged without a second guard.
+
+            This dialog closes as the confirmation opens. Leaving it up and
+            stacking the two renders them into each other — both take the same
+            z-index, so the confirmation bleeds through this one instead of
+            covering it. Nothing is lost by closing: the confirmation is where
+            the league's name is typed out. */}
+        <div className="mt-6 border-t border-gray-200 pt-4">
+          <h3 className="text-sm font-semibold text-red-800">{t('delete.dangerZone')}</h3>
+          <p className="mt-1 text-sm text-gray-600">{t('season.deleteExplain')}</p>
+          <Button
+            variant="danger"
+            className="mt-3"
+            onClick={() => {
+              setEditOpen(false)
+              setDeleteError('')
+              setDeleteOpen(true)
+            }}
+          >
+            {t('season.delete')}
+          </Button>
+        </div>
       </Modal>
 
       <Modal
