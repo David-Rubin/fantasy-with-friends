@@ -108,6 +108,14 @@ export interface LeagueMemberDoc {
   displayName: string
   role: MemberRole
   joinedAt: number
+  /**
+   * Denormalized from the owner's user doc, for the same reason as
+   * `displayName`: a roster cannot read `users/{uid}` for anyone but the
+   * signed-in person. Kept current by the onUserProfileWritten trigger.
+   * Absent for anyone who has not uploaded a picture, and for member documents
+   * written before this field existed — both fall back to the lettered circle.
+   */
+  photoUrl?: string
 }
 
 export type JoinRequestStatus = 'pending' | 'approved' | 'rejected'
@@ -130,6 +138,13 @@ export interface LeagueJoinRequestDoc {
   uid: string
   /** Denormalized display name — see LeagueMemberDoc.displayName */
   displayName: string
+  /**
+   * Denormalized picture, carried so the owner can stamp it onto the member
+   * document on approval. The owner cannot read the requester's user doc, so
+   * without it a newly admitted member would be a blank circle on the roster
+   * until their next profile edit.
+   */
+  photoUrl?: string
   status: JoinRequestStatus
   requestedAt: number
   /** Set when an owner approves or rejects; null while pending */
@@ -165,6 +180,14 @@ export interface SeasonMemberDoc {
   teamName: string
   pickPosition: number | null
   joinedAt: number
+  /**
+   * Denormalized from the owner's user doc, for the same reason as
+   * `displayName`: a roster cannot read `users/{uid}` for anyone but the
+   * signed-in person. Kept current by the onUserProfileWritten trigger.
+   * Absent for anyone who has not uploaded a picture, and for member documents
+   * written before this field existed — both fall back to the lettered circle.
+   */
+  photoUrl?: string
 }
 
 export interface ContestantDoc {

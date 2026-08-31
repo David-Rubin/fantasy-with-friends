@@ -10,6 +10,7 @@ import { seasonChildTrail } from '../lib/breadcrumbs'
 import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
+import { UserAvatar } from '../components/UserAvatar'
 import { ContestantCard } from '../components/ContestantCard'
 import { TeamNameCard } from '../components/TeamNameCard'
 import { TimerBanner } from '../components/TimerBanner'
@@ -375,8 +376,11 @@ export function DraftRoomPage() {
           <p className="text-gray-500 mb-4">{t('draft.lobby.waitingForAdmin')}</p>
           <div className="flex flex-col gap-2 mb-4">
             {members.map((m) => (
-              <div key={m.uid} className="flex items-center justify-between text-sm">
-                <span className="font-medium text-gray-800">{m.displayName}</span>
+              <div key={m.uid} className="flex items-center justify-between gap-2 text-sm">
+                <span className="flex min-w-0 items-center gap-2">
+                  <UserAvatar displayName={m.displayName} photoUrl={m.photoUrl} />
+                  <span className="truncate font-medium text-gray-800">{m.displayName}</span>
+                </span>
                 {m.pickPosition && (
                   <span className="text-gray-400">
                     {t('draft.lobby.yourPosition', { n: m.pickPosition })}

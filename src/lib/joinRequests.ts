@@ -33,13 +33,15 @@ import type {
 export async function requestToJoin(
   leagueId: string,
   uid: string,
-  displayName: string
+  displayName: string,
+  photoUrl?: string
 ): Promise<void> {
   // Keyed by uid: asking twice rewrites one document instead of queueing two,
   // which is also how a rejected user asks again.
   await setDoc(doc(db, 'leagues', leagueId, 'joinRequests', uid), {
     uid,
     displayName,
+    ...(photoUrl ? { photoUrl } : {}),
     status: 'pending',
     requestedAt: Date.now(),
     decidedAt: null,
@@ -64,7 +66,7 @@ export async function approveJoinRequest(
   request: LeagueJoinRequestDoc,
   approverUid: string
 ): Promise<void> {
-  const { uid, displayName } = request
+  const { uid, displayName, photoUrl } = request
 
   const setupSeasons = await getDocs(
     query(
@@ -83,9 +85,11 @@ export async function approveJoinRequest(
   })
 
   batch.set(doc(db, 'leagues', leagueId, 'members', uid), {
-    // uid and displayName are denormalized deliberately — see LeagueMemberDoc.
+    // uid, displayName and photoUrl are denormalized deliberately — see
+    // LeagueMemberDoc.
     uid,
     displayName,
+    ...(photoUrl ? { photoUrl } : {}),
     role: 'member',
     joinedAt: Date.now(),
   } satisfies LeagueMemberDoc)
@@ -94,6 +98,7 @@ export async function approveJoinRequest(
     batch.set(doc(db, 'seasons', season.id, 'members', uid), {
       uid,
       displayName,
+      ...(photoUrl ? { photoUrl } : {}),
       teamName: `${displayName}'s Team`,
       pickPosition: null,
       joinedAt: Date.now(),

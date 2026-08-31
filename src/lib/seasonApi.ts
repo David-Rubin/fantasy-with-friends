@@ -56,12 +56,16 @@ export async function joinSeason(
   seasonId: string,
   leagueId: string,
   uid: string,
-  displayName: string
+  displayName: string,
+  photoUrl?: string
 ): Promise<void> {
   await setDoc(doc(db, 'seasons', seasonId, 'members', uid), {
-    // uid and displayName are denormalized deliberately — see SeasonMemberDoc.
+    // uid, displayName and photoUrl are denormalized deliberately — see
+    // SeasonMemberDoc. Written here as well as by the trigger so a member is
+    // not a blank circle between joining and their next profile edit.
     uid,
     displayName,
+    ...(photoUrl ? { photoUrl } : {}),
     teamName: `${displayName}'s Team`,
     pickPosition: null,
     joinedAt: Date.now(),
