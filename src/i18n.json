@@ -117,7 +117,7 @@
   "contestant.name": "Name",
   "contestant.photo": "Photo URL",
   "contestant.photoPreviewAlt": "The photo at that address",
-  "contestant.photoPreviewHint": "Check this is the right contestant before saving.",
+  "contestant.photoLoading": "Loading the photo",
   "contestant.photoFailed": "Nothing loaded from that address. Check the link.",
   "contestant.bio": "Bio",
   "contestant.readBio": "Read {name}'s full bio",
