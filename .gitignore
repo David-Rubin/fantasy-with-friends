@@ -16,6 +16,13 @@ functions/lib
 # Firebase emulator persisted data (local dev accounts, Firestore docs)
 .emulator-data
 
+# Playwright run output
+test-results
+playwright-report
+
+# Firebase CLI's local deploy cache (hosting file hashes)
+.firebase
+
 # Claude Code per-machine settings (approved tool permissions)
 .claude/settings.local.json
 

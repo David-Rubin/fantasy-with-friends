@@ -10,30 +10,29 @@ export function SignupPage() {
   const navigate = useNavigate()
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [devPin, setDevPin] = useState('')
+  const [emailError, setEmailError] = useState('')
+  const [passwordError, setPasswordError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError('')
-    setDevPin('')
+    setEmailError('')
+    setPasswordError('')
     setLoading(true)
     try {
-      const result = await signUp(displayName.trim(), email.trim().toLowerCase())
+      await signUp(displayName.trim(), email.trim().toLowerCase(), password)
       trackEvent('sign_up')
-      if (result.devPin) {
-        setDevPin(result.devPin)
-        setLoading(false)
-        return // Stay on page to show PIN
-      }
+      // Creating the account signs you in, so there is nowhere to go but in.
       navigate('/dashboard')
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : ''
-      if (msg.includes('email-already-in-use')) {
-        setError('An account with that email already exists.')
+      const code = (err as { code?: string }).code ?? ''
+      if (code === 'auth/email-already-in-use') {
+        setEmailError(t('auth.emailInUse'))
+      } else if (code === 'auth/weak-password') {
+        setPasswordError(t('auth.weakPassword'))
       } else {
-        setError(t('common.error'))
+        setEmailError(t('common.error'))
       }
     } finally {
       setLoading(false)
@@ -44,26 +43,6 @@ export function SignupPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm border border-gray-200">
         <h1 className="mb-6 text-2xl font-bold text-gray-900">{t('auth.signUp')}</h1>
-
-        {devPin && (
-          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-4">
-            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">
-              Dev mode — your PIN
-            </p>
-            <p className="text-3xl font-mono font-bold text-amber-900 tracking-widest">{devPin}</p>
-            <p className="text-xs text-amber-600 mt-2">
-              Copy this PIN, then{' '}
-              <button
-                type="button"
-                className="underline font-medium"
-                onClick={() => navigate('/login')}
-              >
-                log in
-              </button>
-              .
-            </p>
-          </div>
-        )}
 
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
           <Input
@@ -82,7 +61,18 @@ export function SignupPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            error={error || undefined}
+            error={emailError || undefined}
+          />
+          <Input
+            label={t('auth.password')}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={8}
+            autoComplete="new-password"
+            hint={t('auth.newPasswordHint')}
+            error={passwordError || undefined}
           />
           <Button type="submit" loading={loading} className="w-full mt-2">
             {loading ? t('auth.creatingAccount') : t('auth.signUp')}

@@ -160,6 +160,18 @@ it. See `src/lib/authPersistence.ts`.
 Then `npm run emulators` (builds the functions first, so the emulator can never
 serve stale or missing function code) and `npm run dev`.
 
+### Signing in locally
+
+Sign-up takes a password you choose, so a new local account is usable straight
+away. The accounts already in `.emulator-data` are not: they were made when the
+password was a random 6-digit PIN nobody wrote down. `npm run seed:passwords`
+sets every account in the running emulator to `abcd1234` and is the way back in.
+
+It talks only to the Auth emulator's REST API on a hardcoded host and project,
+and exits if nothing is listening there. Keep it that way — a known shared
+password is precisely what production must never have, so the script must have
+no way to be pointed at a real project.
+
 ### Tests
 
 `vite.config.ts` supplies dummy `VITE_FIREBASE_*` values to the test env and pins
@@ -168,9 +180,15 @@ that pin a developer running the emulator would have tests behaving differently
 from CI. **Mocks are for observing behaviour, not for getting a module to load.**
 If a test mocks something only so it will import, the fix belongs in the config.
 
-CI runs `lint`, `test` and `build` with **no `.env` at all**. A local `.env.local`
-hides env-dependent breakage, so before claiming a change is green, run the
-checks with that file moved aside.
+Vite ranks env files `.env.[mode].local` > `.env.[mode]` > `.env.local` >
+`.env`, so `.env.production` outranks `.env.local` in a production build and
+`npm run build` produces the real bundle even on a machine set up for the
+emulator. `.env.local` wins in `npm run dev`, where the mode is development and
+`.env.production` is not read at all. So the two do not fight: dev is the
+emulator, `build` is production, and no file needs moving aside to deploy.
+
+What `.env.local` does still mask is a variable that exists nowhere else. To see
+what a machine without it sees, move it aside and run the checks.
 
 ### Verify in the browser before saying it works
 
@@ -178,6 +196,42 @@ Tests passing is not the same as the feature working. For anything user-facing,
 drive it in the emulator with a real browser — sign up, click through, screenshot
 — and check the data in Firestore afterwards. Several bugs in this repo's history
 were invisible to unit tests and obvious on the first click.
+
+---
+
+## Production
+
+The live project is **`real-tv-draft`** (`.firebaserc`), on the Blaze plan
+because Cloud Functions require it. `https://real-tv-draft.web.app`.
+
+**Merging to `main` deploys.** `.github/workflows/ci.yml` runs lint, test and
+build, then — only on a push to `main` — installs both npm trees, builds, and
+deploys rules, indexes, storage, functions and hosting in that order. Backend
+before hosting, always: a bundle must never reach a browser before the rules and
+functions it expects exist.
+
+`.env.production` is committed, and is the only place production Firebase config
+comes from. That is not a leak — a Firebase web config ships inside the JS bundle
+by design, and access control is `firestore.rules`, not the API key. It is
+committed rather than kept in a GitHub secret so that the values a build used are
+visible in the diff. Vite loads `.env.local` in every mode and it wins, so a
+production build only comes out right where no `.env.local` exists — which is CI.
+For a one-off local production build, move `.env.local` aside first.
+
+`firebase.json` carries `predeploy` hooks for both hosting and functions, so a
+manual `firebase deploy` cannot ship a stale `dist/` or `functions/lib/`.
+
+Whoever signs up first on a fresh project becomes superadmin
+(`grantFirstUserSuperadmin`), once, and it never re-arms.
+
+A single-field index belongs in `fieldOverrides`, never in `indexes` — the
+`indexes` array is for composite indexes, and Firestore rejects a one-field
+entry there with "this index is not necessary". The emulator does not validate
+`firestore.indexes.json` at all, so the first real deploy is where such a
+mistake surfaces. That is where `uid`'s collection-group indexes live: a nested
+rule does not authorise a collection-group query, so `members` and
+`joinRequests` both carry a denormalised `uid`, and both need collection-group
+scope declared for it.
 
 ---
 

@@ -21,6 +21,16 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 }
 
+// A bundle built without these carries `undefined` for every field, and the
+// failure surfaces later as an opaque Firebase error on the first read. Say so
+// here instead. CI builds with no .env at all on purpose (see the workflow), so
+// this is what a production build missing .env.production looks like.
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  throw new Error(
+    'Firebase is not configured: VITE_FIREBASE_* variables are missing from this build.'
+  )
+}
+
 const app = initializeApp(firebaseConfig)
 
 /**
@@ -34,8 +44,8 @@ const app = initializeApp(firebaseConfig)
  * shared session into the tab — the leak we are removing. initializeAuth never
  * reads the shared stores at all.
  *
- * No popupRedirectResolver is passed because sign-in here is custom-token and
- * email/password only (src/lib/auth.ts). A popup flow added later must pass
+ * No popupRedirectResolver is passed because sign-in here is email/password only
+ * (src/lib/auth.ts). A popup flow added later must pass
  * browserPopupRedirectResolver, or it will fail to open.
  */
 function createAuth(firebaseApp: FirebaseApp): Auth {

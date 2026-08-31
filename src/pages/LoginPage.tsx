@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Input } from '../components/Input'
 import { Button } from '../components/Button'
-import { loginWithEmail } from '../lib/auth'
+import { logIn, sendReset } from '../lib/auth'
 import { postLoginTarget } from '../lib/loginRedirect'
 import { tabHasHostedSignIn } from '../lib/tabSession'
 import { t } from '../lib/i18n'
@@ -21,8 +21,10 @@ export function LoginPage() {
   )
 
   const [email, setEmail] = useState('')
-  const [pin, setPin] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
   const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
@@ -30,16 +32,28 @@ export function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      // Auth is disabled for now — the PIN above is not checked. See loginAsUser
-      // in functions/src/index.ts for the real (temporary) login logic.
-      await loginWithEmail(email.trim())
+      await logIn(email.trim(), password)
       // replace, so Back from the page they land on does not return to a login
       // form they have already used.
       navigate(target, { replace: true })
-    } catch {
-      setError(t('auth.userNotFound'))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : ''
+      setError(msg === 'auth/account-locked' ? t('auth.accountLocked') : t('auth.wrongPassword'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleReset() {
+    setError('')
+    setResetting(true)
+    try {
+      await sendReset(email.trim())
+      setResetSent(true)
+    } catch {
+      setError(t('common.error'))
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -56,23 +70,37 @@ export function LoginPage() {
             required
             autoComplete="email"
             autoFocus
-            error={error || undefined}
           />
           <Input
-            label={t('auth.pin')}
+            label={t('auth.password')}
             type="password"
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
             autoComplete="current-password"
-            hint={t('auth.pinOptionalHint')}
+            error={error || undefined}
           />
           <Button type="submit" loading={loading} className="w-full mt-2">
             {loading ? t('auth.loggingIn') : t('auth.logIn')}
           </Button>
         </form>
+
+        {resetSent ? (
+          <p role="status" className="mt-4 text-center text-sm text-gray-600">
+            {t('auth.resetSent')}
+          </p>
+        ) : (
+          <p className="mt-4 text-center text-sm">
+            <button
+              type="button"
+              onClick={handleReset}
+              disabled={!email.trim() || resetting}
+              className="text-blue-600 hover:underline disabled:text-gray-400 disabled:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+            >
+              {resetting ? t('auth.sendingReset') : t('auth.forgotPassword')}
+            </button>
+          </p>
+        )}
 
         <p className="mt-4 text-center text-sm text-gray-500">
           {t('auth.noAccount')}{' '}

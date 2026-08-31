@@ -18,6 +18,7 @@ test.describe('Auth flow', () => {
     await expect(page.getByRole('heading', { name: /sign up/i })).toBeVisible()
     await expect(page.getByLabel(/display name/i)).toBeVisible()
     await expect(page.getByLabel(/email/i)).toBeVisible()
+    await expect(page.getByLabel(/password/i)).toBeVisible()
     await expect(page.getByRole('button', { name: /sign up/i })).toBeVisible()
   })
 
@@ -25,7 +26,7 @@ test.describe('Auth flow', () => {
     await page.goto('/login')
     await expect(page.getByRole('heading', { name: /log in/i })).toBeVisible()
     await expect(page.getByLabel(/email/i)).toBeVisible()
-    await expect(page.getByLabel(/pin/i)).toBeVisible()
+    await expect(page.getByLabel(/password/i)).toBeVisible()
     await expect(page.getByRole('button', { name: /log in/i })).toBeVisible()
   })
 
@@ -53,18 +54,22 @@ test.describe('Auth flow', () => {
 let seq = 0
 const uniqueEmail = (prefix: string) => `${prefix}-${Date.now()}-${seq++}@example.com`
 
+const PASSWORD = 'abcd1234'
+
 async function signUp(page: import('@playwright/test').Page, displayName: string, email: string) {
   await page.goto('/signup')
   await page.getByLabel(/display name/i).fill(displayName)
   await page.getByLabel(/email/i).fill(email)
+  await page.getByLabel(/password/i).fill(PASSWORD)
   await page.getByRole('button', { name: /^sign up$/i }).click()
-  // In emulator mode signing up stays on the page to show the dev PIN.
-  await expect(page.getByText(/your PIN/i)).toBeVisible()
+  // Creating the account signs you in, so there is nowhere to land but inside.
+  await expect(page).toHaveURL(/\/dashboard$/)
 }
 
-/** Assumes the login form is already on screen. The PIN is not checked. */
+/** Assumes the login form is already on screen. */
 async function logIn(page: import('@playwright/test').Page, email: string) {
   await page.getByLabel(/email/i).fill(email)
+  await page.getByLabel(/password/i).fill(PASSWORD)
   await page.getByRole('button', { name: /^log in$/i }).click()
 }
 
@@ -76,6 +81,7 @@ test.describe('Landing after login', () => {
     const bob = uniqueEmail('bob')
     await signUp(page, 'Ada Owner', ada)
     await signUp(page, 'Bob Member', bob)
+    await page.getByRole('button', { name: /sign out/i }).click()
 
     await page.goto('/login')
     await logIn(page, ada)
@@ -126,6 +132,7 @@ test.describe('Per-tab sessions', () => {
     const first = await context.newPage()
     await signUp(first, 'Ada Owner', ada)
     await signUp(first, 'Bob Member', bob)
+    await first.getByRole('button', { name: /sign out/i }).click()
 
     await first.goto('/login')
     await logIn(first, ada)
@@ -146,6 +153,58 @@ test.describe('Per-tab sessions', () => {
     await expect(first).toHaveTitle('Fantasy With Friends — Ada Owner')
     await expect(second).toHaveTitle('Fantasy With Friends — Bob Member')
 
+    await context.close()
+  })
+})
+
+/**
+ * The password is actually checked.
+ *
+ * Worth an explicit test because for a while it was not: login took an email and
+ * handed back a session for it, and nothing in the suite noticed.
+ */
+test.describe('Passwords', () => {
+  test('the wrong password does not get you in', async ({ browser }) => {
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    const ada = uniqueEmail('ada')
+
+    await signUp(page, 'Ada Owner', ada)
+    await page.getByRole('button', { name: /sign out/i }).click()
+
+    await page.goto('/login')
+    await page.getByLabel(/email/i).fill(ada)
+    await page.getByLabel(/password/i).fill('not-the-password')
+    await page.getByRole('button', { name: /^log in$/i }).click()
+
+    await expect(page.getByRole('alert')).toBeVisible()
+    await expect(page).toHaveURL(/\/login$/)
+    await context.close()
+  })
+
+  test('changing your password on the settings page takes effect', async ({ browser }) => {
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    const bob = uniqueEmail('bob')
+    const nextPassword = 'wxyz5678'
+
+    await signUp(page, 'Bob Member', bob)
+    await page.goto('/settings')
+
+    // By id, not by label: "New password" is also a substring of "Confirm new
+    // password", and the required marker sits inside the label element.
+    await page.locator('#current-password').fill(PASSWORD)
+    await page.locator('#new-password').fill(nextPassword)
+    await page.locator('#confirm-new-password').fill(nextPassword)
+    await page.getByRole('button', { name: /^change password$/i }).click()
+    await expect(page.getByRole('status')).toBeVisible()
+
+    await page.getByRole('button', { name: /sign out/i }).click()
+    await page.goto('/login')
+    await page.getByLabel(/email/i).fill(bob)
+    await page.getByLabel(/password/i).fill(nextPassword)
+    await page.getByRole('button', { name: /^log in$/i }).click()
+    await expect(page).toHaveURL(/\/dashboard$/)
     await context.close()
   })
 })
