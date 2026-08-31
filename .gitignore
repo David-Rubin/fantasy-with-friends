@@ -20,6 +20,9 @@ functions/lib
 test-results
 playwright-report
 
+# Firebase CLI's local deploy cache (hosting file hashes)
+.firebase
+
 # Claude Code per-machine settings (approved tool permissions)
 .claude/settings.local.json
 
