@@ -16,7 +16,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -28,5 +28,68 @@ jobs:
       - name: Test
         run: npm test
 
+      # No .env.local exists here, so this compiles against the committed
+      # .env.production — the same bundle the deploy job below ships.
       - name: Build
         run: npm run build
+
+  deploy:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Two merges landing together must not race each other's uploads, and the
+    # second must not be cancelled half way through a deploy.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The functions live in their own npm tree, and `firebase deploy` uploads
+      # functions/lib as it finds it.
+      - name: Install function dependencies
+        run: npm ci --prefix functions
+
+      # Without it the bundle carries an undefined Firebase config and the
+      # deployed site fails on first load. Better to stop here than to publish
+      # that.
+      - name: Check production config is present
+        run: test -f .env.production || { echo '.env.production is missing'; exit 1; }
+
+      - name: Build the app
+        run: npm run build
+
+      - name: Build the functions
+        run: npm run build --prefix functions
+
+      - name: Authenticate to Firebase
+        run: |
+          echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/service-account.json" >> "$GITHUB_ENV"
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_REAL_TV_DRAFT }}
+
+      # Backend first: rules, indexes and functions are what the new bundle
+      # expects to find. Shipping hosting first would put a client in front of a
+      # backend that cannot serve it.
+      - name: Deploy rules, indexes and functions
+        run: >
+          npx --yes firebase-tools@15 deploy
+          --only firestore:rules,firestore:indexes,storage,functions
+          --project real-tv-draft --non-interactive --force
+
+      - name: Deploy hosting
+        run: >
+          npx --yes firebase-tools@15 deploy
+          --only hosting
+          --project real-tv-draft --non-interactive --force

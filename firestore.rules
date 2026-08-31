@@ -62,8 +62,15 @@ service cloud.firestore {
       // account through the deleteUser function, which also has to reach the
       // Auth record, the superadmins document, and every membership the user
       // holds across leagues and seasons. None of that is visible from here.
+      // No credential ever belongs in this document. Firebase Authentication
+      // holds the password as a salted hash and nothing here needs to see it,
+      // so a write carrying anything password-shaped is refused outright rather
+      // than trusted to be harmless.
       allow create, update: if request.auth.uid == uid
-        && !('pinHash' in request.resource.data);
+        && !('pinHash' in request.resource.data)
+        && !('pin' in request.resource.data)
+        && !('password' in request.resource.data)
+        && !('passwordHash' in request.resource.data);
       allow delete: if false;
     }
 

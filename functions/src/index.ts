@@ -9,81 +9,6 @@ import type { ContestantScoreDoc } from './scoring'
 admin.initializeApp()
 const db = admin.firestore()
 
-// ── Auth: sign up ─────────────────────────────────────────────────────────────
-
-export const signUpUser = functions.https.onCall(
-  async (data: { displayName: string; email: string }) => {
-    const { displayName, email } = data
-
-    // Generate 6-digit PIN
-    const pin = String(Math.floor(100000 + Math.random() * 900000))
-
-    // Create Firebase Auth user — password is the PIN itself
-    // (In production, you'd hash this; for Firebase Auth email/password, the PIN IS the password)
-    const userRecord = await admin.auth().createUser({
-      email: email.toLowerCase(),
-      password: pin,
-      displayName,
-    })
-
-    // Write user doc
-    await db.doc(`users/${userRecord.uid}`).set({
-      displayName,
-      email: email.toLowerCase(),
-      createdAt: Date.now(),
-      loginAttempts: 0,
-      lockedUntil: null,
-    })
-
-    // TODO: Send PIN via email (use Firebase Extension: Trigger Email)
-    // For now, log it for emulator development
-    functions.logger.info(`PIN for ${email}: ${pin}`)
-
-    return { uid: userRecord.uid }
-  }
-)
-
-// ── Auth: log in by email (auth disabled — trusts any caller) ─────────────────
-// TEMPORARY: does not check a PIN or password at all. Whoever supplies an
-// email is logged in as that user. Re-enable real verification (see
-// loginWithPin/resendPin below) before this app is used outside a small
-// trusted group.
-
-export const loginAsUser = functions.https.onCall(async (data: { email: string }) => {
-  const email = data.email.trim().toLowerCase()
-
-  let userRecord
-  try {
-    userRecord = await admin.auth().getUserByEmail(email)
-  } catch {
-    throw new functions.https.HttpsError('not-found', 'No account with that email.')
-  }
-
-  const token = await admin.auth().createCustomToken(userRecord.uid)
-  return { token }
-})
-
-// ── Auth: resend PIN ──────────────────────────────────────────────────────────
-
-export const resendPin = functions.https.onCall(async (data: { email: string }) => {
-  const { email } = data
-
-  // Find user by email
-  const userRecord = await admin.auth().getUserByEmail(email.toLowerCase())
-
-  // Generate new PIN
-  const pin = String(Math.floor(100000 + Math.random() * 900000))
-
-  // Update Firebase Auth password
-  await admin.auth().updateUser(userRecord.uid, { password: pin })
-
-  // Reset login attempts
-  await db.doc(`users/${userRecord.uid}`).update({ loginAttempts: 0, lockedUntil: null })
-
-  // TODO: Send PIN via email
-  functions.logger.info(`New PIN for ${email}: ${pin}`)
-})
-
 // ── Leagues: keep memberCount in step with the roster ────────────────────────
 
 /**
@@ -945,10 +870,10 @@ async function isSuperadmin(uid: string): Promise<boolean> {
 /**
  * Make the very first account on an environment a superadmin.
  *
- * A trigger rather than a branch inside signUpUser, because that is not the only
- * way an account gets made — the emulator path in src/lib/auth.ts writes the user
- * document straight from the client and never calls the function. Hanging this
- * off the document itself catches every route in.
+ * A trigger rather than part of the sign-up path, because sign-up happens in the
+ * client (src/lib/auth.ts) and a client cannot be trusted to grant itself a
+ * role — the rules make `superadmins/{uid}` unwritable from there. Hanging this
+ * off the user document itself catches every route in, whatever creates it.
  *
  * The one-shot marker is what makes it safe: two signups landing together would
  * both see an empty superadmins collection, so instead the transaction claims a

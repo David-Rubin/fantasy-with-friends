@@ -16,6 +16,10 @@ functions/lib
 # Firebase emulator persisted data (local dev accounts, Firestore docs)
 .emulator-data
 
+# Playwright run output
+test-results
+playwright-report
+
 # Claude Code per-machine settings (approved tool permissions)
 .claude/settings.local.json
 

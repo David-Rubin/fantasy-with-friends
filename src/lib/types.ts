@@ -57,12 +57,16 @@ export type AccentColor =
 
 // ── Firestore document shapes ─────────────────────────────────────────────────
 
+/**
+ * Everything the app stores about an account. No credential of any kind belongs
+ * here: the password lives in Firebase Authentication as a salted hash and is
+ * never readable, and the rules refuse a write to this document that carries a
+ * password-shaped field.
+ */
 export interface UserDoc {
   displayName: string
   email: string
   createdAt: number // epoch ms
-  loginAttempts: number
-  lockedUntil: number | null
 }
 
 export interface LeagueDoc {

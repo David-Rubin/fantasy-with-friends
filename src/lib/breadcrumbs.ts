@@ -34,6 +34,10 @@ export function adminUsersTrail(): BreadcrumbItem[] {
   return [{ label: t('nav.dashboard'), to: '/dashboard' }, { label: t('admin.users.title') }]
 }
 
+export function settingsTrail(): BreadcrumbItem[] {
+  return [{ label: t('nav.dashboard'), to: '/dashboard' }, { label: t('settings.title') }]
+}
+
 export function leagueTrail(leagueName: string | undefined): BreadcrumbItem[] {
   return [{ label: t('nav.dashboard'), to: '/dashboard' }, { label: leagueLabel(leagueName) }]
 }

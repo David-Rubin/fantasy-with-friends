@@ -10,6 +10,7 @@ import { SeasonDetailPage } from './pages/SeasonDetailPage'
 import { DraftRoomPage } from './pages/DraftRoomPage'
 import { EpisodeScoringPage } from './pages/EpisodeScoringPage'
 import { AdminUsersPage } from './pages/AdminUsersPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 export default function App() {
   return (
@@ -62,6 +63,14 @@ export default function App() {
           />
 
           {/* App-level, not scoped to a league */}
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/admin/users"
             element={

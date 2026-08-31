@@ -1,12 +1,16 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Contestant photos: authenticated users can read; admins write via Cloud Function
-    match /contestants/{seasonId}/{contestantId}/{fileName} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-        && request.resource.size <= 2 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+    // Nothing in the app uploads yet: a contestant photo is a URL typed into a
+    // text field (src/components/ContestantFields.tsx), stored as a string, and
+    // fetched from wherever it already lives. So the bucket is closed.
+    //
+    // The rule this replaced let any signed-in user write to any contestant's
+    // photo path — an open door onto a room nobody has built. When uploads
+    // arrive, open the path they actually use, and keep the size and
+    // content-type limits the old rule had.
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

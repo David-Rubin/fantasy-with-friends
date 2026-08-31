@@ -1,63 +1,34 @@
 import {
   signInWithEmailAndPassword,
-  signInWithCustomToken,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  reauthenticateWithCredential,
+  updatePassword,
+  EmailAuthProvider,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   type User,
 } from 'firebase/auth'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { httpsCallable } from 'firebase/functions'
-import { auth, db, functions } from './firebase'
+import { auth, db } from './firebase'
 
-const IS_EMULATOR = import.meta.env.VITE_USE_EMULATOR === 'true'
+// Passwords never touch this app's storage. Firebase Authentication holds a
+// salted hash of them and nothing else here — no Firestore document carries a
+// password, and no Cloud Function reads one. The `users/{uid}` write below is
+// the whole of what we persist about an account.
 
-// FUTURE IMPROVEMENT: Move brute-force lockout to a `loginWithPin` Cloud Function.
-// The client calls a callable function; the function checks /users/{uid}.loginAttempts
-// via Admin SDK (bypasses security rules), enforces the 5-attempt / 15-min lockout,
-// then signs the user in server-side and returns a custom token. This removes the need
-// for the client to ever read the users collection unauthenticated.
-// See: https://firebase.google.com/docs/auth/admin/create-custom-tokens
-
-// AUTH DISABLED (temporary): loginAsUser trusts any caller and skips PIN/password
-// verification entirely — see functions/src/index.ts for the real logic and a note
-// on re-enabling loginWithPin below.
-
-const signUpFn = httpsCallable<{ displayName: string; email: string }, { uid: string }>(
-  functions,
-  'signUpUser'
-)
-
-const loginAsUserFn = httpsCallable<{ email: string }, { token: string }>(functions, 'loginAsUser')
-
-const resendPinFn = httpsCallable<{ email: string }, void>(functions, 'resendPin')
-
-export async function signUp(displayName: string, email: string): Promise<{ devPin?: string }> {
-  if (IS_EMULATOR) {
-    // Dev-only: create user directly, skip Cloud Function + email
-    const pin = String(Math.floor(100000 + Math.random() * 900000))
-    const credential = await createUserWithEmailAndPassword(auth, email.toLowerCase(), pin)
-    await setDoc(doc(db, 'users', credential.user.uid), {
-      displayName,
-      email: email.toLowerCase(),
-      createdAt: Date.now(),
-      loginAttempts: 0,
-      lockedUntil: null,
-    })
-    return { devPin: pin }
-  }
-  await signUpFn({ displayName, email })
-  return {}
+export async function signUp(displayName: string, email: string, password: string): Promise<void> {
+  const credential = await createUserWithEmailAndPassword(auth, email.toLowerCase(), password)
+  await setDoc(doc(db, 'users', credential.user.uid), {
+    displayName,
+    email: email.toLowerCase(),
+    createdAt: Date.now(),
+  })
 }
 
-export async function loginWithEmail(email: string): Promise<void> {
-  const { data } = await loginAsUserFn({ email: email.trim().toLowerCase() })
-  await signInWithCustomToken(auth, data.token)
-}
-
-export async function loginWithPin(email: string, pin: string): Promise<void> {
+export async function logIn(email: string, password: string): Promise<void> {
   try {
-    await signInWithEmailAndPassword(auth, email.toLowerCase(), pin)
+    await signInWithEmailAndPassword(auth, email.toLowerCase(), password)
   } catch (err: unknown) {
     const code = (err as { code?: string }).code ?? ''
     if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
@@ -73,8 +44,48 @@ export async function loginWithPin(email: string, pin: string): Promise<void> {
   }
 }
 
-export async function resendPin(email: string): Promise<void> {
-  await resendPinFn({ email })
+/**
+ * Send Firebase's own password-reset email.
+ *
+ * Resolves even when no account has that address. A form that reported "no such
+ * user" would let anyone test whether a given person plays here, and the person
+ * asking for a reset cannot act on the distinction anyway.
+ */
+export async function sendReset(email: string): Promise<void> {
+  try {
+    await sendPasswordResetEmail(auth, email.toLowerCase())
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code ?? ''
+    if (code === 'auth/user-not-found' || code === 'auth/invalid-email') return
+    throw err
+  }
+}
+
+/**
+ * Change the signed-in user's password.
+ *
+ * Firebase refuses `updatePassword` on a session that has not signed in
+ * recently, so the current password is re-checked first. That is also what stops
+ * someone at an unattended logged-in browser taking the account over.
+ */
+export async function changePassword(current: string, next: string): Promise<void> {
+  const user = auth.currentUser
+  if (!user?.email) throw new Error('auth/no-user')
+
+  try {
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, current))
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code ?? ''
+    if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+      throw new Error('auth/wrong-password')
+    }
+    if (code === 'auth/too-many-requests') {
+      throw new Error('auth/account-locked')
+    }
+    throw err
+  }
+
+  await updatePassword(user, next)
 }
 
 export async function signOut(): Promise<void> {
