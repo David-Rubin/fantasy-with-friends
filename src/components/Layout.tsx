@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { signOut } from '../lib/auth'
 import { t } from '../lib/i18n'
 import { Breadcrumbs } from './Breadcrumbs'
+import { UserMenu } from './UserMenu'
 import type { BreadcrumbItem } from '../lib/breadcrumbs'
 
 interface LayoutProps {
@@ -35,32 +36,14 @@ export function Layout({ children, breadcrumbs }: LayoutProps) {
           >
             {t('nav.appName')}
           </Link>
-          <div className="flex items-center gap-4">
-            {isSuperadmin && (
-              <Link
-                to="/admin/users"
-                className="text-sm text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
-              >
-                {t('nav.users')}
-              </Link>
-            )}
-            <Link
-              to="/settings"
-              className="text-sm text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
-            >
-              {t('nav.settings')}
-            </Link>
-            {userDoc && (
-              <span className="hidden text-sm text-gray-600 sm:block">{userDoc.displayName}</span>
-            )}
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="text-sm text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
-            >
-              {t('nav.signOut')}
-            </button>
-          </div>
+          {userDoc && (
+            <UserMenu
+              displayName={userDoc.displayName}
+              photoUrl={userDoc.photoUrl}
+              isSuperadmin={isSuperadmin}
+              onLogOut={handleSignOut}
+            />
+          )}
         </div>
       </nav>
       <main className="mx-auto max-w-5xl px-4 py-8">

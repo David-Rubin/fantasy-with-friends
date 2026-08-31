@@ -1,14 +1,27 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Nothing in the app uploads yet: a contestant photo is a URL typed into a
-    // text field (src/components/ContestantFields.tsx), stored as a string, and
-    // fetched from wherever it already lives. So the bucket is closed.
+    // Profile pictures. The only thing the app uploads.
     //
-    // The rule this replaced let any signed-in user write to any contestant's
-    // photo path — an open door onto a room nobody has built. When uploads
-    // arrive, open the path they actually use, and keep the size and
-    // content-type limits the old rule had.
+    // The constraints that matter are here rather than in the client, because
+    // a check in the upload form is advice: anyone with devtools can call the
+    // SDK directly. The form applies the same limits so a mistake is caught
+    // before the bytes are sent, not so the rule can be relaxed.
+    //
+    // One fixed path per person, so a new picture replaces the old one instead
+    // of accumulating files nothing points at.
+    match /avatars/{uid}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg)');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Contestant photos are URLs typed into a text field, not uploads
+    // (src/components/ContestantFields.tsx), so there is nothing to store and
+    // nothing to allow. Open a path here when that changes.
     match /{allPaths=**} {
       allow read, write: if false;
     }

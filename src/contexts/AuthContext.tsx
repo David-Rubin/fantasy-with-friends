@@ -14,6 +14,8 @@ interface UserDoc {
   uid: string
   displayName: string
   email: string
+  /** An uploaded profile picture. Absent until someone uploads one. */
+  photoUrl?: string
 }
 
 interface AuthContextValue {

@@ -66,6 +66,16 @@ async function signUp(page: import('@playwright/test').Page, displayName: string
   await expect(page).toHaveURL(/\/dashboard$/)
 }
 
+/** Log out lives behind the account menu now, not in the header. */
+async function logOut(page: import('@playwright/test').Page) {
+  await page
+    .getByRole('button', { name: /account menu|log out/i })
+    .or(page.locator('[id^="headlessui-menu-button"]'))
+    .first()
+    .click()
+  await page.getByRole('menuitem', { name: /^log out$/i }).click()
+}
+
 /** Assumes the login form is already on screen. */
 async function logIn(page: import('@playwright/test').Page, email: string) {
   await page.getByLabel(/email/i).fill(email)
@@ -81,13 +91,13 @@ test.describe('Landing after login', () => {
     const bob = uniqueEmail('bob')
     await signUp(page, 'Ada Owner', ada)
     await signUp(page, 'Bob Member', bob)
-    await page.getByRole('button', { name: /sign out/i }).click()
+    await logOut(page)
 
     await page.goto('/login')
     await logIn(page, ada)
     await expect(page).toHaveURL(/\/dashboard$/)
 
-    await page.getByRole('button', { name: /sign out/i }).click()
+    await logOut(page)
     await expect(page).toHaveURL(/\/$/)
 
     // Ada's page is no longer offered to whoever logs in next: the bounce keeps
@@ -132,7 +142,7 @@ test.describe('Per-tab sessions', () => {
     const first = await context.newPage()
     await signUp(first, 'Ada Owner', ada)
     await signUp(first, 'Bob Member', bob)
-    await first.getByRole('button', { name: /sign out/i }).click()
+    await logOut(first)
 
     await first.goto('/login')
     await logIn(first, ada)
@@ -150,8 +160,8 @@ test.describe('Per-tab sessions', () => {
     await expect(second.getByText('Bob Member')).toBeVisible()
 
     // The tab strip is what tells them apart without switching tabs.
-    await expect(first).toHaveTitle('Fantasy With Friends — Ada Owner')
-    await expect(second).toHaveTitle('Fantasy With Friends — Bob Member')
+    await expect(first).toHaveTitle('RealTV Draft — Ada Owner')
+    await expect(second).toHaveTitle('RealTV Draft — Bob Member')
 
     await context.close()
   })
@@ -170,7 +180,7 @@ test.describe('Passwords', () => {
     const ada = uniqueEmail('ada')
 
     await signUp(page, 'Ada Owner', ada)
-    await page.getByRole('button', { name: /sign out/i }).click()
+    await logOut(page)
 
     await page.goto('/login')
     await page.getByLabel(/email/i).fill(ada)
@@ -189,7 +199,8 @@ test.describe('Passwords', () => {
     const nextPassword = 'wxyz5678'
 
     await signUp(page, 'Bob Member', bob)
-    await page.goto('/settings')
+    // The account page opens on User Info; the password form is its own view.
+    await page.goto('/settings?tab=password')
 
     // By id, not by label: "New password" is also a substring of "Confirm new
     // password", and the required marker sits inside the label element.
@@ -199,7 +210,7 @@ test.describe('Passwords', () => {
     await page.getByRole('button', { name: /^change password$/i }).click()
     await expect(page.getByRole('status')).toBeVisible()
 
-    await page.getByRole('button', { name: /sign out/i }).click()
+    await logOut(page)
     await page.goto('/login')
     await page.getByLabel(/email/i).fill(bob)
     await page.getByLabel(/password/i).fill(nextPassword)
