@@ -56,6 +56,9 @@ export function LeagueDetailPage() {
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const [joinRequests, setJoinRequests] = useState<LeagueJoinRequestDoc[]>([])
   const [deciding, setDeciding] = useState<string | null>(null)
+  // Keyed by request, so a failure names the row it belongs to rather than
+  // hanging a message over a queue that may hold several people.
+  const [decideError, setDecideError] = useState<string | null>(null)
   // Distinguishes "not a member" from "membership not loaded yet", so the page
   // never flashes a Join button at someone who already belongs here.
   const [membershipResolved, setMembershipResolved] = useState(false)
@@ -214,6 +217,7 @@ export function LeagueDetailPage() {
   async function handleDecide(request: LeagueJoinRequestDoc, approve: boolean) {
     if (!leagueId || !user) return
     setDeciding(request.uid)
+    setDecideError(null)
     try {
       if (approve) {
         await approveJoinRequest(leagueId, request, user.uid)
@@ -221,8 +225,12 @@ export function LeagueDetailPage() {
         await rejectJoinRequest(leagueId, request.uid, user.uid)
       }
     } catch (error) {
-      // A denied or partial write would otherwise leave the row looking decided.
+      // Say so on the row. Without this the only sign of a failure was a line
+      // in the console: the request stayed in the queue looking untouched, so
+      // the obvious read was that the button had not worked, and the obvious
+      // response was to reload and try again.
       console.error('Failed to decide join request', error)
+      setDecideError(request.uid)
     } finally {
       setDeciding(null)
     }
@@ -417,8 +425,15 @@ export function LeagueDetailPage() {
                 key={request.uid}
                 className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
               >
-                <span className="text-sm font-medium text-gray-800">{request.displayName}</span>
-                <div className="flex items-center gap-2">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-gray-800">{request.displayName}</span>
+                  {decideError === request.uid && (
+                    <p role="alert" className="mt-1 text-xs text-red-600">
+                      {t('league.decideFailed')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
                   <Button
                     variant="secondary"
                     loading={deciding === request.uid}
