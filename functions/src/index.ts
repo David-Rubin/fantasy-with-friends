@@ -1,5 +1,15 @@
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions/v1'
+import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore'
+
+// The three Firestore triggers below are 2nd gen while every callable is 1st.
+// Not a style choice: a 1st gen Firestore trigger cannot watch a database in a
+// multi-region location, and this project's is in nam5. The deploy fails with
+// "is in region nam5-us-central1 which is not supported". 2nd gen goes through
+// Eventarc, which does support it. The callables have no such constraint and
+// are left alone rather than migrated for tidiness — mixing generations in one
+// codebase is supported, and a rewrite of twelve entry points is a larger
+// change than the reason for it warrants.
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
 import { nextSlot, pickerAt, draftOutcome, openSlots, skipLimitReached } from './draft'
 import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
@@ -24,16 +34,17 @@ const db = admin.firestore()
  * write is interrupted; recounting on every membership change is self-healing,
  * and rosters here are a few dozen documents at most.
  */
-export const onLeagueMemberWritten = functions.firestore
-  .document('leagues/{leagueId}/members/{uid}')
-  .onWrite(async (change, context) => {
+export const onLeagueMemberWritten = onDocumentWritten(
+  'leagues/{leagueId}/members/{uid}',
+  async (event) => {
     // Role edits leave the roster size alone.
-    if (change.before.exists && change.after.exists) return
+    if (event.data?.before.exists && event.data.after.exists) return
 
-    const { leagueId } = context.params
+    const { leagueId } = event.params
     const membersSnap = await db.collection(`leagues/${leagueId}/members`).get()
     await db.doc(`leagues/${leagueId}`).update({ memberCount: membersSnap.size })
-  })
+  }
+)
 
 // ── Leagues: remove a member ─────────────────────────────────────────────────
 
@@ -885,42 +896,40 @@ async function isSuperadmin(uid: string): Promise<boolean> {
  * users — which is deliberate, since "next person to sign up becomes superadmin"
  * would be a way in rather than a recovery.
  */
-export const grantFirstUserSuperadmin = functions.firestore
-  .document('users/{uid}')
-  .onCreate(async (_snap, context) => {
-    const { uid } = context.params
-    const markerRef = db.doc('appConfig/bootstrap')
+export const grantFirstUserSuperadmin = onDocumentCreated('users/{uid}', async (event) => {
+  const { uid } = event.params
+  const markerRef = db.doc('appConfig/bootstrap')
 
-    // Only in a genuinely empty environment. Without this, deploying to a
-    // project that already has accounts would hand the role to whoever signed
-    // up next — a way in rather than a bootstrap. The trigger runs after the
-    // write, so one document means this account and nobody else.
-    const existing = await db.collection('users').limit(2).get()
-    if (existing.size > 1) return
+  // Only in a genuinely empty environment. Without this, deploying to a
+  // project that already has accounts would hand the role to whoever signed
+  // up next — a way in rather than a bootstrap. The trigger runs after the
+  // write, so one document means this account and nobody else.
+  const existing = await db.collection('users').limit(2).get()
+  if (existing.size > 1) return
 
-    const granted = await db.runTransaction(async (tx) => {
-      const marker = await tx.get(markerRef)
-      if (marker.exists) return false
+  const granted = await db.runTransaction(async (tx) => {
+    const marker = await tx.get(markerRef)
+    if (marker.exists) return false
 
-      tx.set(markerRef, { superadminGrantedTo: uid, grantedAt: Date.now() })
-      tx.set(db.doc(`superadmins/${uid}`), {
-        grantedAt: Date.now(),
-        note: 'first account on this environment',
-      })
-      return true
+    tx.set(markerRef, { superadminGrantedTo: uid, grantedAt: Date.now() })
+    tx.set(db.doc(`superadmins/${uid}`), {
+      grantedAt: Date.now(),
+      note: 'first account on this environment',
     })
-
-    if (granted) {
-      functions.logger.info(`Granted superadmin to first user ${uid}`)
-      await db.collection('auditLogs').add({
-        action: 'superadmin_granted',
-        actorUid: 'system',
-        targetUid: uid,
-        reason: 'first-user',
-        timestamp: Date.now(),
-      })
-    }
+    return true
   })
+
+  if (granted) {
+    functions.logger.info(`Granted superadmin to first user ${uid}`)
+    await db.collection('auditLogs').add({
+      action: 'superadmin_granted',
+      actorUid: 'system',
+      targetUid: uid,
+      reason: 'first-user',
+      timestamp: Date.now(),
+    })
+  }
+})
 
 /**
  * Every account on the app, for the superadmin user directory.
@@ -1235,12 +1244,13 @@ export const logAuditEvent = functions.https.onCall(async (data, context) => {
 
 // ── Score calculation trigger ─────────────────────────────────────────────────
 
-export const onEpisodeScoreWritten = functions.firestore
-  .document('seasons/{seasonId}/episodeScores/{episodeNumber}/contestantScores/{contestantId}')
-  .onWrite(async (_, context) => {
-    const { seasonId } = context.params
+export const onEpisodeScoreWritten = onDocumentWritten(
+  'seasons/{seasonId}/episodeScores/{episodeNumber}/contestantScores/{contestantId}',
+  async (event) => {
+    const { seasonId } = event.params
     await recalcTeamTotals(seasonId)
-  })
+  }
+)
 
 async function recalcTeamTotals(seasonId: string) {
   // Fetch all data needed for recalculation
