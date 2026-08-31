@@ -9,7 +9,7 @@ import {
   onAuthStateChanged,
   type User,
 } from 'firebase/auth'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, setDoc } from 'firebase/firestore'
 import { auth, db } from './firebase'
 
 // Passwords never touch this app's storage. Firebase Authentication holds a
@@ -94,9 +94,4 @@ export async function signOut(): Promise<void> {
 
 export function onAuthChanged(callback: (user: User | null) => void) {
   return onAuthStateChanged(auth, callback)
-}
-
-export async function getUserDoc(uid: string) {
-  const snap = await getDoc(doc(db, 'users', uid))
-  return snap.exists() ? { uid, ...snap.data() } : null
 }
