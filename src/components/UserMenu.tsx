@@ -5,8 +5,10 @@ import { t } from '../lib/i18n'
 
 interface UserMenuProps {
   displayName: string
+  photoUrl?: string
   /** App-level role. Only a superadmin is offered the user directory. */
   isSuperadmin: boolean
+  onLogOut: () => void
 }
 
 /**
@@ -21,7 +23,7 @@ interface UserMenuProps {
  * up: on a phone the button is just the avatar, and without the name it would
  * announce as an unlabelled button.
  */
-export function UserMenu({ displayName, isSuperadmin }: UserMenuProps) {
+export function UserMenu({ displayName, photoUrl, isSuperadmin, onLogOut }: UserMenuProps) {
   // data-focus, not focus: Headless UI v2 tracks the highlighted item virtually
   // and marks it with that attribute rather than moving DOM focus to it, so a
   // plain focus: variant never fires and arrow-key users see nothing move.
@@ -31,7 +33,7 @@ export function UserMenu({ displayName, isSuperadmin }: UserMenuProps) {
   return (
     <Menu as="div" className="relative">
       <MenuButton className="flex cursor-pointer items-center gap-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
-        <UserAvatar displayName={displayName} />
+        <UserAvatar displayName={displayName} photoUrl={photoUrl} />
         <span className="sr-only text-sm text-gray-600 sm:not-sr-only sm:block">{displayName}</span>
       </MenuButton>
 
@@ -47,6 +49,13 @@ export function UserMenu({ displayName, isSuperadmin }: UserMenuProps) {
           <Link to="/settings" className={itemClass}>
             {t('nav.settings')}
           </Link>
+        </MenuItem>
+        {/* Separated: the others navigate, this one ends the session. */}
+        <div className="my-1 border-t border-gray-100" />
+        <MenuItem>
+          <button type="button" onClick={onLogOut} className={`cursor-pointer ${itemClass}`}>
+            {t('nav.logOut')}
+          </button>
         </MenuItem>
       </MenuItems>
     </Menu>

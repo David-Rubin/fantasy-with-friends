@@ -36,16 +36,14 @@ export function Layout({ children, breadcrumbs }: LayoutProps) {
           >
             {t('nav.appName')}
           </Link>
-          <div className="flex items-center gap-4">
-            {userDoc && <UserMenu displayName={userDoc.displayName} isSuperadmin={isSuperadmin} />}
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="text-sm text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
-            >
-              {t('nav.signOut')}
-            </button>
-          </div>
+          {userDoc && (
+            <UserMenu
+              displayName={userDoc.displayName}
+              photoUrl={userDoc.photoUrl}
+              isSuperadmin={isSuperadmin}
+              onLogOut={handleSignOut}
+            />
+          )}
         </div>
       </nav>
       <main className="mx-auto max-w-5xl px-4 py-8">

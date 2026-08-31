@@ -67,6 +67,8 @@ export interface UserDoc {
   displayName: string
   email: string
   createdAt: number // epoch ms
+  /** Storage URL of an uploaded profile picture. Absent until one is uploaded. */
+  photoUrl?: string
 }
 
 export interface LeagueDoc {
