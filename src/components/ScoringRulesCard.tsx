@@ -93,22 +93,43 @@ export function ScoringRulesCard({
   }
 
   if (!editing) {
+    // Collapsed by default. How points are earned is what a player checks
+    // mid-episode and otherwise never thinks about, so it is present on every
+    // screen and in the way on none of them.
+    //
+    // A native <details>, which brings the toggle, the keyboard behaviour and
+    // the open/closed semantics without state or ARIA of our own. Edit sits in
+    // the <summary> so the header stays one row; its click has to be stopped
+    // from reaching the summary, or entering edit mode would toggle the panel
+    // shut on the way in.
     return (
-      <div className="mb-6 rounded-xl border border-gray-200 bg-white">
-        <div className="flex items-center justify-between px-5 py-3">
-          <span className="text-sm font-medium text-gray-700">
+      <details className="mb-6 rounded-xl border border-gray-200 bg-white">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-5 py-3 marker:content-none hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          <span className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+            <svg
+              className="h-4 w-4 text-gray-400 transition-transform [details[open]_&]:rotate-90"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M7 5l6 5-6 5V5z" />
+            </svg>
             {t('rules.heading', { n: rules.length })}
           </span>
           {canEdit && (
             <Button
               variant="secondary"
               className="!min-h-0 !px-3 !py-1 text-xs"
-              onClick={startEditing}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                startEditing()
+              }}
             >
               {t('common.edit')}
             </Button>
           )}
-        </div>
+        </summary>
         <div className="border-t border-gray-100 px-5 py-4">
           {rules.length === 0 ? (
             <p className="text-sm text-gray-400">{t('rules.none')}</p>
@@ -122,7 +143,7 @@ export function ScoringRulesCard({
             </ul>
           )}
         </div>
-      </div>
+      </details>
     )
   }
 

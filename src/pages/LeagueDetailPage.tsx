@@ -56,6 +56,9 @@ export function LeagueDetailPage() {
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const [joinRequests, setJoinRequests] = useState<LeagueJoinRequestDoc[]>([])
   const [deciding, setDeciding] = useState<string | null>(null)
+  // Keyed by request, so a failure names the row it belongs to rather than
+  // hanging a message over a queue that may hold several people.
+  const [decideError, setDecideError] = useState<string | null>(null)
   // Distinguishes "not a member" from "membership not loaded yet", so the page
   // never flashes a Join button at someone who already belongs here.
   const [membershipResolved, setMembershipResolved] = useState(false)
@@ -214,6 +217,7 @@ export function LeagueDetailPage() {
   async function handleDecide(request: LeagueJoinRequestDoc, approve: boolean) {
     if (!leagueId || !user) return
     setDeciding(request.uid)
+    setDecideError(null)
     try {
       if (approve) {
         await approveJoinRequest(leagueId, request, user.uid)
@@ -221,8 +225,12 @@ export function LeagueDetailPage() {
         await rejectJoinRequest(leagueId, request.uid, user.uid)
       }
     } catch (error) {
-      // A denied or partial write would otherwise leave the row looking decided.
+      // Say so on the row. Without this the only sign of a failure was a line
+      // in the console: the request stayed in the queue looking untouched, so
+      // the obvious read was that the button had not worked, and the obvious
+      // response was to reload and try again.
       console.error('Failed to decide join request', error)
+      setDecideError(request.uid)
     } finally {
       setDeciding(null)
     }
@@ -403,39 +411,46 @@ export function LeagueDetailPage() {
         </div>
       )}
 
-      {/* Pending requests, for the owner to decide */}
-      {canManageLeague && (
+      {/* Pending requests, for whoever can decide them. The whole section is
+          absent when the queue is empty rather than showing an empty state:
+          there is nothing to do about no requests, and a standing "No pending
+          requests." line pushes the league's actual content down the page on
+          every visit for the one person who sees it. */}
+      {pendingRequests.length > 0 && (
         <section className="mb-8">
           <h2 className="mb-3 text-lg font-semibold text-gray-900">{t('league.joinRequests')}</h2>
-          {pendingRequests.length === 0 ? (
-            <p className="text-sm text-gray-400">{t('league.noJoinRequests')}</p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {pendingRequests.map((request) => (
-                <div
-                  key={request.uid}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
-                >
+          <div className="flex flex-col gap-2">
+            {pendingRequests.map((request) => (
+              <div
+                key={request.uid}
+                className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
+              >
+                <div className="min-w-0">
                   <span className="text-sm font-medium text-gray-800">{request.displayName}</span>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      loading={deciding === request.uid}
-                      onClick={() => handleDecide(request, false)}
-                    >
-                      {t('league.reject')}
-                    </Button>
-                    <Button
-                      loading={deciding === request.uid}
-                      onClick={() => handleDecide(request, true)}
-                    >
-                      {t('league.approve')}
-                    </Button>
-                  </div>
+                  {decideError === request.uid && (
+                    <p role="alert" className="mt-1 text-xs text-red-600">
+                      {t('league.decideFailed')}
+                    </p>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    loading={deciding === request.uid}
+                    onClick={() => handleDecide(request, false)}
+                  >
+                    {t('league.reject')}
+                  </Button>
+                  <Button
+                    loading={deciding === request.uid}
+                    onClick={() => handleDecide(request, true)}
+                  >
+                    {t('league.approve')}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
@@ -576,23 +591,6 @@ export function LeagueDetailPage() {
             </div>
           </section>
         )}
-
-        {canManageLeague && (
-          <section className="rounded-2xl border border-red-200 bg-white p-6">
-            <h2 className="text-lg font-semibold text-red-800">{t('delete.dangerZone')}</h2>
-            <p className="mt-1 text-sm text-gray-600">{t('league.deleteExplain')}</p>
-            <Button
-              variant="danger"
-              className="mt-4"
-              onClick={() => {
-                setDeleteError('')
-                setDeleteOpen(true)
-              }}
-            >
-              {t('league.delete')}
-            </Button>
-          </section>
-        )}
       </div>
 
       <ConfirmDeleteModal
@@ -659,6 +657,33 @@ export function LeagueDetailPage() {
             onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
           />
         </form>
+
+        {/* Deleting lives here rather than on the page. It is reached about
+            once in a league's life, and a red panel below the roster was
+            shouting that on every visit. The dialog is already the place you
+            go to change the league, and it is only opened by someone who may
+            delete it — so the audience is the same without a second guard.
+
+            This dialog closes as the confirmation opens. Leaving it up and
+            stacking the two renders them into each other — both take the same
+            z-index, so the confirmation bleeds through this one instead of
+            covering it. Nothing is lost by closing: the confirmation is where
+            the league's name is typed out. */}
+        <div className="mt-6 border-t border-gray-200 pt-4">
+          <h3 className="text-sm font-semibold text-red-800">{t('delete.dangerZone')}</h3>
+          <p className="mt-1 text-sm text-gray-600">{t('league.deleteExplain')}</p>
+          <Button
+            variant="danger"
+            className="mt-3"
+            onClick={() => {
+              setEditOpen(false)
+              setDeleteError('')
+              setDeleteOpen(true)
+            }}
+          >
+            {t('league.delete')}
+          </Button>
+        </div>
       </Modal>
 
       {/* Remove a member */}

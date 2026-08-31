@@ -24,13 +24,13 @@ import { t } from '../lib/i18n'
  * rendered solely while the rules are still open to change; once the first
  * episode is scored both drop it rather than showing dead forms.
  *
- * Everyone reads the rules elsewhere — ScoringRulesDisclosure on the season
+ * Everyone reads the rules elsewhere — ScoringRulesCard on the season
  * page — which is why the read-only rendering of a rule lives in RuleSummary
  * below and is shared between the two.
  */
 
 /**
- * One rule, as a reader sees it. Shared with ScoringRulesDisclosure so the
+ * One rule, as a reader sees it. Shared with ScoringRulesCard so the
  * rules read identically whether an admin is editing them or a player is
  * looking them up mid-season.
  */
