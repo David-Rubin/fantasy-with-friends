@@ -21,17 +21,54 @@ import type {
   ScoringRule,
   Contestant,
 } from '../lib/types'
-import { evaluateRule } from '../lib/scoring'
+import { evaluateRule, isPenalty } from '../lib/scoring'
 import { fingerprintOf, ruleCoversEpisode, rulesFingerprint } from '../lib/scoringRules'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
 
 /** A scored/not-scored cell, for the read-only table a member sees. */
-function ScoreMark({ on, label }: { on: boolean; label: string }) {
+/**
+ * One cell of a scorecard nobody can edit.
+ *
+ * Three states, not two. A rule that was ticked is drawn as a green check where
+ * it earns points and a red cross where it costs them, because the tick alone
+ * says only that the thing happened — whether that is good news depends on the
+ * column, and a card is read a column at a time. An untouched cell stays the
+ * grey dash it always was.
+ *
+ * The cross is a deliberate risk: on its own it reads as "no". What stops it is
+ * that the heading above says both the rule and its points, so the column is
+ * already marked as one that takes them away. The label spells it out for
+ * anyone who cannot see either the colour or the heading.
+ */
+function ScoreMark({
+  on,
+  penalty = false,
+  rule,
+  contestant,
+}: {
+  on: boolean
+  /** Drawn as a cross rather than a check. See isPenalty. */
+  penalty?: boolean
+  rule: string
+  contestant: string
+}) {
+  // Said in full rather than left to colour and glyph: the mark used to carry
+  // the same label whether or not it was ticked, so a screen reader heard the
+  // rule and the name and never the answer.
+  const label = t(
+    !on ? 'scoring.mark.notScored' : penalty ? 'scoring.mark.penalised' : 'scoring.mark.scored',
+    { rule, contestant }
+  )
+
   return (
-    <span className={on ? 'text-green-600' : 'text-gray-300'} title={label} aria-label={label}>
-      {on ? '\u2713' : '\u2014'}
+    <span
+      className={!on ? 'text-gray-300' : penalty ? 'text-red-600' : 'text-green-600'}
+      title={label}
+      aria-label={label}
+    >
+      {!on ? '\u2014' : penalty ? '\u00d7' : '\u2713'}
     </span>
   )
 }
@@ -363,10 +400,19 @@ export function EpisodeScoringPage() {
                 </td>
                 {displayRules.map((rule) => {
                   const val = scores[contestant.id]?.[rule.id]
-                  if (!canEdit) {
+                  // A checkbox is an invitation to tick it. An admin looking at
+                  // a locked episode — or at one still showing the rules it was
+                  // recorded under — cannot, so they get the same marks
+                  // everybody else gets rather than a row of dead boxes.
+                  if (!canEdit || readOnlyTable) {
                     return (
                       <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
-                        <ScoreMark on={val === true} label={`${rule.name} — ${contestant.name}`} />
+                        <ScoreMark
+                          on={val === true}
+                          penalty={isPenalty(rule.points)}
+                          rule={rule.name}
+                          contestant={contestant.name}
+                        />
                       </td>
                     )
                   }
@@ -387,10 +433,15 @@ export function EpisodeScoringPage() {
                   {calcTotalForContestant(contestant.id)}
                 </td>
                 <td className="border-b border-gray-100 py-3 px-3 text-center">
-                  {!canEdit ? (
+                  {/* Left as a check. Being eliminated is not a scoring rule and
+                      costs no points — the column records what happened, and
+                      giving it the penalty cross would imply a deduction that
+                      does not exist. */}
+                  {!canEdit || readOnlyTable ? (
                     <ScoreMark
                       on={!!eliminations[contestant.id]}
-                      label={`${t('contestant.eliminated')} — ${contestant.name}`}
+                      rule={t('contestant.eliminated')}
+                      contestant={contestant.name}
                     />
                   ) : (
                     <button
