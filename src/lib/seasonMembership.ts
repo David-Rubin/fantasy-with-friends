@@ -40,3 +40,35 @@ export function canJoinSeason({
   if (!resolved) return false
   return state === 'setup' && isLeagueMember && !isSeasonMember
 }
+
+/**
+ * Who is offered the way into a running draft.
+ *
+ * Deliberately the same people the season page would have offered it to, since
+ * that is where this button used to live: a season page is for that season's
+ * members, plus a superadmin, who is cleared to read every season without
+ * joining one. Anybody else sees the season on the league page as a card and
+ * nothing more.
+ *
+ * Note this is not the mirror of canJoinSeason above. That one is about letting
+ * yourself onto a roster, and so is closed to anyone already on it; this is a
+ * door into a room, and being on the roster is exactly what opens it.
+ */
+interface DraftJoinableInput {
+  state: SeasonState
+  isSeasonMember: boolean
+  /** Cleared to read any season without joining it — see useSeasonMembership. */
+  isSuperadmin: boolean
+  /** False while season membership is still loading; see JoinableInput.resolved. */
+  resolved: boolean
+}
+
+export function canJoinDraft({
+  state,
+  isSeasonMember,
+  isSuperadmin,
+  resolved,
+}: DraftJoinableInput): boolean {
+  if (!resolved) return false
+  return state === 'draft' && (isSeasonMember || isSuperadmin)
+}

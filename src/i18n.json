@@ -96,6 +96,8 @@
   "season.states.complete": "Complete",
   "season.setupNoticeTitle": "This season is still being set up",
   "season.setupNoticeBody": "An admin is adding the contestants and scoring rules. Check back soon — the draft will open once the season is ready.",
+  "season.draftNoticeTitle": "The draft is under way",
+  "season.draftNoticeBody": "Your league is drafting right now. Join the draft room to see the board and take your picks.",
   "season.tabs.leaderboard": "Leaderboard",
   "season.tabs.roster": "Roster",
   "season.tabs.freeAgents": "Free Agents",

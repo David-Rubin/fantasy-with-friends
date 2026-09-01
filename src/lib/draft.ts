@@ -1,4 +1,4 @@
-import type { PickOrderMethod } from './types'
+import type { PickOrderMethod, SeasonState } from './types'
 
 /**
  * Client-side draft helpers.
@@ -72,4 +72,23 @@ export function movePickOrder(order: string[], from: number, to: number): string
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved)
   return next
+}
+
+// ── Standing in a room that is no longer there ───────────────────────────────
+
+/**
+ * Whether the draft room should send whoever is in it back to the season page.
+ *
+ * An admin can reset a draft from anywhere, and everyone else is simply
+ * standing in the room when it happens — so this cannot be decided by whoever
+ * pressed the button. The season going back to `setup` is the signal, and it
+ * reaches every participant through the season listener.
+ *
+ * `setup` alone, deliberately. "Not drafting" would also catch the season a
+ * finished draft leaves behind, and that has its own screen in the room: the
+ * one that says the draft is complete and names your team. Sending people away
+ * from that would replace a result with a redirect.
+ */
+export function draftRoomShouldRedirect(seasonState: SeasonState): boolean {
+  return seasonState === 'setup'
 }
