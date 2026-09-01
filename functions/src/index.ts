@@ -11,13 +11,39 @@ import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/fire
 // codebase is supported, and a rewrite of twelve entry points is a larger
 // change than the reason for it warrants.
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
-import { nextSlot, pickerAt, draftOutcome, openSlots, skipLimitReached } from './draft'
+import {
+  nextSlot,
+  pickerAt,
+  draftOutcome,
+  openSlots,
+  skipLimitReached,
+  resolvePickOrder,
+} from './draft'
 import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
 import { userDeletionProblem, userDeletionMessage } from './deletion'
 import type { ContestantScoreDoc } from './scoring'
 
 admin.initializeApp()
 const db = admin.firestore()
+
+/**
+ * Settings for the callables someone is sitting and waiting on — a pick, the
+ * clock, opening or closing the board.
+ *
+ * A 1st gen function's CPU is tied to its memory, and the 256MB default is the
+ * slowest share on offer. That cost is paid mostly on a cold start, where the
+ * container has to boot Node and load this module — every entry point in it,
+ * since they share one file — before the handler runs at all. On a warm
+ * instance it is milliseconds; on a cold one, at a quarter of the clock speed,
+ * it is the difference between a button that responds and a button that looks
+ * broken. Pausing the draft clock was taking the best part of ten seconds the
+ * first time it was pressed, and only the first time.
+ *
+ * This does not abolish cold starts — only a minimum instance does that, and
+ * that one is billed by the hour whether anyone drafts or not. It makes them
+ * several times shorter for the price of a little memory during the call.
+ */
+const INTERACTIVE: functions.RuntimeOptions = { memory: '1GB', timeoutSeconds: 60 }
 
 // ── Users: keep the copies of a profile in step with it ──────────────────────
 
@@ -234,148 +260,162 @@ export const removeLeagueMember = functions.https.onCall(
  * checked together against committed state, which also removes the race where
  * two clients pick the same contestant from a stale snapshot.
  */
-export const submitPick = functions.https.onCall(
-  async (
-    data: { seasonId: string; contestantId: string; onBehalfOf?: string },
-    context
-  ): Promise<{ status: 'active' | 'awaiting-close' | 'complete' }> => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
-    }
-    const actingUid = context.auth.uid
-    const { seasonId, contestantId, onBehalfOf } = data
-
-    if (!seasonId || !contestantId) {
-      throw new functions.https.HttpsError('invalid-argument', 'seasonId and contestantId required')
-    }
-
-    const seasonRef = db.doc(`seasons/${seasonId}`)
-    const seasonSnap = await seasonRef.get()
-    if (!seasonSnap.exists) {
-      throw new functions.https.HttpsError('not-found', 'Season not found')
-    }
-    const leagueId = seasonSnap.data()?.leagueId as string
-
-    // Proxy picks (PRD 3.3.2) are admin-only, and get recorded with the acting
-    // admin's id so the audit trail shows who actually pressed the button.
-    const isAdmin = await isLeagueAdmin(leagueId, actingUid)
-    if (onBehalfOf && !isAdmin) {
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Only an admin can pick on behalf of another member'
-      )
-    }
-    const pickerUid = onBehalfOf ?? actingUid
-
-    // The draft doc has a generated id, so find it rather than assume one.
-    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
-    if (draftQuery.empty) {
-      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
-    }
-    const draftRef = draftQuery.docs[0].ref
-    const contestantRef = db.doc(`seasons/${seasonId}/contestants/${contestantId}`)
-    const contestantsCol = db.collection(`seasons/${seasonId}/contestants`)
-
-    const result = await db.runTransaction(async (tx) => {
-      const [draftSnap, contestantSnap, allContestants] = await Promise.all([
-        tx.get(draftRef),
-        tx.get(contestantRef),
-        tx.get(contestantsCol),
-      ])
-
-      const draft = draftSnap.data()
-      // `paused` is a live draft awaiting an admin proxy pick for the member
-      // who missed their turn, so picks are still accepted here.
-      if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
-        throw new functions.https.HttpsError('failed-precondition', 'Draft is not active')
+export const submitPick = functions
+  .runWith(INTERACTIVE)
+  .https.onCall(
+    async (
+      data: { seasonId: string; contestantId?: string; onBehalfOf?: string; warm?: boolean },
+      context
+    ): Promise<{ status: 'active' | 'awaiting-close' | 'complete'; warmed?: boolean }> => {
+      if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
       }
-      if (!contestantSnap.exists) {
-        throw new functions.https.HttpsError('not-found', 'Contestant not found')
+      // The first pick of a draft pays the same cold start as the first pause.
+      // See the note on warming above setTimerPaused.
+      if (data.warm) return { status: 'active', warmed: true }
+      const actingUid = context.auth.uid
+      const { seasonId, contestantId, onBehalfOf } = data
+
+      if (!seasonId || !contestantId) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'seasonId and contestantId required'
+        )
       }
 
-      const contestant = contestantSnap.data()
-      if (contestant?.draftedByUid) {
-        throw new functions.https.HttpsError('aborted', 'That contestant has already been drafted')
+      const seasonRef = db.doc(`seasons/${seasonId}`)
+      const seasonSnap = await seasonRef.get()
+      if (!seasonSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Season not found')
       }
-      if (contestant?.eliminatedEpisode !== null && contestant?.eliminatedEpisode !== undefined) {
-        throw new functions.https.HttpsError('failed-precondition', 'Contestant is eliminated')
+      const leagueId = seasonSnap.data()?.leagueId as string
+
+      // Proxy picks (PRD 3.3.2) are admin-only, and get recorded with the acting
+      // admin's id so the audit trail shows who actually pressed the button.
+      const isAdmin = await isLeagueAdmin(leagueId, actingUid)
+      if (onBehalfOf && !isAdmin) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Only an admin can pick on behalf of another member'
+        )
       }
+      const pickerUid = onBehalfOf ?? actingUid
 
-      // An admin may pick out of turn only via onBehalfOf; picking for yourself
-      // still requires it to actually be your turn.
-      if (draft.currentPickerUid !== pickerUid) {
-        throw new functions.https.HttpsError('failed-precondition', 'It is not that member’s turn')
+      // The draft doc has a generated id, so find it rather than assume one.
+      const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+      if (draftQuery.empty) {
+        throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
       }
+      const draftRef = draftQuery.docs[0].ref
+      const contestantRef = db.doc(`seasons/${seasonId}/contestants/${contestantId}`)
+      const contestantsCol = db.collection(`seasons/${seasonId}/contestants`)
 
-      const pickOrder = (draft.pickOrder ?? []) as string[]
+      const result = await db.runTransaction(async (tx) => {
+        const [draftSnap, contestantSnap, allContestants] = await Promise.all([
+          tx.get(draftRef),
+          tx.get(contestantRef),
+          tx.get(contestantsCol),
+        ])
 
-      tx.create(draftRef.collection('picks').doc(), {
+        const draft = draftSnap.data()
+        // `paused` is a live draft awaiting an admin proxy pick for the member
+        // who missed their turn, so picks are still accepted here.
+        if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
+          throw new functions.https.HttpsError('failed-precondition', 'Draft is not active')
+        }
+        if (!contestantSnap.exists) {
+          throw new functions.https.HttpsError('not-found', 'Contestant not found')
+        }
+
+        const contestant = contestantSnap.data()
+        if (contestant?.draftedByUid) {
+          throw new functions.https.HttpsError(
+            'aborted',
+            'That contestant has already been drafted'
+          )
+        }
+        if (contestant?.eliminatedEpisode !== null && contestant?.eliminatedEpisode !== undefined) {
+          throw new functions.https.HttpsError('failed-precondition', 'Contestant is eliminated')
+        }
+
+        // An admin may pick out of turn only via onBehalfOf; picking for yourself
+        // still requires it to actually be your turn.
+        if (draft.currentPickerUid !== pickerUid) {
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            'It is not that member’s turn'
+          )
+        }
+
+        const pickOrder = (draft.pickOrder ?? []) as string[]
+
+        tx.create(draftRef.collection('picks').doc(), {
+          contestantId,
+          pickerUid,
+          actingAdminUid: onBehalfOf ? actingUid : null,
+          round: draft.currentRound,
+          pickNumber: draft.currentPickNumber,
+          timestamp: Date.now(),
+        })
+
+        tx.update(contestantRef, {
+          draftedByUid: pickerUid,
+          draftedRound: draft.currentRound,
+        })
+
+        // The draft finishes on a round boundary once too few contestants remain
+        // to give everyone one more. If a roster is short and the bench still has
+        // someone on it, an admin settles that before the draft closes.
+        const remaining = allContestants.docs.filter(
+          (d) =>
+            !d.data().draftedByUid && d.data().eliminatedEpisode === null && d.id !== contestantId
+        ).length
+        const rosterCounts = countRosters(allContestants.docs, pickOrder, contestantId, pickerUid)
+
+        const outcome = draftOutcome(
+          draft.currentPickNumber as number,
+          pickOrder.length,
+          remaining,
+          rosterCounts
+        )
+
+        if (outcome !== 'continue') {
+          tx.update(draftRef, { status: outcome, currentPickerUid: null, timerExpiresAt: null })
+          if (outcome === 'complete') tx.update(seasonRef, { state: 'active' })
+          return { status: outcome }
+        }
+
+        const next = nextSlot(
+          pickOrder,
+          draft.currentRound as number,
+          draft.currentPickNumber as number
+        )
+        tx.update(draftRef, {
+          status: 'active',
+          currentRound: next.round,
+          currentPickNumber: next.pickNumber,
+          currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
+          timerExpiresAt: Date.now() + ((seasonSnap.data()?.timerSeconds as number) ?? 60) * 1000,
+          // Somebody picked, so the room is not abandoned.
+          consecutiveSkips: 0,
+        })
+        return { status: 'active' as const }
+      })
+
+      // Logged here rather than by the caller — a client that skipped the call
+      // used to leave a proxy pick with no trace (PRD 10.1).
+      await db.collection('auditLogs').add({
+        action: onBehalfOf ? 'admin_proxy_pick' : 'draft_pick',
+        seasonId,
         contestantId,
-        pickerUid,
-        actingAdminUid: onBehalfOf ? actingUid : null,
-        round: draft.currentRound,
-        pickNumber: draft.currentPickNumber,
+        targetUid: onBehalfOf ?? null,
+        actorUid: actingUid,
         timestamp: Date.now(),
       })
 
-      tx.update(contestantRef, {
-        draftedByUid: pickerUid,
-        draftedRound: draft.currentRound,
-      })
-
-      // The draft finishes on a round boundary once too few contestants remain
-      // to give everyone one more. If a roster is short and the bench still has
-      // someone on it, an admin settles that before the draft closes.
-      const remaining = allContestants.docs.filter(
-        (d) =>
-          !d.data().draftedByUid && d.data().eliminatedEpisode === null && d.id !== contestantId
-      ).length
-      const rosterCounts = countRosters(allContestants.docs, pickOrder, contestantId, pickerUid)
-
-      const outcome = draftOutcome(
-        draft.currentPickNumber as number,
-        pickOrder.length,
-        remaining,
-        rosterCounts
-      )
-
-      if (outcome !== 'continue') {
-        tx.update(draftRef, { status: outcome, currentPickerUid: null, timerExpiresAt: null })
-        if (outcome === 'complete') tx.update(seasonRef, { state: 'active' })
-        return { status: outcome }
-      }
-
-      const next = nextSlot(
-        pickOrder,
-        draft.currentRound as number,
-        draft.currentPickNumber as number
-      )
-      tx.update(draftRef, {
-        status: 'active',
-        currentRound: next.round,
-        currentPickNumber: next.pickNumber,
-        currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
-        timerExpiresAt: Date.now() + ((seasonSnap.data()?.timerSeconds as number) ?? 60) * 1000,
-        // Somebody picked, so the room is not abandoned.
-        consecutiveSkips: 0,
-      })
-      return { status: 'active' as const }
-    })
-
-    // Logged here rather than by the caller — a client that skipped the call
-    // used to leave a proxy pick with no trace (PRD 10.1).
-    await db.collection('auditLogs').add({
-      action: onBehalfOf ? 'admin_proxy_pick' : 'draft_pick',
-      seasonId,
-      contestantId,
-      targetUid: onBehalfOf ?? null,
-      actorUid: actingUid,
-      timestamp: Date.now(),
-    })
-
-    return result
-  }
-)
+      return result
+    }
+  )
 
 // ── Draft: resolve an expired pick timer ──────────────────────────────────────
 
@@ -410,7 +450,7 @@ export const submitPick = functions.https.onCall(
  * turns on one expiry. Whichever call lands first advances the turn; the rest
  * no longer match and do nothing.
  */
-export const resolveExpiredTurn = functions.https.onCall(
+export const resolveExpiredTurn = functions.runWith(INTERACTIVE).https.onCall(
   async (
     data: { seasonId: string; round: number; pickNumber: number },
     context
@@ -577,6 +617,132 @@ function countRosters(
   )
 }
 
+// ── Draft: opening the board ─────────────────────────────────────────────────
+
+/**
+ * Start the draft: fix the order, hand out pick positions, and start the clock.
+ *
+ * Server-side because of the clock. The deadline is an absolute timestamp that
+ * the server later measures against its own `Date.now()` — when a turn expires,
+ * and what a pause banks — so a deadline written from a browser silently mixes
+ * two clocks. An admin whose machine ran five seconds fast wrote a deadline
+ * five seconds further out than the timer they had configured: their own screen
+ * counted down correctly, because it was reading its own clock back, while
+ * every other participant and the server itself saw five seconds more. Pausing
+ * a 60-second timer at 56 banked 61. Nothing about that is visible to the admin
+ * who caused it, and it drifts with whatever their clock happens to be doing.
+ *
+ * With the write here, the deadline and the clock that judges it are the same
+ * clock. A participant whose own machine is off still renders a countdown that
+ * is off by their skew — a browser can only subtract the time it has — but what
+ * is stored, banked and enforced no longer depends on who pressed the button.
+ *
+ * The rest follows from being here anyway: one batch instead of a write per
+ * member issued one at a time from a browser, and a guard against two admins
+ * opening the board at once, which the old path would have answered with two
+ * draft documents and a coin toss over which one counted.
+ */
+export const startDraft = functions
+  .runWith(INTERACTIVE)
+  .https.onCall(
+    async (
+      data: { seasonId: string },
+      context
+    ): Promise<{ pickOrder: string[]; timerExpiresAt: number }> => {
+      if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+      }
+      const { seasonId } = data
+      if (!seasonId) throw new functions.https.HttpsError('invalid-argument', 'seasonId required')
+
+      const seasonRef = db.doc(`seasons/${seasonId}`)
+      const [seasonSnap, membersSnap, draftQuery] = await Promise.all([
+        seasonRef.get(),
+        db.collection(`seasons/${seasonId}/members`).get(),
+        db.collection(`seasons/${seasonId}/draft`).limit(1).get(),
+      ])
+      if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
+      const season = seasonSnap.data() ?? {}
+
+      if (!(await isLeagueAdmin(season.leagueId as string, context.auth.uid))) {
+        throw new functions.https.HttpsError('permission-denied', 'Admins only')
+      }
+      // Already open. Returning the running draft rather than throwing keeps a
+      // double click — or two admins on the same lobby — harmless.
+      if (!draftQuery.empty) {
+        const existing = draftQuery.docs[0].data()
+        return {
+          pickOrder: (existing.pickOrder as string[]) ?? [],
+          timerExpiresAt: (existing.timerExpiresAt as number) ?? 0,
+        }
+      }
+      if (membersSnap.empty) {
+        throw new functions.https.HttpsError('failed-precondition', 'Season has no members')
+      }
+
+      const memberUids = membersSnap.docs.map((d) => d.id)
+      const pickOrder = resolvePickOrder(
+        (season.pickOrderMethod as 'randomized' | 'admin-set') ?? 'randomized',
+        memberUids,
+        season.adminPickOrder as string[] | undefined
+      )
+      const timerSeconds = (season.timerSeconds as number) ?? 60
+      const timerExpiresAt = Date.now() + timerSeconds * 1000
+
+      const batch = db.batch()
+      batch.set(db.collection(`seasons/${seasonId}/draft`).doc(), {
+        status: 'active',
+        currentPickerUid: pickOrder[0],
+        currentRound: 1,
+        currentPickNumber: 1,
+        pickOrder,
+        timerExpiresAt,
+        consecutiveSkips: 0,
+        haltedReason: null,
+        timerPausedRemainingMs: null,
+      })
+      pickOrder.forEach((uid, i) => {
+        batch.update(db.doc(`seasons/${seasonId}/members/${uid}`), { pickPosition: i + 1 })
+      })
+      batch.update(seasonRef, { state: 'draft' })
+      await batch.commit()
+
+      await db.collection('auditLogs').add({
+        action: 'draft_started',
+        seasonId,
+        leagueId: season.leagueId,
+        actorUid: context.auth.uid,
+        newValue: pickOrder,
+        timestamp: Date.now(),
+      })
+
+      return { pickOrder, timerExpiresAt }
+    }
+  )
+
+// ── Draft: waking the instance before it is needed ───────────────────────────
+
+/**
+ * A call that does nothing except arrive.
+ *
+ * Cold starts are what made the first press of Pause take the best part of ten
+ * seconds: the container has to boot Node and load this module before the
+ * handler runs. An instance stays warm for a while after any call, and a draft
+ * room is open for minutes before anyone touches the clock — so the room sends
+ * one of these on the way in, and the press that matters lands on a warm
+ * instance.
+ *
+ * It has to be an explicit flag, and it has to return before reading anything.
+ * The obvious alternative — ask the function to set the state it is already in
+ * and let it short-circuit — is a race: the client's idea of the current state
+ * can be stale by the time the server acts on it, so a warm-up that set out
+ * believing the clock was running would resume a clock that had been paused in
+ * the meantime. The dangerous window is exactly the one where it is slow.
+ *
+ * Signed in is still required. Beyond that it reads nothing and writes nothing,
+ * so there is nothing for it to get wrong.
+ */
+
 // ── Draft: pause and resume the clock ─────────────────────────────────────────
 
 /**
@@ -593,75 +759,83 @@ function countRosters(
  * Separate from `status: 'paused'`, which means a turn expired under the
  * admin-picks policy. Here the turn is untouched and its holder can still pick.
  */
-export const setTimerPaused = functions.https.onCall(
-  async (
-    data: { seasonId: string; paused: boolean },
-    context
-  ): Promise<{ paused: boolean; remainingMs: number | null }> => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
-    }
-    const { seasonId, paused } = data
-    if (!seasonId || typeof paused !== 'boolean') {
-      throw new functions.https.HttpsError('invalid-argument', 'seasonId and paused required')
-    }
-
-    const seasonSnap = await db.doc(`seasons/${seasonId}`).get()
-    if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
-
-    if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
-      throw new functions.https.HttpsError('permission-denied', 'Admins only')
-    }
-
-    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
-    if (draftQuery.empty) {
-      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
-    }
-    const draftRef = draftQuery.docs[0].ref
-    const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
-
-    const result = await db.runTransaction(async (tx) => {
-      const draftSnap = await tx.get(draftRef)
-      const draft = draftSnap.data()
-      if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
-        throw new functions.https.HttpsError('failed-precondition', 'Draft is not running')
+export const setTimerPaused = functions
+  .runWith(INTERACTIVE)
+  .https.onCall(
+    async (
+      data: { seasonId: string; paused: boolean; warm?: boolean },
+      context
+    ): Promise<{ paused: boolean; remainingMs: number | null; warmed?: boolean }> => {
+      if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+      }
+      // See the note on warming above: returns before touching any state.
+      if (data.warm) return { paused: false, remainingMs: null, warmed: true }
+      const { seasonId, paused } = data
+      if (!seasonId || typeof paused !== 'boolean') {
+        throw new functions.https.HttpsError('invalid-argument', 'seasonId and paused required')
       }
 
-      const bankedMs = draft.timerPausedRemainingMs as number | null
+      // Fetched together: neither read depends on the other, and this runs while
+      // an admin watches the button spin.
+      const [seasonSnap, draftQuery] = await Promise.all([
+        db.doc(`seasons/${seasonId}`).get(),
+        db.collection(`seasons/${seasonId}/draft`).limit(1).get(),
+      ])
+      if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
 
-      if (paused) {
-        if (bankedMs !== null && bankedMs !== undefined) {
-          return { paused: true, remainingMs: bankedMs } // already paused
+      if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
+        throw new functions.https.HttpsError('permission-denied', 'Admins only')
+      }
+
+      if (draftQuery.empty) {
+        throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+      }
+      const draftRef = draftQuery.docs[0].ref
+      const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
+
+      const result = await db.runTransaction(async (tx) => {
+        const draftSnap = await tx.get(draftRef)
+        const draft = draftSnap.data()
+        if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
+          throw new functions.https.HttpsError('failed-precondition', 'Draft is not running')
         }
-        const expiresAt = draft.timerExpiresAt as number | null
-        // Bank whatever is left, never a negative. An already-expired clock
-        // banks nothing, so resuming hands back a fresh turn rather than one
-        // that fires the moment it restarts.
-        const remainingMs = expiresAt ? Math.max(0, expiresAt - Date.now()) : timerSeconds * 1000
-        tx.update(draftRef, { timerPausedRemainingMs: remainingMs, timerExpiresAt: null })
-        return { paused: true, remainingMs }
-      }
 
-      if (bankedMs === null || bankedMs === undefined) {
-        return { paused: false, remainingMs: null } // already running
-      }
-      tx.update(draftRef, {
-        timerPausedRemainingMs: null,
-        timerExpiresAt: Date.now() + (bankedMs > 0 ? bankedMs : timerSeconds * 1000),
+        const bankedMs = draft.timerPausedRemainingMs as number | null
+
+        if (paused) {
+          if (bankedMs !== null && bankedMs !== undefined) {
+            return { paused: true, remainingMs: bankedMs } // already paused
+          }
+          const expiresAt = draft.timerExpiresAt as number | null
+          // Bank whatever is left, never a negative. An already-expired clock
+          // banks nothing, so resuming hands back a fresh turn rather than one
+          // that fires the moment it restarts.
+          const remainingMs = expiresAt ? Math.max(0, expiresAt - Date.now()) : timerSeconds * 1000
+          tx.update(draftRef, { timerPausedRemainingMs: remainingMs, timerExpiresAt: null })
+          return { paused: true, remainingMs }
+        }
+
+        if (bankedMs === null || bankedMs === undefined) {
+          return { paused: false, remainingMs: null } // already running
+        }
+        tx.update(draftRef, {
+          timerPausedRemainingMs: null,
+          timerExpiresAt: Date.now() + (bankedMs > 0 ? bankedMs : timerSeconds * 1000),
+        })
+        return { paused: false, remainingMs: null }
       })
-      return { paused: false, remainingMs: null }
-    })
 
-    await db.collection('auditLogs').add({
-      action: paused ? 'draft_timer_paused' : 'draft_timer_resumed',
-      seasonId,
-      actorUid: context.auth.uid,
-      timestamp: Date.now(),
-    })
+      await db.collection('auditLogs').add({
+        action: paused ? 'draft_timer_paused' : 'draft_timer_resumed',
+        seasonId,
+        actorUid: context.auth.uid,
+        timestamp: Date.now(),
+      })
 
-    return result
-  }
-)
+      return result
+    }
+  )
 
 // ── Draft: bench assignment and closing ───────────────────────────────────────
 
@@ -762,48 +936,50 @@ export const assignFromBench = functions.https.onCall(
  * leave rosters uneven and the remaining contestants on the bench, and that is a
  * decision worth making on purpose.
  */
-export const closeDraft = functions.https.onCall(async (data: { seasonId: string }, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
-  }
-  const { seasonId } = data
-  if (!seasonId) throw new functions.https.HttpsError('invalid-argument', 'seasonId required')
-
-  const seasonRef = db.doc(`seasons/${seasonId}`)
-  const seasonSnap = await seasonRef.get()
-  if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
-
-  if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
-    throw new functions.https.HttpsError('permission-denied', 'Admins only')
-  }
-
-  const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
-  if (draftQuery.empty) {
-    throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
-  }
-  const draftRef = draftQuery.docs[0].ref
-
-  await db.runTransaction(async (tx) => {
-    const draftSnap = await tx.get(draftRef)
-    if (draftSnap.data()?.status !== 'awaiting-close') {
-      throw new functions.https.HttpsError(
-        'failed-precondition',
-        'The draft is not waiting to be closed'
-      )
+export const closeDraft = functions
+  .runWith(INTERACTIVE)
+  .https.onCall(async (data: { seasonId: string }, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
     }
-    tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
-    tx.update(seasonRef, { state: 'active' })
-  })
+    const { seasonId } = data
+    if (!seasonId) throw new functions.https.HttpsError('invalid-argument', 'seasonId required')
 
-  await db.collection('auditLogs').add({
-    action: 'draft_closed',
-    seasonId,
-    actorUid: context.auth.uid,
-    timestamp: Date.now(),
-  })
+    const seasonRef = db.doc(`seasons/${seasonId}`)
+    const seasonSnap = await seasonRef.get()
+    if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
 
-  return { ok: true }
-})
+    if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Admins only')
+    }
+
+    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+    if (draftQuery.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+    }
+    const draftRef = draftQuery.docs[0].ref
+
+    await db.runTransaction(async (tx) => {
+      const draftSnap = await tx.get(draftRef)
+      if (draftSnap.data()?.status !== 'awaiting-close') {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'The draft is not waiting to be closed'
+        )
+      }
+      tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+      tx.update(seasonRef, { state: 'active' })
+    })
+
+    await db.collection('auditLogs').add({
+      action: 'draft_closed',
+      seasonId,
+      actorUid: context.auth.uid,
+      timestamp: Date.now(),
+    })
+
+    return { ok: true }
+  })
 
 /**
  * Put a season that is drafting back into setup so an admin can change it.

@@ -12,8 +12,8 @@ import { functions } from './firebase'
  * `onBehalfOf` is an admin proxy pick (PRD 3.3.2) and is rejected for non-admins.
  */
 export const submitPick = httpsCallable<
-  { seasonId: string; contestantId: string; onBehalfOf?: string },
-  { status: 'active' | 'awaiting-close' | 'complete' }
+  { seasonId: string; contestantId?: string; onBehalfOf?: string; warm?: boolean },
+  { status: 'active' | 'awaiting-close' | 'complete'; warmed?: boolean }
 >(functions, 'submitPick')
 
 /**
@@ -26,6 +26,21 @@ export const assignFromBench = httpsCallable<
 >(functions, 'assignFromBench')
 
 /**
+ * Open the board: fix the pick order, hand out positions, start the clock.
+ * Admin only.
+ *
+ * Server-side for the clock above all. The deadline is judged against the
+ * server's own clock — when a turn expires, what a pause banks — so writing it
+ * from a browser mixed two clocks, and an admin whose machine ran fast gave
+ * everyone a longer turn than the season was configured for. See startDraft in
+ * functions/src/index.ts.
+ */
+export const startDraft = httpsCallable<
+  { seasonId: string },
+  { pickOrder: string[]; timerExpiresAt: number }
+>(functions, 'startDraft')
+
+/**
  * Stop or restart the pick clock. Admin only.
  *
  * Server-side so it reaches every participant, not just the admin who pressed
@@ -33,8 +48,8 @@ export const assignFromBench = httpsCallable<
  * loses nothing.
  */
 export const setTimerPaused = httpsCallable<
-  { seasonId: string; paused: boolean },
-  { paused: boolean; remainingMs: number | null }
+  { seasonId: string; paused: boolean; warm?: boolean },
+  { paused: boolean; remainingMs: number | null; warmed?: boolean }
 >(functions, 'setTimerPaused')
 
 /** Close a draft that is waiting on an admin. Admin only. */

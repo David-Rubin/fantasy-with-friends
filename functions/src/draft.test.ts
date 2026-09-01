@@ -6,6 +6,8 @@ import {
   draftOutcome,
   openSlots,
   skipLimitReached,
+  reconcilePickOrder,
+  resolvePickOrder,
 } from './draft'
 
 describe('nextSlot', () => {
@@ -158,5 +160,50 @@ describe('skipLimitReached', () => {
 
   it('is inert with no players, rather than halting instantly', () => {
     expect(skipLimitReached(0, 0)).toBe(false)
+  })
+})
+
+// The server's own copy, which decides what the draft is actually run from —
+// see src/lib/draft.test.ts for the client's, which decides what setup shows.
+describe('resolvePickOrder (server)', () => {
+  it('runs an admin-set season in the order that was arranged', () => {
+    expect(resolvePickOrder('admin-set', ['u1', 'u2', 'u3'], ['u3', 'u1', 'u2'])).toEqual([
+      'u3',
+      'u1',
+      'u2',
+    ])
+  })
+
+  it('squares that order with who is actually in the season', () => {
+    // u2 left and u4 joined after the order was arranged.
+    expect(resolvePickOrder('admin-set', ['u1', 'u3', 'u4'], ['u3', 'u2', 'u1'])).toEqual([
+      'u3',
+      'u1',
+      'u4',
+    ])
+  })
+
+  it('shuffles a randomized season without losing or repeating anyone', () => {
+    const members = ['u1', 'u2', 'u3', 'u4']
+    const result = resolvePickOrder('randomized', members, ['u4', 'u3'])
+    expect([...result].sort()).toEqual(members)
+  })
+
+  it('falls back to a shuffle when admin-set has nothing arranged', () => {
+    expect([...resolvePickOrder('admin-set', ['u1', 'u2'])].sort()).toEqual(['u1', 'u2'])
+  })
+})
+
+describe('reconcilePickOrder (server)', () => {
+  it('appends anyone who joined after the order was arranged', () => {
+    expect(reconcilePickOrder(['u2', 'u1'], ['u1', 'u2', 'u3'])).toEqual(['u2', 'u1', 'u3'])
+  })
+
+  it('drops anyone no longer on the roster', () => {
+    expect(reconcilePickOrder(['u2', 'gone', 'u1'], ['u1', 'u2'])).toEqual(['u2', 'u1'])
+  })
+
+  it('is the roster itself when nothing was arranged', () => {
+    expect(reconcilePickOrder(undefined, ['u1', 'u2'])).toEqual(['u1', 'u2'])
   })
 })

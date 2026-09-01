@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { doc, collection, updateDoc, addDoc, getDoc } from 'firebase/firestore'
+import { doc, collection, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
@@ -22,7 +22,6 @@ import type {
   MemberRole,
   Contestant,
 } from '../lib/types'
-import { resolvePickOrder } from '../lib/draft'
 import { canRenameTeam } from '../lib/teamName'
 import {
   reopenSeasonSetup,
@@ -31,6 +30,7 @@ import {
   assignFromBench,
   closeDraft,
   setTimerPaused,
+  startDraft,
 } from '../lib/draftApi'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
@@ -135,6 +135,31 @@ export function DraftRoomPage() {
   const isMyTurn = (draft?.status === 'active' || isPaused) && draft?.currentPickerUid === user?.uid
 
   /**
+   * Wake the draft's server functions on the way into the room.
+   *
+   * They are cold when nobody has drafted for a while, and a cold callable has
+   * to boot a container and load the whole functions module before it does
+   * anything — which is why the first press of Pause took the best part of ten
+   * seconds while every press after it was instant. An instance stays warm for
+   * a while once called, and this room is open for minutes before anyone
+   * touches the clock or takes a pick.
+   *
+   * `warm` is an explicit flag that returns before the function reads or writes
+   * anything, so this cannot collide with a real pause or a real pick. Warming
+   * by asking for the state the client believes is already set would: that
+   * belief can be stale by the time the server acts on it, and the moment it is
+   * most likely to be stale is this one.
+   *
+   * Failure is ignored on purpose. Nothing depends on it — the only thing lost
+   * is the head start.
+   */
+  useEffect(() => {
+    if (!seasonId || !canView) return
+    setTimerPaused({ seasonId, paused: false, warm: true }).catch(() => {})
+    submitPick({ seasonId, warm: true }).catch(() => {})
+  }, [seasonId, canView])
+
+  /**
    * Nudge the server when the clock runs out. Purely a prompt — the server
    * re-checks its own clock and the turn identity, so a stale or duplicated
    * call does nothing. Every client runs this, which is deliberate: it means
@@ -219,37 +244,26 @@ export function DraftRoomPage() {
     }
   }
 
+  /**
+   * Open the board. One server call, where it used to be a document written
+   * from here plus an update per member issued one at a time.
+   *
+   * The order and the pick positions moved with it, but the clock is the
+   * reason. A deadline is measured against the server's clock everywhere else
+   * — when a turn expires, what a pause banks — so writing it here handed the
+   * draft whatever this machine believed the time was. See startDraft in
+   * functions/src/index.ts.
+   */
   async function handleStartDraft() {
     if (!seasonId || !season || !user) return
     setStartingDraft(true)
+    setPickError('')
     try {
-      const memberUids = members.map((m) => m.uid)
-      // The saved arrangement, not merely the method: without it an
-      // admin-set season shuffled like any other, which is what made the
-      // option look as though it did nothing.
-      const pickOrder = resolvePickOrder(season.pickOrderMethod, memberUids, season.adminPickOrder)
-
-      await addDoc(collection(db, 'seasons', seasonId, 'draft'), {
-        status: 'active',
-        currentPickerUid: pickOrder[0],
-        currentRound: 1,
-        currentPickNumber: 1,
-        pickOrder,
-        timerExpiresAt: Date.now() + season.timerSeconds * 1000,
-        consecutiveSkips: 0,
-        haltedReason: null,
-        timerPausedRemainingMs: null,
-      } satisfies DraftDoc)
-
-      // Assign pick positions to members
-      for (let i = 0; i < pickOrder.length; i++) {
-        await updateDoc(doc(db, 'seasons', seasonId, 'members', pickOrder[i]), {
-          pickPosition: i + 1,
-        })
-      }
-
-      await updateDoc(doc(db, 'seasons', seasonId), { state: 'draft' })
-      trackEvent('draft_started', { season_id: seasonId, player_count: memberUids.length })
+      const { data } = await startDraft({ seasonId })
+      trackEvent('draft_started', { season_id: seasonId, player_count: data.pickOrder.length })
+    } catch (error) {
+      setPickError((error as { message?: string }).message ?? 'Could not start the draft.')
+      console.error('Start draft rejected', error)
     } finally {
       setStartingDraft(false)
     }
@@ -532,7 +546,12 @@ export function DraftRoomPage() {
             </div>
           ) : (
             <>
+              {/* Keyed on the deadline so a new one — a pick taken, the clock
+                  restarted — starts a fresh countdown seeded from it, rather
+                  than showing the previous turn's width for a frame and
+                  animating across. */}
               <TimerBanner
+                key={draft.timerExpiresAt}
                 pickerName={currentPickerName}
                 timerExpiresAt={draft.timerExpiresAt}
                 durationSeconds={season.timerSeconds}
