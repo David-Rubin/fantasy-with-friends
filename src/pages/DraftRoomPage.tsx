@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Navigate } from 'react-router-dom'
 import { doc, collection, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery, guarded } from '../lib/listen'
@@ -22,6 +22,7 @@ import type {
   MemberRole,
   Contestant,
 } from '../lib/types'
+import { draftRoomShouldRedirect } from '../lib/draft'
 import { canRenameTeam } from '../lib/teamName'
 import {
   reopenSeasonSetup,
@@ -103,9 +104,10 @@ export function DraftRoomPage() {
   useEffect(() => {
     if (!seasonId || !canView) return
     return listenQuery(collection(db, 'seasons', seasonId, 'draft'), 'draft state', (snap) => {
-      if (!snap.empty) {
-        setDraft(snap.docs[0].data() as DraftDoc)
-      }
+      // An empty snapshot means the draft document is gone — a reset deletes
+      // it. Ignoring that left the room rendering a draft that no longer
+      // existed, complete with picks that had been deleted with it.
+      setDraft(snap.empty ? null : (snap.docs[0].data() as DraftDoc))
     })
   }, [seasonId, canView])
 
@@ -317,6 +319,22 @@ export function DraftRoomPage() {
         <p className="text-gray-400">{t('common.loading')}</p>
       </Layout>
     )
+  }
+
+  // The draft was reset while we were standing in it — by an admin here, or by
+  // one somewhere else entirely, which is the case that had nowhere to go. The
+  // season page is where a season under setup explains itself: the panel for an
+  // admin, the "still being set up" notice for everyone else.
+  //
+  // Redirected during render rather than from an effect so there is no frame of
+  // an empty lobby first, and replacing the entry so that Back does not lead
+  // to a room that is no longer there.
+  //
+  // `setup` specifically, not merely "not drafting". A finished draft moves the
+  // season to `active`, and that has its own screen here — the one that says
+  // the draft is complete and names your team.
+  if (draftRoomShouldRedirect(season.state)) {
+    return <Navigate to={`/leagues/${leagueId}/seasons/${seasonId}`} replace />
   }
 
   return (

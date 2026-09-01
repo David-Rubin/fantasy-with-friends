@@ -851,10 +851,23 @@ export function SeasonDetailPage() {
         </div>
       )}
 
-      {/* Draft lobby link */}
+      {/* The same panel for a season that is drafting, since this page has
+          nothing else to show while it is — the tabs belong to a season with
+          scores. The league page sends people straight to the draft room and
+          leaves the card unclickable while it does, so this is reached by a
+          direct link, by the breadcrumb out of the room, or by somebody sitting
+          here after a reset waiting for the draft to open again.
+
+          No membership test beyond the state: this page is already closed to
+          anyone who is not in the season, which is the same test the league
+          page's button makes. See canJoinDraft. */}
       {season.state === 'draft' && (
-        <div className="mb-6">
-          <Link to={`/leagues/${leagueId}/seasons/${seasonId}/draft`}>
+        <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
+          <p className="font-medium text-gray-700">{t('season.draftNoticeTitle')}</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
+            {t('season.draftNoticeBody')}
+          </p>
+          <Link to={`/leagues/${leagueId}/seasons/${seasonId}/draft`} className="mt-4 inline-block">
             <Button>{t('dashboard.joinDraft')}</Button>
           </Link>
         </div>

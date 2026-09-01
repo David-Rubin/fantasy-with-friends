@@ -27,7 +27,7 @@ import { useMySeasonIds } from '../components/SeasonMemberGate'
 import { leagueTrail } from '../lib/breadcrumbs'
 import { updateLeagueDetails, removeLeagueMember } from '../lib/leagueApi'
 import { approveJoinRequest, rejectJoinRequest, useMyJoinRequests } from '../lib/joinRequests'
-import { canJoinSeason } from '../lib/seasonMembership'
+import { canJoinDraft, canJoinSeason } from '../lib/seasonMembership'
 import { joinSeason } from '../lib/seasonApi'
 import type {
   LeagueDoc,
@@ -498,18 +498,33 @@ export function LeagueDetailPage() {
                   isSeasonMember: mySeasonIds.has(season.id),
                   resolved: membershipResolved && seasonMembershipResolved,
                 })
-                const card = openable ? (
-                  <Link
-                    to={`/leagues/${leagueId}/seasons/${season.id}`}
-                    className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
-                  >
-                    {summary}
-                  </Link>
-                ) : (
-                  <div className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4">
-                    {summary}
-                  </div>
-                )
+                // The way into a running draft, which used to be the whole
+                // content of the season page for anyone who was not an admin.
+                // Offered to exactly whoever that page would have offered it
+                // to — see canJoinDraft.
+                const draftOpen = canJoinDraft({
+                  state: season.state,
+                  isSeasonMember: mySeasonIds.has(season.id),
+                  isSuperadmin,
+                  resolved: seasonMembershipResolved,
+                })
+                // Not a link while the draft button is beside it: the button
+                // is the useful destination, and the page it would otherwise
+                // open says only that the draft is under way. That notice is
+                // for whoever arrives another way.
+                const card =
+                  openable && !draftOpen ? (
+                    <Link
+                      to={`/leagues/${leagueId}/seasons/${season.id}`}
+                      className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
+                    >
+                      {summary}
+                    </Link>
+                  ) : (
+                    <div className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4">
+                      {summary}
+                    </div>
+                  )
                 // The button sits beside the card rather than inside it: the
                 // card is a link when the season is openable, and a button
                 // nested in a link is reachable by neither keyboard nor screen
@@ -524,6 +539,16 @@ export function LeagueDetailPage() {
                       >
                         {joiningSeason === season.id ? t('season.joining') : t('season.join')}
                       </Button>
+                    )}
+                    {/* Beside the card rather than within it, for the reason
+                        above: the card is itself a link. */}
+                    {draftOpen && (
+                      <Link
+                        to={`/leagues/${leagueId}/seasons/${season.id}/draft`}
+                        className="shrink-0"
+                      >
+                        <Button>{t('dashboard.joinDraft')}</Button>
+                      </Link>
                     )}
                     {/* Requirement is that a season can be deleted from either
                         page. Here it is any league admin, which is what
