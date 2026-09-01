@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { doc, getDoc, collection, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -185,6 +185,34 @@ export function SeasonDetailPage() {
     timerExpiry: 'auto-pick' as SeasonDoc['timerExpiry'],
     adminPickOrder: [] as string[],
   })
+  // Whether the form has been touched since it last matched what is stored.
+  // A flag rather than a comparison against the saved values: it is what gates
+  // the Save button, and re-enabling it for an edit that was undone by hand
+  // costs a redundant write, where comparing would have to decide whether a
+  // pick order reconciled against a roster that moved counts as a change.
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  // Set once a save lands, so the button can say so. Cleared by the next edit
+  // rather than by a timer — "Saved" stops being true the moment it is stale,
+  // and a countdown would make it a guess.
+  const [settingsSaved, setSettingsSaved] = useState(false)
+
+  // Counts edits, so a save can tell whether the form moved under it while the
+  // write was in flight. A ref because the save handler reads it after an
+  // await, where a state variable would still hold the value it closed over.
+  const settingsEdits = useRef(0)
+
+  /**
+   * Every edit to the draft settings goes through here, so that marking the
+   * form dirty and retiring the "Saved" line cannot be forgotten by one
+   * control. Deliberately not wired into the timer field's blur, which
+   * re-clamps a value that typing has already accounted for.
+   */
+  function editDraftSettings(update: (previous: typeof draftSettings) => typeof draftSettings) {
+    setDraftSettings(update)
+    settingsEdits.current += 1
+    setSettingsDirty(true)
+    setSettingsSaved(false)
+  }
 
   // The arrangement as it stands against the roster as it stands. Derived
   // rather than held, because the roster moves underneath it: a league member
@@ -229,6 +257,11 @@ export function SeasonDetailPage() {
           // Absent on seasons saved before the order could be arranged.
           adminPickOrder: data.adminPickOrder ?? [],
         })
+        // The form now holds exactly what the season holds. This covers a
+        // change made elsewhere — another admin, or another tab; a save of our
+        // own clears the flag itself, because a write that stores what was
+        // already there raises no snapshot to be heard.
+        setSettingsDirty(false)
       }
     })
     return unsub
@@ -390,8 +423,21 @@ export function SeasonDetailPage() {
   async function handleSaveSetup() {
     if (!seasonId) return
     setSavingSetup(true)
+    // What the form has had done to it as of this write. Anything past this is
+    // an edit the write did not carry.
+    const savedAtEdit = settingsEdits.current
     try {
       await updateDoc(doc(db, 'seasons', seasonId), draftSettingsToSave)
+      setSettingsSaved(true)
+      // Cleared here rather than left to the season listener. Firestore only
+      // reports a document whose data actually changed, so saving a form that
+      // was edited and put back exactly as it was — or that another tab has
+      // already written — produces no snapshot at all, and the button stayed
+      // lit after a save that plainly succeeded.
+      //
+      // Unless the form moved while the write was in flight, in which case
+      // there is again something to save and the button belongs lit.
+      if (settingsEdits.current === savedAtEdit) setSettingsDirty(false)
     } finally {
       setSavingSetup(false)
     }
@@ -646,7 +692,7 @@ export function SeasonDetailPage() {
                 <select
                   value={draftSettings.pickOrderMethod}
                   onChange={(e) =>
-                    setDraftSettings((s) => ({
+                    editDraftSettings((s) => ({
                       ...s,
                       pickOrderMethod: e.target.value as SeasonDoc['pickOrderMethod'],
                     }))
@@ -669,7 +715,7 @@ export function SeasonDetailPage() {
                   // Takes whatever is typed, empty included — clearing the field
                   // is how you replace 5 with 400 without fighting it.
                   onChange={(e) =>
-                    setDraftSettings((s) => ({ ...s, timerSeconds: e.target.value }))
+                    editDraftSettings((s) => ({ ...s, timerSeconds: e.target.value }))
                   }
                   // Settled only once the field is left: an emptied or
                   // out-of-range box becomes the nearest allowed value, and a
@@ -688,7 +734,7 @@ export function SeasonDetailPage() {
                 <select
                   value={draftSettings.timerExpiry}
                   onChange={(e) =>
-                    setDraftSettings((s) => ({
+                    editDraftSettings((s) => ({
                       ...s,
                       timerExpiry: e.target.value as SeasonDoc['timerExpiry'],
                     }))
@@ -718,7 +764,7 @@ export function SeasonDetailPage() {
                 <PickOrderList
                   players={members}
                   order={pickOrder}
-                  onChange={(next) => setDraftSettings((s) => ({ ...s, adminPickOrder: next }))}
+                  onChange={(next) => editDraftSettings((s) => ({ ...s, adminPickOrder: next }))}
                 />
                 {members.length > 0 && (
                   <p className="mt-3 text-xs text-gray-400">{t('draft.pickOrder.savedOnSetup')}</p>
@@ -728,7 +774,15 @@ export function SeasonDetailPage() {
           </section>
 
           <div className="flex gap-3">
-            <Button variant="secondary" onClick={handleSaveSetup} loading={savingSetup}>
+            {/* Off until something has been edited: with nothing to write, a
+                live button invites a click that does nothing, which is the
+                complaint it was meant to answer. */}
+            <Button
+              variant="secondary"
+              onClick={handleSaveSetup}
+              loading={savingSetup}
+              disabled={!settingsDirty}
+            >
               {t('season.saveSetup')}
             </Button>
             <Button
@@ -740,6 +794,31 @@ export function SeasonDetailPage() {
               {t('season.openDraft')}
             </Button>
           </div>
+          {/* Sits under the Save button it belongs to. A write to Firestore is
+              silent and the form looks identical afterwards, so without this
+              there is nothing at all to say the click landed. `role="status"`
+              announces it to a screen reader, which sees no colour. */}
+          {settingsSaved && (
+            <p
+              role="status"
+              className="mt-2 flex items-center gap-1 text-xs font-medium text-green-600"
+            >
+              {t('season.setupSaved')}
+              {/* Sized in `em` so it tracks the text it sits beside. */}
+              <svg
+                className="size-[1em] shrink-0"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 10.5l4 4 8-9" />
+              </svg>
+            </p>
+          )}
           {!canOpenDraft && (
             <p className="mt-2 text-xs text-gray-400">{t('season.openDraftDisabled')}</p>
           )}
