@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { t } from '../lib/i18n'
 
 interface TimerBannerProps {
@@ -9,27 +9,52 @@ interface TimerBannerProps {
   isYourTurn: boolean
 }
 
+/** What the clock reads now. `durationSeconds` stands in when it is not running. */
+function remainingSeconds(expiresAt: number | null, durationSeconds: number): number {
+  if (!expiresAt) return durationSeconds
+  return Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
+}
+
 export function TimerBanner({
   pickerName,
   timerExpiresAt,
   durationSeconds,
   isYourTurn,
 }: TimerBannerProps) {
-  const [secondsLeft, setSecondsLeft] = useState<number>(durationSeconds)
-  const rafRef = useRef<number>(0)
+  // Seeded from the deadline, not from the full duration.
+  //
+  // This banner is unmounted while the clock is stopped — the paused state
+  // renders a different block — so resuming mounts it afresh. Starting at the
+  // duration meant the first paint was a full bar whatever the clock actually
+  // said; the effect then corrected it a frame later and the width transition
+  // animated the difference, so every resume swept the bar down from full to
+  // where it had been paused. Computed here, the first paint is already right,
+  // and a bar that is right on its first paint has nothing to animate from.
+  const [secondsLeft, setSecondsLeft] = useState<number>(() =>
+    remainingSeconds(timerExpiresAt, durationSeconds)
+  )
 
+  /**
+   * The countdown, on a timer rather than a frame loop.
+   *
+   * requestAnimationFrame is not paced for this: it ran sixty times a second to
+   * move a number that changes once a second. Both are throttled while the tab
+   * is hidden — frames stop altogether, timers slow to as little as one a
+   * minute — so neither keeps a backgrounded clock live, and each recomputes
+   * from the deadline on the first tick back, which is what makes that
+   * harmless. The saving is on the tab someone is actually watching.
+   *
+   * Every 250ms so the displayed second turns over promptly, wherever in the
+   * second the deadline happens to fall.
+   */
   useEffect(() => {
     if (!timerExpiresAt) return
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((timerExpiresAt - Date.now()) / 1000))
-      setSecondsLeft(remaining)
-      if (remaining > 0) {
-        rafRef.current = requestAnimationFrame(tick)
-      }
-    }
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [timerExpiresAt])
+    const id = setInterval(
+      () => setSecondsLeft(remainingSeconds(timerExpiresAt, durationSeconds)),
+      250
+    )
+    return () => clearInterval(id)
+  }, [timerExpiresAt, durationSeconds])
 
   const pct = timerExpiresAt ? (secondsLeft / durationSeconds) * 100 : 100
   const isLow = secondsLeft <= 10

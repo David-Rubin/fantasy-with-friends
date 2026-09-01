@@ -309,8 +309,19 @@ service cloud.firestore {
 
       match /draft/{draftId} {
         allow read: if isSeasonMember(seasonId);
-        // Draft state transitions are admin-only
-        allow write: if isSeasonAdmin(seasonId);
+        // Written only by Cloud Functions through the Admin SDK — startDraft
+        // opens it, submitPick and resolveExpiredTurn move it on, setTimerPaused
+        // stops and restarts its clock.
+        //
+        // Closed to clients because of `timerExpiresAt`. It is an absolute
+        // timestamp that the server measures against its own clock, so a
+        // browser writing it puts two clocks in the same field: an admin whose
+        // machine ran five seconds fast opened the board with a deadline five
+        // seconds further out than the season allowed, and pausing a 60 second
+        // timer at 56 banked 61. No rule can check a timestamp against the time
+        // — that is exactly what a rule cannot see — so the write has to happen
+        // where the clock is.
+        allow write: if false;
 
         match /picks/{pickId} {
           allow read: if isSeasonMember(seasonId);

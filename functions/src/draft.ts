@@ -123,3 +123,41 @@ export function pickerAt(pickOrder: string[], round: number, pickNumber: number)
   const idx = isEvenRound ? pickOrder.length - pickNumber : pickNumber - 1
   return pickOrder[idx]
 }
+
+// ── Pick order resolution ─────────────────────────────────────────────────────
+
+/**
+ * A saved admin-set order, brought back into line with who is in the season.
+ *
+ * Mirrored from src/lib/draft.ts for the same reason as the turn arithmetic
+ * above: the client's copy decides what the setup panel shows, this one decides
+ * what the draft is actually run from.
+ */
+export function reconcilePickOrder(
+  savedOrder: string[] | undefined | null,
+  memberUids: string[]
+): string[] {
+  const members = new Set(memberUids)
+  const placed = (savedOrder ?? []).filter(
+    (uid, i, all) => members.has(uid) && all.indexOf(uid) === i
+  )
+  const seen = new Set(placed)
+  return [...placed, ...memberUids.filter((uid) => !seen.has(uid))]
+}
+
+/** The order the draft will run in. See src/lib/draft.ts. */
+export function resolvePickOrder(
+  method: 'randomized' | 'admin-set',
+  memberUids: string[],
+  adminSetOrder?: string[] | null
+): string[] {
+  if (method === 'admin-set' && adminSetOrder?.length) {
+    return reconcilePickOrder(adminSetOrder, memberUids)
+  }
+  const arr = [...memberUids]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
