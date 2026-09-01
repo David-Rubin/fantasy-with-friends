@@ -6,6 +6,26 @@ export function evaluateRule(rule: ScoringRule, entry: ContestantScoreEntry): nu
   return entry[rule.id] === true ? rule.points : 0
 }
 
+/**
+ * Whether a rule takes points away rather than awarding them.
+ *
+ * A rule is only ever ticked or not, so what a scorecard cell means is decided
+ * entirely by the column it sits in: the same tick is worth having under
+ * "Wins HOH" and worth avoiding under "Sent to jury". The read-only card draws
+ * the two differently, and this is the line between them.
+ *
+ * Zero is not a penalty. It takes nothing away, so it reads as the ordinary
+ * mark — a rule worth no points is a strange thing to have written, but it is
+ * not a punishment.
+ *
+ * Takes the points rather than the rule so that a recorded column — an entry in
+ * EpisodeScoreDoc.appliedRules, which is not a ScoringRule — can be asked too.
+ * The card draws those when an episode is showing as it was recorded.
+ */
+export function isPenalty(points: number): boolean {
+  return points < 0
+}
+
 // ── Contestant totals ─────────────────────────────────────────────────────────
 
 export function calcContestantEpisodePoints(

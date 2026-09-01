@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   evaluateRule,
+  isPenalty,
   calcContestantTotal,
   calcTeamTotal,
   calcTeamEpisodeTotals,
@@ -133,5 +134,22 @@ describe('latestEpisodePoints', () => {
 
   it('counts a negative score', () => {
     expect(latestEpisodePoints([ep(1, { c1: -2 })], 'c1')).toBe(-2)
+  })
+})
+
+describe('isPenalty', () => {
+  it('is true of a rule that takes points away', () => {
+    expect(isPenalty(-5)).toBe(true)
+    expect(isPenalty(-1)).toBe(true)
+  })
+
+  it('is false of a rule that awards them', () => {
+    expect(isPenalty(5)).toBe(false)
+  })
+
+  // Strange to have written, but it is not a punishment — so it draws as the
+  // ordinary mark rather than the penalty cross.
+  it('is false of a rule worth nothing', () => {
+    expect(isPenalty(0)).toBe(false)
   })
 })
