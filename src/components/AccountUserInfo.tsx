@@ -3,7 +3,7 @@ import { UserAvatar } from './UserAvatar'
 import { Button } from './Button'
 import { Input } from './Input'
 import { uploadAvatar, removeAvatar, updateDisplayName } from '../lib/avatarApi'
-import { avatarFileProblem, AVATAR_ACCEPT } from '../lib/avatarFile'
+import { avatarFileProblem, AVATAR_ACCEPT, MAX_AVATAR_MB } from '../lib/avatarFile'
 import { t } from '../lib/i18n'
 
 interface AccountUserInfoProps {
@@ -45,7 +45,9 @@ export function AccountUserInfo({ uid, displayName, email, photoUrl }: AccountUs
     const problem = avatarFileProblem(file)
     if (problem) {
       setPhotoError(
-        t(problem === 'type' ? 'settings.userInfo.wrongType' : 'settings.userInfo.tooBig')
+        t(problem === 'type' ? 'settings.userInfo.wrongType' : 'settings.userInfo.tooBig', {
+          max: MAX_AVATAR_MB,
+        })
       )
       return
     }
@@ -132,7 +134,9 @@ export function AccountUserInfo({ uid, displayName, email, photoUrl }: AccountUs
                 </Button>
               )}
             </div>
-            <p className="text-xs text-gray-500">{t('settings.userInfo.photoHint')}</p>
+            <p className="text-xs text-gray-500">
+              {t('settings.userInfo.photoHint', { max: MAX_AVATAR_MB })}
+            </p>
           </div>
         </div>
         {/* Hidden because a bare file input cannot be styled to match the rest
