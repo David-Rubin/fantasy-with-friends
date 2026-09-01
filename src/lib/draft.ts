@@ -17,13 +17,41 @@ import type { PickOrderMethod } from './types'
 
 // ── Pick order resolution ─────────────────────────────────────────────────────
 
+/**
+ * A saved admin-set order, brought back into line with who is actually in the
+ * season.
+ *
+ * The order is arranged during setup and used when the draft opens, and the
+ * roster can move in between: a league member may join a season on their own
+ * while it is still `setup`, and an admin may remove someone. Using the saved
+ * list as written would then hand a turn to somebody who has left, or leave a
+ * newcomer out of the rotation entirely — an off-by-one that only shows up
+ * mid-draft, when there is no way back.
+ *
+ * So departed uids are dropped, and anyone missing is appended in roster order.
+ * Appending rather than refusing keeps the admin's arrangement intact: the part
+ * they set stays exactly as they left it, and the newcomer picks last until
+ * they say otherwise.
+ */
+export function reconcilePickOrder(
+  savedOrder: string[] | undefined | null,
+  memberUids: string[]
+): string[] {
+  const members = new Set(memberUids)
+  const placed = (savedOrder ?? []).filter(
+    (uid, i, all) => members.has(uid) && all.indexOf(uid) === i
+  )
+  const seen = new Set(placed)
+  return [...placed, ...memberUids.filter((uid) => !seen.has(uid))]
+}
+
 export function resolvePickOrder(
   method: PickOrderMethod,
   memberUids: string[],
-  adminSetOrder?: string[]
+  adminSetOrder?: string[] | null
 ): string[] {
   if (method === 'admin-set' && adminSetOrder?.length) {
-    return adminSetOrder
+    return reconcilePickOrder(adminSetOrder, memberUids)
   }
   // Randomized — Fisher-Yates shuffle
   const arr = [...memberUids]
@@ -32,4 +60,16 @@ export function resolvePickOrder(
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
   return arr
+}
+
+/**
+ * One row moved to another position, as a new array. The list is short and
+ * rearranged by hand, so clarity beats an in-place splice.
+ */
+export function movePickOrder(order: string[], from: number, to: number): string[] {
+  if (from === to || from < 0 || to < 0 || from >= order.length || to >= order.length) return order
+  const next = [...order]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
 }

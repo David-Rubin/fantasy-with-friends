@@ -338,7 +338,7 @@ export function LeagueDetailPage() {
         episodeCount: parseInt(seasonForm.episodeCount, 10),
         state: 'setup',
         draftFormat: 'snake',
-        pickOrderMethod: 'randomized',
+        pickOrderMethod: 'admin-set',
         timerSeconds: 60,
         timerExpiry: 'auto-pick',
         accentColor: seasonForm.accentColor,

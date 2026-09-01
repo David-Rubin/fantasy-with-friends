@@ -41,6 +41,8 @@ import {
   TIMER_SECONDS_MIN,
 } from '../lib/seasonDetails'
 import { updateSeasonDetails } from '../lib/seasonApi'
+import { reconcilePickOrder } from '../lib/draft'
+import { PickOrderList } from '../components/PickOrderList'
 import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
 import { ContestantCard } from '../components/ContestantCard'
@@ -178,17 +180,40 @@ export function SeasonDetailPage() {
   // way from "5" to "400", and a number cannot hold it. It is read back as a
   // number only when the field is left, and again when the form is written.
   const [draftSettings, setDraftSettings] = useState({
-    pickOrderMethod: 'randomized' as SeasonDoc['pickOrderMethod'],
+    pickOrderMethod: 'admin-set' as SeasonDoc['pickOrderMethod'],
     timerSeconds: '60',
     timerExpiry: 'auto-pick' as SeasonDoc['timerExpiry'],
+    adminPickOrder: [] as string[],
   })
+
+  // The arrangement as it stands against the roster as it stands. Derived
+  // rather than held, because the roster moves underneath it: a league member
+  // can join the season while it is still being set up, and the saved order
+  // knows nothing about them until this squares the two.
+  const pickOrder = useMemo(
+    () =>
+      reconcilePickOrder(
+        draftSettings.adminPickOrder,
+        members.map((m) => m.uid)
+      ),
+    [draftSettings.adminPickOrder, members]
+  )
 
   // What the form actually writes: whatever is in the timer field, brought
   // inside its bounds. Nothing downstream should ever see the raw text.
+  //
+  // The order is written whichever method is selected, so that switching to
+  // Randomized to see what it says and back again does not throw away an
+  // arrangement someone made by hand.
   const draftSettingsToSave = {
     pickOrderMethod: draftSettings.pickOrderMethod,
     timerSeconds: clampTimerSeconds(parseInt(draftSettings.timerSeconds, 10)),
     timerExpiry: draftSettings.timerExpiry,
+    // Only once the roster is in. `members` arrives on its own listener, so
+    // there is a moment after the panel renders when it is still empty and
+    // `pickOrder` with it — and writing that would wipe a saved arrangement
+    // for anyone quick enough to press Save in the meantime.
+    adminPickOrder: members.length > 0 ? pickOrder : draftSettings.adminPickOrder,
   }
 
   useEffect(() => {
@@ -201,6 +226,8 @@ export function SeasonDetailPage() {
           pickOrderMethod: data.pickOrderMethod,
           timerSeconds: String(data.timerSeconds),
           timerExpiry: data.timerExpiry,
+          // Absent on seasons saved before the order could be arranged.
+          adminPickOrder: data.adminPickOrder ?? [],
         })
       }
     })
@@ -626,8 +653,8 @@ export function SeasonDetailPage() {
                   }
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="randomized">{t('draft.pickOrder.randomized')}</option>
                   <option value="admin-set">{t('draft.pickOrder.adminSet')}</option>
+                  <option value="randomized">{t('draft.pickOrder.randomized')}</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1">
@@ -674,6 +701,30 @@ export function SeasonDetailPage() {
                 </select>
               </label>
             </div>
+
+            {/* Only under Admin-set: with Randomized the order is drawn when
+                the draft opens, so a list here would be a promise the draft
+                does not keep. The arrangement itself is kept either way — see
+                draftSettingsToSave — so flicking between the two to read the
+                options costs nothing. */}
+            {draftSettings.pickOrderMethod === 'admin-set' && (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <h4 className="text-sm font-medium text-gray-700">
+                  {t('draft.pickOrder.adminSetTitle')}
+                </h4>
+                <p className="mb-3 mt-1 text-xs text-gray-500">
+                  {t('draft.pickOrder.adminSetHelp')}
+                </p>
+                <PickOrderList
+                  players={members}
+                  order={pickOrder}
+                  onChange={(next) => setDraftSettings((s) => ({ ...s, adminPickOrder: next }))}
+                />
+                {members.length > 0 && (
+                  <p className="mt-3 text-xs text-gray-400">{t('draft.pickOrder.savedOnSetup')}</p>
+                )}
+              </div>
+            )}
           </section>
 
           <div className="flex gap-3">

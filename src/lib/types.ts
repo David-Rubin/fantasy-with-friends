@@ -161,6 +161,19 @@ export interface SeasonDoc {
   state: SeasonState
   draftFormat: DraftFormat
   pickOrderMethod: PickOrderMethod
+  /**
+   * The order an admin arranged by hand, as uids, used when
+   * `pickOrderMethod` is 'admin-set'. Kept on the season rather than as each
+   * member's `pickPosition` because a position is what the draft assigns when
+   * it opens — this is the intention beforehand, and it has to survive the
+   * season going back to setup and the draft being drawn again.
+   *
+   * Optional: absent on every season created before this field existed, and on
+   * any season whose order was never arranged. Read through reconcilePickOrder
+   * (src/lib/draft.ts), which squares it with the current roster — the list
+   * can name someone who has since left, or miss someone who has since joined.
+   */
+  adminPickOrder?: string[]
   timerSeconds: number
   timerExpiry: TimerExpiry
   accentColor: AccentColor

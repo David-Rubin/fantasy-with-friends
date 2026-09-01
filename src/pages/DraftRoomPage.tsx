@@ -224,7 +224,10 @@ export function DraftRoomPage() {
     setStartingDraft(true)
     try {
       const memberUids = members.map((m) => m.uid)
-      const pickOrder = resolvePickOrder(season.pickOrderMethod, memberUids)
+      // The saved arrangement, not merely the method: without it an
+      // admin-set season shuffled like any other, which is what made the
+      // option look as though it did nothing.
+      const pickOrder = resolvePickOrder(season.pickOrderMethod, memberUids, season.adminPickOrder)
 
       await addDoc(collection(db, 'seasons', seasonId, 'draft'), {
         status: 'active',
@@ -600,7 +603,11 @@ export function DraftRoomPage() {
                 Teams
               </h2>
               <div className="flex flex-col gap-4">
-                {members
+                {/* Copied before sorting: Array.sort works in place, and sorting
+                    the state array itself both mutates it behind React's back
+                    and leaves the copy React compares against already
+                    reordered. */}
+                {[...members]
                   .sort((a, b) => (a.pickPosition ?? 99) - (b.pickPosition ?? 99))
                   .map((member) => {
                     const teamContestants = contestants.filter((c) => c.draftedByUid === member.uid)
