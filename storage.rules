@@ -11,10 +11,14 @@ service firebase.storage {
     // One fixed path per person, so a new picture replaces the old one instead
     // of accumulating files nothing points at.
     match /avatars/{uid}/{fileName} {
+      //
+      // The size must match MAX_AVATAR_BYTES in src/lib/avatarFile.ts, which
+      // refuses the file before it uploads. Rules cannot import, so the number
+      // is written twice; src/lib/rulesLimits.test.ts fails if the two drift.
       allow read: if request.auth != null;
       allow write: if request.auth != null
         && request.auth.uid == uid
-        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.size <= 3 * 1024 * 1024
         && request.resource.contentType.matches('image/(png|jpeg)');
       allow delete: if request.auth != null && request.auth.uid == uid;
     }

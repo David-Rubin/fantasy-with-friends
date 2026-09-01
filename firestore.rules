@@ -242,7 +242,8 @@ service cloud.firestore {
         //
         // The length bound is enforced here rather than left to the client: a
         // name too long for a leaderboard row is everyone else's problem, not
-        // only the writer's. It must match TEAM_NAME_MAX_LENGTH.
+        // only the writer's. It must match TEAM_NAME_MAX_LENGTH in
+        // src/lib/teamName.ts; src/lib/rulesLimits.test.ts fails if it does not.
         allow update: if request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamName'])
           && request.resource.data.teamName is string

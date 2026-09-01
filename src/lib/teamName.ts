@@ -9,7 +9,8 @@ import type { SeasonDoc } from './types'
 /**
  * Long enough for a joke, short enough to sit in a leaderboard row beside a
  * points column without wrapping. The security rule enforces the same number;
- * changing one means changing both.
+ * changing one means changing both, and src/lib/rulesLimits.test.ts fails if
+ * only one of them changes.
  */
 export const TEAM_NAME_MAX_LENGTH = 40
 
