@@ -274,6 +274,7 @@ export function EpisodeScoringPage() {
    */
   const card = scorecardState({
     isAdmin,
+    seasonClosed: season?.state === 'complete',
     officiallyScored: existingScore !== null,
     isLocked: isLockedNow,
     showingAsRecorded,
@@ -608,6 +609,10 @@ export function EpisodeScoringPage() {
             </Button>
           )}
         </div>
+      )}
+
+      {card.notice === 'seasonClosed' && (
+        <p className="mt-6 text-sm text-gray-500">{t('season.completedNotice')}</p>
       )}
 
       {card.notice === 'pendingApproval' && (

@@ -1,32 +1,32 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @theme {
   /* Base palette */
-  --color-bg: #F9FAFB;
-  --color-surface: #FFFFFF;
-  --color-border: #E5E7EB;
+  --color-bg: #f9fafb;
+  --color-surface: #ffffff;
+  --color-border: #e5e7eb;
   --color-text-primary: #111827;
-  --color-text-secondary: #6B7280;
-  --color-text-disabled: #9CA3AF;
+  --color-text-secondary: #6b7280;
+  --color-text-disabled: #9ca3af;
 
   /* Semantic */
-  --color-success: #16A34A;
-  --color-error: #DC2626;
-  --color-warning: #D97706;
-  --color-info: #2563EB;
+  --color-success: #16a34a;
+  --color-error: #dc2626;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
 
   /* Accent palette (12 options) */
-  --color-accent-violet: #7C3AED;
-  --color-accent-purple: #9333EA;
-  --color-accent-pink: #DB2777;
-  --color-accent-rose: #E11D48;
-  --color-accent-orange: #EA580C;
-  --color-accent-amber: #D97706;
+  --color-accent-violet: #7c3aed;
+  --color-accent-purple: #9333ea;
+  --color-accent-pink: #db2777;
+  --color-accent-rose: #e11d48;
+  --color-accent-orange: #ea580c;
+  --color-accent-amber: #d97706;
   --color-accent-emerald: #059669;
-  --color-accent-teal: #0D9488;
-  --color-accent-cyan: #0891B2;
-  --color-accent-blue: #2563EB;
-  --color-accent-indigo: #4F46E5;
+  --color-accent-teal: #0d9488;
+  --color-accent-cyan: #0891b2;
+  --color-accent-blue: #2563eb;
+  --color-accent-indigo: #4f46e5;
   --color-accent-slate: #475569;
 
   /* Typography */
@@ -44,4 +44,60 @@ body {
 
 #root {
   min-height: 100svh;
+}
+
+/* ── The season champion celebration ──────────────────────────────────────────
+   Every rule here is inside the reduced-motion guard, so a viewer who has asked
+   for less movement gets the banner and the ribbons sitting still rather than a
+   fallback that looks broken. See src/components/SeasonChampion.tsx. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes champion-rise {
+    from {
+      opacity: 0;
+      transform: translateY(0.75rem) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes champion-trophy {
+    0%,
+    100% {
+      transform: rotate(-6deg);
+    }
+    50% {
+      transform: rotate(6deg);
+    }
+  }
+
+  /* Ribbons fall the height of the banner and stop. A loop would keep a party
+     going under a page people are trying to read. */
+  @keyframes champion-ribbon {
+    from {
+      opacity: 0;
+      transform: translateY(-120%) rotate(0deg);
+    }
+    15% {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+      transform: translateY(320%) rotate(540deg);
+    }
+  }
+
+  .champion-banner {
+    animation: champion-rise 520ms ease-out both;
+  }
+
+  .champion-trophy {
+    animation: champion-trophy 2.4s ease-in-out 520ms infinite;
+    transform-origin: 50% 85%;
+  }
+
+  .champion-ribbon {
+    animation: champion-ribbon 2.6s ease-in forwards;
+  }
 }
