@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { doc, collection, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -12,6 +12,7 @@ import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import type {
   MemberRole,
+  ScoreProposalDoc,
   SeasonDoc,
   ContestantDoc,
   ScoringRuleDoc,
@@ -22,6 +23,8 @@ import type {
   Contestant,
 } from '../lib/types'
 import { evaluateRule, isPenalty } from '../lib/scoring'
+import { scorecardState } from '../lib/scorecard'
+import { decideProposal, proposeScores } from '../lib/scoreProposalApi'
 import { fingerprintOf, ruleCoversEpisode, rulesFingerprint } from '../lib/scoringRules'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
@@ -79,7 +82,7 @@ export function EpisodeScoringPage() {
     seasonId: string
     episodeNumber: string
   }>()
-  const { user, isSuperadmin } = useAuth()
+  const { user, userDoc, isSuperadmin } = useAuth()
   const navigate = useNavigate()
   const epNum = parseInt(episodeNumber ?? '1', 10)
 
@@ -100,6 +103,17 @@ export function EpisodeScoringPage() {
   const [ruleChangesApplied, setRuleChangesApplied] = useState(false)
   const [submitConfirm, setSubmitConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // A card somebody has offered for this episode, if there is one.
+  const [proposal, setProposal] = useState<ScoreProposalDoc | null>(null)
+  // Whether this episode has a real result, readable from inside a listener
+  // that lands in an unpredictable order relative to the one that sets it.
+  const officiallyScoredRef = useRef(false)
+  // The admin pressed Edit or Reset and is now working on that card. Local to
+  // the visit: nothing is written until they submit.
+  const [adminEditingProposal, setAdminEditingProposal] = useState(false)
+  const [proposeConfirm, setProposeConfirm] = useState(false)
+  const [approveConfirm, setApproveConfirm] = useState(false)
+  const [resetConfirm, setResetConfirm] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
   // Entering scores is admin-only; every season member may read them. Without
   // this the page offered a member the full form and let the rules reject the
@@ -148,12 +162,22 @@ export function EpisodeScoringPage() {
     const epDoc = doc(db, 'seasons', seasonId, 'episodeScores', episodeNumber)
     const unsubEp = listenDoc(epDoc, 'episode score', (snap) => {
       setExistingScore(snap.exists() ? (snap.data() as EpisodeScoreDoc) : null)
+      officiallyScoredRef.current = snap.exists()
     })
 
     const unsubScores = listenQuery(
       collection(db, 'seasons', seasonId, 'episodeScores', episodeNumber, 'contestantScores'),
       'contestant scores',
       (snap) => {
+        // An episode nobody has scored has no documents here, and an empty
+        // snapshot has nothing to say about what the card should show — so it
+        // must not say anything. It used to write `{}` over the form, which
+        // meant it raced the listener that loads a suggestion into it: the two
+        // arrive in whichever order the server sends them, so an admin opening
+        // a suggested card from the episode list got a blank one, while the
+        // same card reached by reloading the page came up filled in.
+        if (snap.empty) return
+
         const map: Record<string, ContestantScoreDoc> = {}
         snap.docs.forEach((d) => {
           map[d.id] = d.data() as ContestantScoreDoc
@@ -174,8 +198,33 @@ export function EpisodeScoringPage() {
     }
   }, [seasonId, episodeNumber, canView])
 
+  useEffect(() => {
+    if (!seasonId || !episodeNumber || !canView) return
+    return listenDoc(
+      doc(db, 'seasons', seasonId, 'scoreProposals', episodeNumber),
+      'score proposal',
+      (snap) => {
+        const next = snap.exists() ? (snap.data() as ScoreProposalDoc) : null
+        setProposal(next)
+        // Draw the card from the suggestion, so an admin deciding on one is
+        // looking at what was actually proposed and can start from it rather
+        // than retyping it.
+        //
+        // Not for an episode that has been scored for real: that shows its own
+        // result, whatever anybody once suggested. Read through a ref because
+        // the two listeners land in whichever order the server sends them —
+        // if this one is first the scores load and the real ones overwrite
+        // them a moment later, and if it is second this skips.
+        if (next?.status === 'pending' && !officiallyScoredRef.current) {
+          setScores(next.scores)
+          setEliminations(Object.fromEntries(next.eliminations.map((id: string) => [id, true])))
+        }
+      }
+    )
+  }, [seasonId, episodeNumber, canView])
+
   // Superadmins are admins of every season in the rules; the client matches.
-  const canEdit = myRole === 'owner' || myRole === 'admin' || isSuperadmin
+  const isAdmin = myRole === 'owner' || myRole === 'admin' || isSuperadmin
 
   // Active contestants for this episode (not eliminated before this episode)
   const activeContestants = contestants.filter(
@@ -206,7 +255,7 @@ export function EpisodeScoringPage() {
     fingerprintOf(appliedRules) !== currentFingerprint
 
   /** The offer to bring it in line, which only makes sense once it is editable. */
-  const canApplyRuleChanges = canEdit && !isLockedNow && hasPendingRuleChanges
+  const canApplyRuleChanges = isAdmin && !isLockedNow && hasPendingRuleChanges
 
   /**
    * Until an admin applies the changes, the episode is drawn as it was
@@ -219,10 +268,19 @@ export function EpisodeScoringPage() {
     ? appliedRules
     : episodeRules
 
-  // A record is not editable, and neither is an episode still showing its old
-  // rules: ticking a box against a column that no longer exists would submit
-  // scores under rules nobody chose. Apply the changes first.
-  const readOnlyTable = isLockedNow || showingAsRecorded
+  /**
+   * Who may do what to this card. See src/lib/scorecard.ts — the branches got
+   * too many to read in the markup once a member could fill one in.
+   */
+  const card = scorecardState({
+    isAdmin,
+    officiallyScored: existingScore !== null,
+    isLocked: isLockedNow,
+    showingAsRecorded,
+    proposalStatus: proposal?.status ?? 'none',
+    adminEditingProposal,
+  })
+  const readOnlyTable = !card.editable
 
   /** Drop ticks for rules that no longer apply, so a stale one cannot be stored. */
   function applyRuleChanges() {
@@ -254,7 +312,7 @@ export function EpisodeScoringPage() {
     return episodeRules.reduce((sum, rule) => sum + evaluateRule(rule, entry), 0)
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(afterCommit?: () => Promise<void>) {
     if (!seasonId || !episodeNumber || !user) return
     setSubmitting(true)
     try {
@@ -302,11 +360,63 @@ export function EpisodeScoringPage() {
 
       await batch.commit()
 
+      await afterCommit?.()
+
       await logAuditEvent({ action: 'episode_scored', seasonId, episodeNumber: epNum })
       trackEvent('episode_scored', { season_id: seasonId, episode_number: epNum })
 
       setSubmitConfirm(false)
       navigate(`/leagues/${leagueId}/seasons/${seasonId}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  /** Offer the card. Writes nothing that any total is built from. */
+  async function handlePropose() {
+    if (!seasonId || !episodeNumber || !leagueId || !user || !userDoc) return
+    setSubmitting(true)
+    try {
+      await proposeScores(
+        seasonId,
+        leagueId,
+        episodeNumber,
+        { uid: user.uid, displayName: userDoc.displayName },
+        Object.fromEntries(activeContestants.map((c) => [c.id, scores[c.id] ?? {}])),
+        activeContestants.filter((c) => eliminations[c.id]).map((c) => c.id)
+      )
+      trackEvent('episode_scores_proposed', { season_id: seasonId, episode_number: epNum })
+      setProposeConfirm(false)
+      navigate(`/leagues/${leagueId}/seasons/${seasonId}?tab=episodes`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  /**
+   * Approve: score the episode exactly as an admin filling it in would, then
+   * close the suggestion out. The scoring write is the one that counts, so it
+   * goes first — a failure there leaves the suggestion standing rather than
+   * marking it approved for scores that were never stored.
+   */
+  async function handleApprove() {
+    if (!seasonId || !episodeNumber || !leagueId || !user) return
+    await handleSubmit(async () => {
+      await decideProposal(seasonId, leagueId, episodeNumber, 'approved', user.uid)
+    })
+    setApproveConfirm(false)
+  }
+
+  /** Reset: clear the card, keep the suggestion on record, open the episode. */
+  async function handleReset() {
+    if (!seasonId || !episodeNumber || !leagueId || !user) return
+    setSubmitting(true)
+    try {
+      await decideProposal(seasonId, leagueId, episodeNumber, 'discarded', user.uid)
+      setScores({})
+      setEliminations({})
+      setAdminEditingProposal(true)
+      setResetConfirm(false)
     } finally {
       setSubmitting(false)
     }
@@ -334,11 +444,11 @@ export function EpisodeScoringPage() {
     >
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">
-          {canEdit
+          {card.editable
             ? t('scoring.scoreEpisode', { n: epNum })
             : t('scoring.episodeScores', { n: epNum })}
         </h1>
-        {canEdit && isLockedNow && (
+        {card.actions.includes('unlock') && (
           <Button variant="secondary" onClick={() => setUnlockConfirm(true)}>
             {t('scoring.unlockEpisode')}
           </Button>
@@ -404,7 +514,7 @@ export function EpisodeScoringPage() {
                   // a locked episode — or at one still showing the rules it was
                   // recorded under — cannot, so they get the same marks
                   // everybody else gets rather than a row of dead boxes.
-                  if (!canEdit || readOnlyTable) {
+                  if (readOnlyTable) {
                     return (
                       <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
                         <ScoreMark
@@ -437,7 +547,7 @@ export function EpisodeScoringPage() {
                       costs no points — the column records what happened, and
                       giving it the penalty cross would imply a deduction that
                       does not exist. */}
-                  {!canEdit || readOnlyTable ? (
+                  {readOnlyTable ? (
                     <ScoreMark
                       on={!!eliminations[contestant.id]}
                       rule={t('contestant.eliminated')}
@@ -472,15 +582,37 @@ export function EpisodeScoringPage() {
         </table>
       </div>
 
-      {canEdit && !readOnlyTable && (
-        <div className="mt-6">
-          <Button onClick={() => setSubmitConfirm(true)}>{t('scoring.submitScores')}</Button>
+      {/* Whatever this viewer may do with the card, in the order they would
+          reach for it: the decision that settles the episode first. */}
+      {card.actions.length > 0 && (
+        <div className="mt-6 flex flex-wrap gap-3">
+          {card.actions.includes('submit') && (
+            <Button onClick={() => setSubmitConfirm(true)}>{t('scoring.submitScores')}</Button>
+          )}
+          {card.actions.includes('submitForApproval') && (
+            <Button onClick={() => setProposeConfirm(true)}>
+              {t('scoring.submitForApproval')}
+            </Button>
+          )}
+          {card.actions.includes('approve') && (
+            <Button onClick={() => setApproveConfirm(true)}>{t('scoring.approveScores')}</Button>
+          )}
+          {card.actions.includes('edit') && (
+            <Button variant="secondary" onClick={() => setAdminEditingProposal(true)}>
+              {t('scoring.editScores')}
+            </Button>
+          )}
+          {card.actions.includes('reset') && (
+            <Button variant="secondary" onClick={() => setResetConfirm(true)}>
+              {t('scoring.resetScores')}
+            </Button>
+          )}
         </div>
       )}
 
-      {!canEdit && (
-        <p className="mt-6 text-sm text-gray-500">
-          {existingScore ? t('scoring.readOnlyNotice') : t('scoring.notScoredYet')}
+      {card.notice === 'pendingApproval' && (
+        <p className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {t('scoring.pendingApproval')}
         </p>
       )}
 
@@ -512,6 +644,63 @@ export function EpisodeScoringPage() {
         <p className="text-gray-600">{t('contestant.markEliminatedConfirm')}</p>
       </Modal>
 
+      {/* Sending a card for approval */}
+      <Modal
+        open={proposeConfirm}
+        onClose={() => setProposeConfirm(false)}
+        title={t('scoring.submitForApproval')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setProposeConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={submitting} onClick={handlePropose}>
+              {t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-gray-600">{t('scoring.submitForApprovalConfirm', { n: epNum })}</p>
+      </Modal>
+
+      {/* Approving one */}
+      <Modal
+        open={approveConfirm}
+        onClose={() => setApproveConfirm(false)}
+        title={t('scoring.approveScores')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setApproveConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={submitting} onClick={handleApprove}>
+              {t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-gray-600">{t('scoring.approveConfirm', { n: epNum })}</p>
+      </Modal>
+
+      {/* Clearing one */}
+      <Modal
+        open={resetConfirm}
+        onClose={() => setResetConfirm(false)}
+        title={t('scoring.resetScores')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setResetConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" loading={submitting} onClick={handleReset}>
+              {t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-gray-600">{t('scoring.resetConfirm')}</p>
+      </Modal>
+
       {/* Submit confirm */}
       <Modal
         open={submitConfirm}
@@ -522,7 +711,7 @@ export function EpisodeScoringPage() {
             <Button variant="secondary" onClick={() => setSubmitConfirm(false)}>
               {t('common.cancel')}
             </Button>
-            <Button loading={submitting} onClick={handleSubmit}>
+            <Button loading={submitting} onClick={() => handleSubmit()}>
               {t('common.confirm')}
             </Button>
           </>
