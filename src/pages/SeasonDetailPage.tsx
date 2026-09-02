@@ -1150,9 +1150,23 @@ export function SeasonDetailPage() {
                         <Button variant="ghost">{t('scoring.suggestScores')}</Button>
                       </Link>
                     )}
-                    {canManageSeason && (
+                    {/* An admin's controls, split by what they do rather than
+                        by who they belong to. Reading a scorecard is not
+                        managing one, so `View scores` stays when the season is
+                        closed — gating the whole group on canManageSeason left
+                        an admin with no way into a finished season's scores at
+                        all, while every member kept theirs. */}
+                    {isAdmin && (
                       <div className="flex gap-2">
-                        {!scored && (
+                        {/* Not alongside `Edit scores`, which is a link to the
+                            same page — an unlocked episode an admin can still
+                            edit needs one way in, not two. */}
+                        {scored && (locked || !canManageSeason) && (
+                          <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
+                            <Button variant="ghost">{t('scoring.viewScores')}</Button>
+                          </Link>
+                        )}
+                        {canManageSeason && !scored && (
                           <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
                             {/* Somebody has already filled this one in: the
                                 admin is going in to decide on their card, not
@@ -1164,17 +1178,12 @@ export function SeasonDetailPage() {
                             </Button>
                           </Link>
                         )}
-                        {scored && locked && (
-                          <>
-                            <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
-                              <Button variant="ghost">{t('scoring.viewScores')}</Button>
-                            </Link>
-                            <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
-                              <Button variant="secondary">{t('scoring.unlockEpisode')}</Button>
-                            </Link>
-                          </>
+                        {canManageSeason && scored && locked && (
+                          <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
+                            <Button variant="secondary">{t('scoring.unlockEpisode')}</Button>
+                          </Link>
                         )}
-                        {scored && !locked && (
+                        {canManageSeason && scored && !locked && (
                           <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
                             <Button variant="secondary">Edit scores</Button>
                           </Link>
