@@ -298,13 +298,20 @@ service cloud.firestore {
         allow write: if isSeasonAdmin(seasonId);
       }
 
+      // Scores stop being writable when the season is closed.
+      //
+      // The page hides every control that would write one, but a check in the
+      // page is advice: closing a season is a statement that the result is
+      // final, and a result anybody with devtools can still edit is not final.
+      // Reopening the season lifts this — the season document itself stays
+      // writable by an admin, which is what makes that possible.
       match /episodeScores/{episodeNumber} {
         allow read: if isSeasonMember(seasonId);
-        allow write: if isSeasonAdmin(seasonId);
+        allow write: if isSeasonAdmin(seasonId) && seasonState(seasonId) != 'complete';
 
         match /contestantScores/{contestantId} {
           allow read: if isSeasonMember(seasonId);
-          allow write: if isSeasonAdmin(seasonId);
+          allow write: if isSeasonAdmin(seasonId) && seasonState(seasonId) != 'complete';
         }
       }
 

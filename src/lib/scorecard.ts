@@ -25,10 +25,12 @@ export type ScorecardAction =
  * a card that has been offered and not yet decided on is the case where the
  * reason is not visible from the card itself.
  */
-export type ScorecardNotice = 'pendingApproval' | null
+export type ScorecardNotice = 'pendingApproval' | 'seasonClosed' | null
 
 export interface ScorecardInput {
   isAdmin: boolean
+  /** The season is finished. Nothing about it is editable, by anybody. */
+  seasonClosed: boolean
   /** An episodeScores document exists: this episode has been scored for real. */
   officiallyScored: boolean
   isLocked: boolean
@@ -48,12 +50,19 @@ export interface ScorecardState {
 
 export function scorecardState({
   isAdmin,
+  seasonClosed,
   officiallyScored,
   isLocked,
   showingAsRecorded,
   proposalStatus,
   adminEditingProposal,
 }: ScorecardInput): ScorecardState {
+  // A finished season is a record, and every card in it is read-only —
+  // including to an admin, who would otherwise still be offered the unlock.
+  // The security rules refuse a score while the season says `complete`, so
+  // this withholds a control that would fail rather than deciding anything.
+  if (seasonClosed) return { editable: false, actions: [], notice: 'seasonClosed' }
+
   // Already scored. A suggestion cannot apply to an episode that has an answer,
   // so this branch is exactly what it was before proposals existed.
   if (officiallyScored) {

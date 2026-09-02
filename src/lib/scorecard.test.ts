@@ -3,6 +3,7 @@ import { scorecardState, type ScorecardInput } from './scorecard'
 
 const base: ScorecardInput = {
   isAdmin: false,
+  seasonClosed: false,
   officiallyScored: false,
   isLocked: false,
   showingAsRecorded: false,
@@ -104,5 +105,25 @@ describe('scorecardState — an episode that has been scored', () => {
       actions: [],
       notice: null,
     })
+  })
+})
+
+describe('scorecardState — a season that has been closed', () => {
+  // Including to an admin, who would otherwise still be offered the unlock.
+  // The rules refuse the write either way; this stops offering it.
+  it('is read-only for everybody, whatever the episode', () => {
+    for (const over of [
+      {},
+      { isAdmin: true },
+      { officiallyScored: true, isLocked: true },
+      { officiallyScored: true, isLocked: true, isAdmin: true },
+      { proposalStatus: 'pending' as const, isAdmin: true },
+    ]) {
+      expect(state({ ...over, seasonClosed: true })).toEqual({
+        editable: false,
+        actions: [],
+        notice: 'seasonClosed',
+      })
+    }
   })
 })

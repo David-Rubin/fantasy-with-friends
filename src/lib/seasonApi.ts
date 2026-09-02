@@ -2,6 +2,7 @@ import { doc, setDoc, updateDoc } from 'firebase/firestore'
 import { db } from './firebase'
 import { logAuditEvent } from './audit'
 import type { SeasonDetails } from './seasonDetails'
+import type { SeasonState } from './types'
 import { normalizeTeamName } from './teamName'
 import type { SeasonMemberDoc } from './types'
 
@@ -110,5 +111,33 @@ export async function renameTeam(
     targetUid: uid,
     oldValue: previous,
     newValue: teamName,
+  })
+}
+
+/**
+ * Closing a season, and opening it again.
+ *
+ * Whether it may be closed is decided in ./seasonCompletion; that it stays
+ * closed is decided by the security rules, which stop accepting a score while
+ * the state is `complete`. A page that merely hid the controls would be making
+ * a promise it could not keep.
+ *
+ * Reversible on purpose, and the reverse is the same one-field write. An admin
+ * who closes a season a week early — or who has to correct a scoring mistake
+ * somebody spots afterwards — should not need anybody's help to undo it.
+ */
+export async function setSeasonCompleted(
+  seasonId: string,
+  leagueId: string,
+  completed: boolean
+): Promise<void> {
+  const state: SeasonState = completed ? 'complete' : 'active'
+  await updateDoc(doc(db, 'seasons', seasonId), { state })
+
+  await logAuditEvent({
+    action: completed ? 'season_completed' : 'season_reopened',
+    seasonId,
+    leagueId,
+    newValue: state,
   })
 }

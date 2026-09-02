@@ -41,8 +41,10 @@ import {
   TIMER_SECONDS_MAX,
   TIMER_SECONDS_MIN,
 } from '../lib/seasonDetails'
-import { updateSeasonDetails } from '../lib/seasonApi'
+import { setSeasonCompleted, updateSeasonDetails } from '../lib/seasonApi'
 import { reconcilePickOrder } from '../lib/draft'
+import { canCompleteSeason, seasonWinner } from '../lib/seasonCompletion'
+import { SeasonChampion } from '../components/SeasonChampion'
 import { PickOrderList } from '../components/PickOrderList'
 import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
@@ -176,6 +178,9 @@ export function SeasonDetailPage() {
     accentColor: 'blue' as AccentColor,
   })
   const [savingEdit, setSavingEdit] = useState(false)
+  const [completeConfirm, setCompleteConfirm] = useState(false)
+  const [reopenConfirm, setReopenConfirm] = useState(false)
+  const [closingSeason, setClosingSeason] = useState(false)
   const [editError, setEditError] = useState('')
 
   // Draft settings form. `timerSeconds` is text, not a number, for the same
@@ -444,6 +449,19 @@ export function SeasonDetailPage() {
     }
   }
 
+  /** Close the season, or open it again. See setSeasonCompleted. */
+  async function handleSetCompleted(completed: boolean) {
+    if (!seasonId || !leagueId) return
+    setClosingSeason(true)
+    try {
+      await setSeasonCompleted(seasonId, leagueId, completed)
+      setCompleteConfirm(false)
+      setReopenConfirm(false)
+    } finally {
+      setClosingSeason(false)
+    }
+  }
+
   async function handleSaveSetup() {
     if (!seasonId) return
     setSavingSetup(true)
@@ -516,6 +534,25 @@ export function SeasonDetailPage() {
       setDeletingSeason(false)
     }
   }
+
+  /**
+   * A finished season is a record. Everything that could change one is withheld
+   * — scores, rules, free agents, the unlock — and the security rules refuse a
+   * score while the state says `complete`, so this is what the page shows
+   * rather than what holds the line.
+   */
+  const seasonClosed = season?.state === 'complete'
+  /** Admin controls that write something, which a closed season does not offer. */
+  const canManageSeason = isAdmin && !seasonClosed
+  const canClose = season
+    ? canCompleteSeason(season.state, season.episodeCount, episodeStatuses)
+    : false
+  const winner = seasonClosed
+    ? seasonWinner(
+        members.map((m) => m.uid),
+        season?.teamTotals ?? {}
+      )
+    : null
 
   const canOpenDraft = contestants.length >= 2 && rules.length >= 1
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
@@ -643,6 +680,16 @@ export function SeasonDetailPage() {
           {isAdmin && (
             <Button variant="secondary" onClick={openEditSeason}>
               {t('season.editDetails')}
+            </Button>
+          )}
+          {/* Offered only once every episode is scored and locked, and replaced
+              by its own undo once it has been used. */}
+          {isAdmin && canClose && (
+            <Button onClick={() => setCompleteConfirm(true)}>{t('season.markCompleted')}</Button>
+          )}
+          {isAdmin && seasonClosed && (
+            <Button variant="secondary" onClick={() => setReopenConfirm(true)}>
+              {t('season.reopen')}
             </Button>
           )}
         </div>
@@ -858,7 +905,7 @@ export function SeasonDetailPage() {
           leagueId={leagueId!}
           rules={rules}
           episodeCount={season.episodeCount}
-          canEdit={isAdmin}
+          canEdit={canManageSeason}
         />
       )}
 
@@ -926,6 +973,22 @@ export function SeasonDetailPage() {
           {/* Leaderboard tab */}
           {tab === 'leaderboard' && (
             <div className="flex flex-col gap-3">
+              {/* Above the standings rather than inside them: it is about the
+                  season, not about one row. */}
+              {winner && (
+                <SeasonChampion
+                  winner={winner}
+                  teams={winner.uids.map((uid) => {
+                    const member = memberUidMap[uid]
+                    return {
+                      uid,
+                      teamName: member?.teamName ?? '',
+                      displayName: member?.displayName ?? uid,
+                      photoUrl: member?.photoUrl,
+                    }
+                  })}
+                />
+              )}
               {members.length === 0 ? (
                 <p className="text-gray-400">{t('leaderboard.noScoresYet')}</p>
               ) : (
@@ -1038,7 +1101,7 @@ export function SeasonDetailPage() {
                     className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4"
                   >
                     <span className="font-medium text-gray-900">{c.name}</span>
-                    {isAdmin && (
+                    {canManageSeason && (
                       <Button variant="secondary" onClick={() => setAssignFreeAgentOpen(c.id)}>
                         {t('contestant.assignToTeam')}
                       </Button>
@@ -1087,7 +1150,7 @@ export function SeasonDetailPage() {
                         <Button variant="ghost">{t('scoring.suggestScores')}</Button>
                       </Link>
                     )}
-                    {isAdmin && (
+                    {canManageSeason && (
                       <div className="flex gap-2">
                         {!scored && (
                           <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
@@ -1173,6 +1236,44 @@ export function SeasonDetailPage() {
       />
 
       {/* Assign free agent modal */}
+      {/* Closing the season */}
+      <Modal
+        open={completeConfirm}
+        onClose={() => setCompleteConfirm(false)}
+        title={t('season.markCompleted')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCompleteConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={closingSeason} onClick={() => handleSetCompleted(true)}>
+              {t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-gray-600">{t('season.markCompletedConfirm', { label: season.label })}</p>
+      </Modal>
+
+      {/* Opening it again */}
+      <Modal
+        open={reopenConfirm}
+        onClose={() => setReopenConfirm(false)}
+        title={t('season.reopen')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setReopenConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={closingSeason} onClick={() => handleSetCompleted(false)}>
+              {t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-gray-600">{t('season.reopenConfirm', { label: season.label })}</p>
+      </Modal>
+
       {/* Edit season details */}
       <Modal
         open={editOpen}
