@@ -308,6 +308,36 @@ service cloud.firestore {
         }
       }
 
+      // A scorecard filled in by a member for an admin to decide on.
+      //
+      // Kept out of episodeScores on purpose. onEpisodeScoreWritten recomputes
+      // every team total from episodeScores/{n}/contestantScores, so a
+      // suggestion stored under that path would move the leaderboard the
+      // moment it was saved. Here nothing watches, and nothing is scored until
+      // an admin writes the real document.
+      //
+      // A rule can decide all of this, so no callable is needed: one exists()
+      // for whether the episode has already been scored, and the rest is the
+      // shape of the incoming document.
+      match /scoreProposals/{episodeNumber} {
+        allow read: if isSeasonMember(seasonId);
+
+        // Members may offer a card, but only for an episode nobody has scored,
+        // only as themselves, and only when there is no live suggestion to
+        // overwrite — the last writer would otherwise silently replace everyone
+        // before them, and the admin would never know they disagreed. A
+        // discarded one may be replaced: the reset reopened the episode.
+        allow create, update: if isSeasonMember(seasonId)
+          && request.auth.uid == request.resource.data.submittedBy
+          && request.resource.data.status == 'pending'
+          && !exists(/databases/$(database)/documents/seasons/$(seasonId)/episodeScores/$(episodeNumber))
+          && (resource == null || resource.data.status == 'discarded');
+
+        // Deciding on it — approving or resetting — belongs to an admin, who is
+        // also the only one who may take it out of `pending`.
+        allow write: if isSeasonAdmin(seasonId);
+      }
+
       match /draft/{draftId} {
         allow read: if isSeasonMember(seasonId);
         // Written only by Cloud Functions through the Admin SDK — startDraft

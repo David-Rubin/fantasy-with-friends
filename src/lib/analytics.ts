@@ -6,6 +6,7 @@ type EventName =
   | 'draft_pick_made'
   | 'draft_completed'
   | 'episode_scored'
+  | 'episode_scores_proposed'
   | 'leaderboard_viewed'
   | 'team_drilldown_opened'
 

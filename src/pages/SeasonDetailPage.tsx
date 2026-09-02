@@ -12,6 +12,7 @@ import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { LeaderboardRow } from '../components/LeaderboardRow'
 import type {
+  ScoreProposalDoc,
   SeasonDoc,
   ContestantDoc,
   SeasonMemberDoc,
@@ -143,7 +144,9 @@ export function SeasonDetailPage() {
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
   const { leagueName, showName } = useTrailNames(leagueId)
-  const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({}) // episodeNumber -> locked
+  const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({})
+  /** Episodes somebody has suggested scores for, awaiting an admin's decision. */
+  const [episodesAwaitingReview, setEpisodesAwaitingReview] = useState<Set<string>>(new Set()) // episodeNumber -> locked
   // Per-contestant scores, keyed by episode number. A cache, not the source of
   // truth for which episodes are scored — that is `episodeStatuses` — so an
   // episode that disappears is filtered out on read rather than deleted here.
@@ -328,6 +331,27 @@ export function SeasonDetailPage() {
       }
     )
     return unsub
+  }, [seasonId, canView])
+
+  // What is waiting to be decided on, so the episode list can say so rather
+  // than sending an admin into every unscored episode to find out. Pending
+  // only: a discarded suggestion is not waiting for anybody, and an approved
+  // one has already become the episode's score.
+  useEffect(() => {
+    if (!seasonId || !canView) return
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'scoreProposals'),
+      'score proposals',
+      (snap) => {
+        setEpisodesAwaitingReview(
+          new Set(
+            snap.docs
+              .filter((d) => (d.data() as ScoreProposalDoc).status === 'pending')
+              .map((d) => d.id)
+          )
+        )
+      }
+    )
   }, [seasonId, canView])
 
   // One listener per scored episode. `contestantScores` is a subcollection of
@@ -1031,6 +1055,7 @@ export function SeasonDetailPage() {
               {episodeNumbers.map((n) => {
                 const scored = episodeStatuses[String(n)] !== undefined
                 const locked = episodeStatuses[String(n)]
+                const awaitingReview = episodesAwaitingReview.has(String(n))
                 return (
                   <div
                     key={n}
@@ -1053,11 +1078,27 @@ export function SeasonDetailPage() {
                         <Button variant="ghost">{t('scoring.viewScores')}</Button>
                       </Link>
                     )}
+                    {/* And a way in to an episode nobody has scored, which is
+                        the only route to filling one in for an admin to
+                        approve. Without this the card exists and nothing on
+                        this page leads to it. */}
+                    {!isAdmin && !scored && (
+                      <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
+                        <Button variant="ghost">{t('scoring.suggestScores')}</Button>
+                      </Link>
+                    )}
                     {isAdmin && (
                       <div className="flex gap-2">
                         {!scored && (
                           <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
-                            <Button variant="secondary">{t('scoring.scoreEpisode', { n })}</Button>
+                            {/* Somebody has already filled this one in: the
+                                admin is going in to decide on their card, not
+                                to face an empty one. */}
+                            <Button variant="secondary">
+                              {awaitingReview
+                                ? t('scoring.seeSuggestedScores')
+                                : t('scoring.scoreEpisode', { n })}
+                            </Button>
                           </Link>
                         )}
                         {scored && locked && (

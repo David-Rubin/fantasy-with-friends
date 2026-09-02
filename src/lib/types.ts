@@ -262,6 +262,45 @@ export interface AppliedRule {
   points: number
 }
 
+/**
+ * A scorecard filled in by somebody who cannot submit one.
+ *
+ * At `seasons/{seasonId}/scoreProposals/{episodeNumber}`, deliberately not
+ * under `episodeScores`. The onEpisodeScoreWritten trigger recomputes every
+ * team total from `episodeScores/{n}/contestantScores`, so a suggestion written
+ * anywhere beneath that path would move the leaderboard the moment it was
+ * saved — which is the one thing a suggestion must not do. Nothing watches this
+ * collection.
+ *
+ * The whole card is one document rather than a document per contestant: it is
+ * read and written as a unit, it is a few hundred booleans at worst, and one
+ * document is one atomic write and one security rule.
+ */
+export type ScoreProposalStatus = 'pending' | 'approved' | 'discarded'
+
+export interface ScoreProposalDoc {
+  status: ScoreProposalStatus
+  /** contestantId → the same shape a contestantScores document stores. */
+  scores: Record<string, ContestantScoreEntry>
+  /** Contestants the proposer marked as going out this episode. */
+  eliminations: string[]
+  submittedBy: string
+  /**
+   * Denormalized — see LeagueMemberDoc.displayName. Not shown on the card,
+   * which says only that scores are pending; kept because the proposal is a
+   * record of somebody's work, and an admin cannot read the proposer's user
+   * document to find out afterwards whose it was.
+   */
+  submittedByName: string
+  submittedAt: number
+  /**
+   * Set when an admin resets the card. A soft delete: the suggestion stays
+   * readable, and the episode is open to be suggested again.
+   */
+  decidedAt: number | null
+  decidedBy: string | null
+}
+
 // ruleId → whether that rule applied to this contestant in this episode
 export type ContestantScoreEntry = Record<string, boolean>
 
