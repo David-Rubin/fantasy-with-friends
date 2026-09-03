@@ -9,7 +9,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  limit,
   addDoc,
   setDoc,
 } from 'firebase/firestore'
@@ -20,20 +19,25 @@ import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import { Input, Textarea } from '../components/Input'
-import { AccentColorPicker } from '../components/AccentColorPicker'
-import { Badge } from '../components/Badge'
+import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
 import { dashboardTrail } from '../lib/breadcrumbs'
 import { useMyJoinRequests } from '../lib/joinRequests'
+import { leadingSeason, sortLeaguesByStatus } from '../lib/leagueStatus'
 import type { LeagueDoc, LeagueMemberDoc, SeasonDoc } from '../lib/types'
-import type { AccentColor } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 
 interface LeagueWithSeason {
   id: string
   league: LeagueDoc
-  latestSeason: (SeasonDoc & { id: string }) | null
+  /**
+   * The season this league is judged by — see leadingSeason. Not its newest:
+   * a league that lines up next year's season while this year's is still being
+   * scored is still playing this year's, and that is what a reader wants the
+   * badge to say.
+   */
+  currentSeason: (SeasonDoc & { id: string }) | null
 }
 
 function memberCountLabel(count: number): string {
@@ -51,7 +55,6 @@ export function DashboardPage() {
   const [leagueName, setLeagueName] = useState('')
   const [leagueShow, setLeagueShow] = useState('')
   const [leagueDesc, setLeagueDesc] = useState('')
-  const [accentColor, setAccentColor] = useState<AccentColor>('blue')
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
@@ -82,20 +85,21 @@ export function DashboardPage() {
             if (!leagueSnap.exists()) continue
             const league = leagueSnap.data() as LeagueDoc
 
-            // Get latest season
+            // Every season, not just the newest: which one speaks for the
+            // league is a question about their states, and only one of them
+            // can be answered by a query's ordering. A league has a handful.
             const seasonsSnap = await getDocs(
               query(
                 collection(db, 'seasons'),
                 where('leagueId', '==', leagueId),
-                orderBy('createdAt', 'desc'),
-                limit(1)
+                orderBy('createdAt', 'desc')
               )
             )
-            const latestSeason = seasonsSnap.empty
-              ? null
-              : { id: seasonsSnap.docs[0].id, ...(seasonsSnap.docs[0].data() as SeasonDoc) }
+            const currentSeason = leadingSeason(
+              seasonsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as SeasonDoc) }))
+            )
 
-            results.push({ id: leagueId, league, latestSeason })
+            results.push({ id: leagueId, league, currentSeason })
           }
           setLeagues(results)
         } catch (error) {
@@ -137,7 +141,6 @@ export function DashboardPage() {
         description: leagueDesc.trim(),
         ownerId: user.uid,
         createdAt: Date.now(),
-        accentColor,
         // Derived state owned by the onLeagueMemberWritten trigger, which sets
         // it to 1 as soon as the owner's member document lands below. The rules
         // require it to start at 0 so a client cannot inflate a league's size.
@@ -172,14 +175,18 @@ export function DashboardPage() {
   const myLeagueIds = new Set(leagues.map((l) => l.id))
   const otherLeagues = allLeagues.filter((l) => !myLeagueIds.has(l.id))
 
-  // Find the most recently updated active/draft season across all leagues
-  const featuredSeason = leagues
-    .flatMap((l) =>
-      l.latestSeason && ['active', 'draft'].includes(l.latestSeason.state)
-        ? [{ ...l, season: l.latestSeason }]
-        : []
-    )
-    .sort((a, b) => (b.season.createdAt ?? 0) - (a.season.createdAt ?? 0))[0]
+  // The leagues in the order they should be read — see sortLeaguesByStatus.
+  const sortedLeagues = sortLeaguesByStatus(leagues)
+
+  // The one season worth putting at the top of the page: whatever is furthest
+  // up the same precedence order, provided it is something to act on. A season
+  // in setup or already over has nothing here for anybody, so the card stays
+  // away rather than pointing at it.
+  const featuredSeason = sortedLeagues.flatMap((l) =>
+    l.currentSeason && ['draft', 'active'].includes(l.currentSeason.state)
+      ? [{ ...l, season: l.currentSeason }]
+      : []
+  )[0]
 
   return (
     <Layout breadcrumbs={dashboardTrail()}>
@@ -193,11 +200,7 @@ export function DashboardPage() {
         <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <Badge accent={featuredSeason.season.accentColor}>
-                {featuredSeason.season.state === 'draft'
-                  ? t('season.states.draft')
-                  : t('season.states.active')}
-              </Badge>
+              <SeasonStateBadge state={featuredSeason.season.state} />
               <h2 className="mt-2 text-xl font-semibold text-gray-900">
                 {featuredSeason.league.showName}
               </h2>
@@ -205,7 +208,7 @@ export function DashboardPage() {
               <p className="mt-1 text-sm text-gray-500">{featuredSeason.league.name}</p>
             </div>
             <Link
-              to={`/leagues/${featuredSeason.id}/seasons/${featuredSeason.latestSeason!.id}${featuredSeason.season.state === 'draft' ? '/draft' : ''}`}
+              to={`/leagues/${featuredSeason.id}/seasons/${featuredSeason.season.id}${featuredSeason.season.state === 'draft' ? '/draft' : ''}`}
             >
               <Button>
                 {featuredSeason.season.state === 'draft'
@@ -233,7 +236,7 @@ export function DashboardPage() {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {leagues.map(({ id, league, latestSeason }) => (
+              {sortedLeagues.map(({ id, league, currentSeason }) => (
                 <Link
                   key={id}
                   to={`/leagues/${id}`}
@@ -241,18 +244,14 @@ export function DashboardPage() {
                 >
                   <div>
                     <p className="font-semibold text-gray-900">{league.name}</p>
-                    {latestSeason && (
+                    {currentSeason && (
                       <p className="text-sm text-gray-500">
                         {league.showName ? `${league.showName} · ` : ''}
-                        {latestSeason.label}
+                        {currentSeason.label}
                       </p>
                     )}
                   </div>
-                  {latestSeason && (
-                    <Badge accent={latestSeason.accentColor}>
-                      {t(`season.states.${latestSeason.state}`)}
-                    </Badge>
-                  )}
+                  {currentSeason && <SeasonStateBadge state={currentSeason.state} />}
                 </Link>
               ))}
             </div>
@@ -338,7 +337,6 @@ export function DashboardPage() {
             value={leagueDesc}
             onChange={(e) => setLeagueDesc(e.target.value)}
           />
-          <AccentColorPicker value={accentColor} onChange={setAccentColor} />
         </form>
       </Modal>
     </Layout>

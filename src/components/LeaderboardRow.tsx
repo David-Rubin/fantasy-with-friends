@@ -118,9 +118,7 @@ export function LeaderboardRow({
                     <td className="py-1.5 pr-2 font-medium text-gray-700">
                       <span>{contestant.name}</span>
                       {contestant.eliminatedEpisode !== null && (
-                        <Badge variant="eliminated" aria-label={t('contestant.eliminated')}>
-                          {t('contestant.eliminated')}
-                        </Badge>
+                        <Badge tone="eliminated">{t('contestant.eliminated')}</Badge>
                       )}
                     </td>
                     <td className="py-1.5 px-2 text-right text-gray-600">

@@ -80,7 +80,6 @@
   "season.create": "Create season",
   "season.label": "Season label",
   "season.episodeCount": "Number of episodes",
-  "season.accentColor": "Accent color",
   "season.editDetails": "Edit season",
   "season.saving": "Saving…",
   "season.episodeCountBelowScored": "Episodes up to {n} already have scores. Lowering the count past them would hide those scores while they still count toward every total.",

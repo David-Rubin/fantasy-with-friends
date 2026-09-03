@@ -15,13 +15,12 @@ import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
-import { Badge } from '../components/Badge'
+import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { Modal } from '../components/Modal'
 import { UserAvatar } from '../components/UserAvatar'
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal'
 import { deleteLeague, deleteSeason, deletionErrorMessage } from '../lib/deleteApi'
 import { Input, Textarea } from '../components/Input'
-import { AccentColorPicker } from '../components/AccentColorPicker'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
 import { useMySeasonIds } from '../components/SeasonMemberGate'
 import { leagueTrail } from '../lib/breadcrumbs'
@@ -35,7 +34,6 @@ import type {
   LeagueMemberDoc,
   SeasonDoc,
   MemberRole,
-  AccentColor,
 } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
@@ -67,11 +65,7 @@ export function LeagueDetailPage() {
   const { seasonIds: mySeasonIds, resolved: seasonMembershipResolved } = useMySeasonIds()
   const [joiningSeason, setJoiningSeason] = useState<string | null>(null)
   const [newSeasonOpen, setNewSeasonOpen] = useState(false)
-  const [seasonForm, setSeasonForm] = useState({
-    label: '',
-    episodeCount: '',
-    accentColor: 'blue' as AccentColor,
-  })
+  const [seasonForm, setSeasonForm] = useState({ label: '', episodeCount: '' })
   const [creating, setCreating] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState({ name: '', showName: '', description: '' })
@@ -341,7 +335,6 @@ export function LeagueDetailPage() {
         pickOrderMethod: 'admin-set',
         timerSeconds: 60,
         timerExpiry: 'auto-pick',
-        accentColor: seasonForm.accentColor,
         createdAt: Date.now(),
         firstEpisodeScoredAt: null,
         teamTotals: {},
@@ -481,7 +474,7 @@ export function LeagueDetailPage() {
                     <div>
                       <p className="font-semibold text-gray-900">{season.label}</p>
                     </div>
-                    <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
+                    <SeasonStateBadge state={season.state} />
                   </>
                 )
                 // Season pages are for members, and a season being set up is
@@ -769,10 +762,6 @@ export function LeagueDetailPage() {
             value={seasonForm.episodeCount}
             onChange={(e) => setSeasonForm((f) => ({ ...f, episodeCount: e.target.value }))}
             required
-          />
-          <AccentColorPicker
-            value={seasonForm.accentColor}
-            onChange={(c) => setSeasonForm((f) => ({ ...f, accentColor: c }))}
           />
         </form>
       </Modal>

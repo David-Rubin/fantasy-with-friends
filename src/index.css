@@ -25,11 +25,11 @@
   --color-sage-500: #7f9463;
   --color-sage-800: #45543a;
 
-  /* Accent palette (12 options).
+  /* Team palette (12 options).
      Chosen so that no two are mistakable for each other at swatch size or as a
      4px border — which is what they mostly are, since a team's colour is how it
-     is picked out of a leaderboard. See src/lib/accentColor.ts for the retired names
-     that documents still carry. */
+     is picked out of a leaderboard. Leagues and seasons had an accent from the
+     same list until it turned out to say nothing a reader could use. */
   --color-accent-violet: #7c3aed;
   --color-accent-lavender: #c084fc;
   --color-accent-pink: #f472b6;

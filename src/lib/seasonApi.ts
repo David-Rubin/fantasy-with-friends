@@ -31,7 +31,6 @@ export async function updateSeasonDetails(
   await updateDoc(doc(db, 'seasons', seasonId), {
     label: next.label,
     episodeCount: next.episodeCount,
-    accentColor: next.accentColor,
   })
 
   await logAuditEvent({

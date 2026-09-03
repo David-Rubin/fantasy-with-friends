@@ -16,7 +16,7 @@ import type { SeasonDoc } from './types'
  * The show name is not among them — it belongs to the league now, and is edited
  * there. See LeagueDoc.showName.
  */
-export type SeasonDetails = Pick<SeasonDoc, 'label' | 'episodeCount' | 'accentColor'>
+export type SeasonDetails = Pick<SeasonDoc, 'label' | 'episodeCount'>
 
 /**
  * The highest episode number that already has a scores document.

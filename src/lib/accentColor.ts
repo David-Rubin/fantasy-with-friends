@@ -32,8 +32,8 @@ export const DEFAULT_ACCENT: AccentColor = 'blue'
 /**
  * A stored accent colour, as one of the twelve.
  *
- * A stored accent is a plain string in Firestore, on every league, season and
- * team, and the palette has been changed once: lavender, sage and brown
+ * A team's colour is a plain string in Firestore, and the palette has been
+ * changed once since teams got one: lavender, sage and brown
  * replaced three colours too close to their neighbours to tell apart. Nothing
  * went back and rewrote those documents, and nothing translates the old names
  * either — a name the palette no longer offers is a name that should not be in
@@ -46,8 +46,9 @@ export const DEFAULT_ACCENT: AccentColor = 'blue'
  * wrong colour. That also covers a document edited by hand or restored from a
  * backup, which a one-off migration would not have.
  *
- * Applied inside Badge and AccentColorPicker, and in ./teamColor, which are
- * every place a stored colour turns into a class name.
+ * Applied inside AccentColorPicker and in ./teamColor, which between them are
+ * every place a stored colour turns into a class name. A badge no longer takes
+ * one: it colours itself from what it is saying — see SeasonStateBadge.
  */
 export function accent(color: AccentColor | string | undefined | null): AccentColor {
   return ACCENT_COLORS.includes(color as AccentColor) ? (color as AccentColor) : DEFAULT_ACCENT
