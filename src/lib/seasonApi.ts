@@ -1,8 +1,9 @@
 import { doc, setDoc, updateDoc } from 'firebase/firestore'
-import { db } from './firebase'
+import { httpsCallable } from 'firebase/functions'
+import { db, functions } from './firebase'
 import { logAuditEvent } from './audit'
 import type { SeasonDetails } from './seasonDetails'
-import type { SeasonState } from './types'
+import type { AccentColor, SeasonState } from './types'
 import { normalizeTeamName } from './teamName'
 import type { SeasonMemberDoc } from './types'
 
@@ -83,10 +84,10 @@ export async function joinSeason(
 /**
  * A member naming their own team.
  *
- * Whether they may is decided in ./teamName and, as a constraint rather than
- * advice, by the `update` rule on the season roster — which pins the write to
- * the caller's own document, to the `teamName` field alone, and to a season
- * with nothing scored against it yet.
+ * What a name may be is decided in ./teamName. That it is *their* team is a
+ * constraint rather than advice: the `update` rule on the season roster pins
+ * the write to the caller's own document and to the `teamName` field alone, in
+ * whatever state the season is in.
  *
  * The name is normalized here so the value that was validated is the value that
  * gets stored; the rule checks the stored length, so a name padded past the
@@ -112,6 +113,34 @@ export async function renameTeam(
     oldValue: previous,
     newValue: teamName,
   })
+}
+
+/**
+ * A member choosing their team's colour.
+ *
+ * A callable rather than a direct write, and the only reason is that the
+ * constraint is not local: no two teams in a season may hold the same colour,
+ * which is a question about the whole roster. A security rule cannot query a
+ * collection, so the field is closed to clients and setTeamColor in
+ * functions/src/index.ts settles it in a transaction — see "Where a rule
+ * belongs" in CLAUDE.md.
+ *
+ * Rejects with `failed-precondition` when somebody claimed the colour first;
+ * the picker turns that into a line of text rather than a thrown error, because
+ * two people reaching for sage at once is an ordinary thing to happen.
+ */
+export const setTeamColor = httpsCallable<
+  { seasonId: string; teamColor: AccentColor },
+  { teamColor: AccentColor }
+>(functions, 'setTeamColor')
+
+/** Whether a rejected colour change was rejected because somebody has it. */
+export function isColorTakenError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: string }).code === 'functions/failed-precondition'
+  )
 }
 
 /**

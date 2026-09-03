@@ -67,6 +67,7 @@ clients (`allow ...: if false`) and go through a callable instead. Precedents:
 | `submitPick`         | Deriving whose turn it is means re-implementing snake order in a rule; detecting a finished draft needs an aggregate |
 | `removeLeagueMember` | "Is this member in a season that is drafting or active?" is a query across `seasons` plus a read in each             |
 | `listAllUsers`       | Keeps the `users` read rule own-document-only, so there is one audited path to anything wider                        |
+| `setTeamColor`       | "No other team in this season holds this colour" is a question about the whole roster, which a rule cannot query     |
 
 A check left in the client when it belongs here is **advice, not a constraint** —
 anyone with devtools ignores it.
@@ -223,6 +224,25 @@ manual `firebase deploy` cannot ship a stale `dist/` or `functions/lib/`.
 
 Whoever signs up first on a fresh project becomes superadmin
 (`grantFirstUserSuperadmin`), once, and it never re-arms.
+
+### Data migrations are not part of the deploy
+
+Nothing in `ci.yml` touches stored documents. A change that renames a stored
+value therefore needs either a script somebody remembers to run, or a front end
+that copes with both spellings — and merging to `main` ships the front end
+whether or not the data moved.
+
+So prefer coping to migrating. The accent palette dropped three colours and
+renamed them, and the documents were never rewritten: `accent()` in
+`src/lib/accentColor.ts` draws a colour the palette does not know as blue, which
+turns "a value we no longer understand" into a wrong colour rather than a blank
+badge. That is cheaper than a migration, and it keeps working for a document
+restored from a backup or edited by hand, which a one-off script does not.
+
+Where a script really is the answer, `scripts/seed-passwords.mjs` is the shape
+to copy — plain `fetch`, no dependency on the functions tree — but note it is
+deliberately hardcoded to the emulator, and a migration would have to be
+reachable against the live project instead.
 
 A single-field index belongs in `fieldOverrides`, never in `indexes` — the
 `indexes` array is for composite indexes, and Firestore rejects a one-field

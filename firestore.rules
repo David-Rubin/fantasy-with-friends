@@ -189,19 +189,11 @@ service cloud.firestore {
       }
     }
 
-    // A season stops being tunable once it has been scored. Expressed here
-    // rather than left to the client: it is a single get() on the parent
-    // season, which is exactly the kind of check a rule can make.
+    // Where a season has got to. A single get() on the parent season, which is
+    // exactly the kind of check a rule can make — so what depends on it is a
+    // constraint rather than something the client is trusted to observe.
     function seasonState(seasonId) {
       return get(/databases/$(database)/documents/seasons/$(seasonId)).data.state;
-    }
-
-    // Whether a season has anything scored against it yet. Absent on season
-    // documents written before the field existed, which read as unscored.
-    function seasonIsUnscored(seasonId) {
-      return seasonState(seasonId) != 'complete'
-        && get(/databases/$(database)/documents/seasons/$(seasonId))
-             .data.get('firstEpisodeScoredAt', null) == null;
     }
 
     // ── Seasons ───────────────────────────────────────────────────────────────
@@ -228,17 +220,21 @@ service cloud.firestore {
 
       match /members/{uid} {
         allow read: if isSeasonMember(seasonId);
-        // Team name update — own record only, and only while the season has
-        // nothing scored against it.
+        // Team name update — own record only, in any state of the season.
         //
-        // That is the closest durable line to the product rule, which is that
-        // naming happens in the draft room: before the draft opens, while it
-        // runs, and while the "Draft complete!" banner is still up. The draft
-        // ending moves the season to `active` in the same write, so `state`
-        // alone cannot tell a member reading that banner from one who came
-        // back in week six — but a scored episode can, and by then the name is
-        // on a leaderboard people are reading. See src/lib/teamName.ts, which
-        // draws the same line for the field the draft room offers.
+        // Naming used to close the moment an episode was scored, on the
+        // reasoning that the name was by then on a leaderboard people were
+        // reading. It is a name, not a score: nothing else in the season
+        // depends on it, and a member who wants to rename their team in week
+        // six is not taking anything from anybody. So membership is now the
+        // whole test, which is what `request.auth.uid == uid` on a document in
+        // this roster already is.
+        //
+        // `teamColor` is deliberately not in this list. Its constraint is that
+        // no other team in the season holds it, which means reading the whole
+        // roster — something a rule cannot do — so it is written only by the
+        // setTeamColor callable and the onSeasonMemberWritten trigger, both of
+        // which use the Admin SDK and are not bound by this rule.
         //
         // The length bound is enforced here rather than left to the client: a
         // name too long for a leaderboard row is everyone else's problem, not
@@ -248,8 +244,7 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamName'])
           && request.resource.data.teamName is string
           && request.resource.data.teamName.size() > 0
-          && request.resource.data.teamName.size() <= 40
-          && seasonIsUnscored(seasonId);
+          && request.resource.data.teamName.size() <= 40;
 
         // A league member joins a season for themselves, while it is still
         // being set up. No approval: they are already in the league, and pick
@@ -268,10 +263,16 @@ service cloud.firestore {
         // admin. displayName is not checked against the league roster: it is
         // copied from the joiner's own self-writable user document everywhere
         // else in the app, so a check here would guard nothing.
+        //
+        // teamColor is refused for the same reason it is refused on update: a
+        // joiner picking their own would be picking one nobody had checked was
+        // free. The onSeasonMemberWritten trigger hands one out the moment this
+        // document lands.
         allow create: if isSignedIn()
           && request.auth.uid == uid
           && request.resource.data.uid == uid
           && request.resource.data.pickPosition == null
+          && !('teamColor' in request.resource.data)
           && seasonState(seasonId) == 'setup'
           && isLeagueMember(seasonLeagueId(seasonId));
 

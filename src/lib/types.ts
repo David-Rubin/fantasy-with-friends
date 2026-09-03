@@ -41,18 +41,22 @@ export type DraftStatus = 'lobby' | 'active' | 'paused' | 'awaiting-close' | 'co
  * league that only ever wanted to tick boxes.
  */
 export type ScoringRuleType = 'binary'
+/**
+ * The palette leagues, seasons and teams pick from. The list as it is offered,
+ * and why these twelve, is in ./accentColor.
+ */
 export type AccentColor =
   | 'violet'
-  | 'purple'
+  | 'lavender'
   | 'pink'
   | 'rose'
   | 'orange'
   | 'amber'
   | 'emerald'
-  | 'teal'
+  | 'sage'
   | 'cyan'
   | 'blue'
-  | 'indigo'
+  | 'brown'
   | 'slate'
 
 // ── Firestore document shapes ─────────────────────────────────────────────────
@@ -191,6 +195,19 @@ export interface SeasonMemberDoc {
   /** Denormalized display name — see LeagueMemberDoc.displayName */
   displayName: string
   teamName: string
+  /**
+   * The colour this team is drawn in, everywhere it appears. Unique within a
+   * season: handed out at random by the onSeasonMemberWritten trigger when
+   * somebody joins, and changed only through the setTeamColor callable, which
+   * refuses a colour another team already holds. Closed to clients in the
+   * rules, because "no other team has this" is a question about the whole
+   * roster and a rule cannot ask it.
+   *
+   * Optional: member documents written before the field existed have no value
+   * for it, and are drawn in a fallback colour until the trigger fills it in.
+   * See src/lib/teamColor.ts.
+   */
+  teamColor?: AccentColor
   pickPosition: number | null
   joinedAt: number
   /**

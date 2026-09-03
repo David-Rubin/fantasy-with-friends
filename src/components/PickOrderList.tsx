@@ -2,11 +2,16 @@ import { useState } from 'react'
 import { t } from '../lib/i18n'
 import { movePickOrder } from '../lib/draft'
 import { UserAvatar } from './UserAvatar'
+import { accentLeftBorder } from './accentStyles'
+import { teamColorFor } from '../lib/teamColor'
+import type { AccentColor } from '../lib/types'
 
 export interface PickOrderPlayer {
   uid: string
   displayName: string
   photoUrl?: string
+  /** Absent on a roster row written before teams had colours. */
+  teamColor?: AccentColor
 }
 
 interface PickOrderListProps {
@@ -70,7 +75,9 @@ export function PickOrderList({ players, order, onChange }: PickOrderListProps) 
             e.preventDefault()
             setDraggingUid(null)
           }}
-          className={`flex cursor-grab items-center gap-3 rounded-lg border bg-white px-3 py-2 ${
+          className={`flex cursor-grab items-center gap-3 rounded-lg border border-l-4 bg-white px-3 py-2 ${
+            accentLeftBorder[teamColorFor(player)]
+          } ${
             draggingUid === player.uid
               ? 'border-blue-400 opacity-60 ring-2 ring-blue-200'
               : 'border-gray-200'

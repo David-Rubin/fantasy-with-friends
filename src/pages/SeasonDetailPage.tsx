@@ -63,6 +63,10 @@ import {
   emptyContestantForm,
   type ContestantFormValues,
 } from '../components/ContestantFields'
+import { TeamIdentityCard } from '../components/TeamIdentityCard'
+import { TeamColorDot } from '../components/TeamColorDot'
+import { accentLeftBorder } from '../components/accentStyles'
+import { takenTeamColors, teamColorFor, teamHoldingColor } from '../lib/teamColor'
 
 const TABS = ['leaderboard', 'roster', 'freeAgents', 'episodes'] as const
 type Tab = (typeof TABS)[number]
@@ -557,20 +561,35 @@ export function SeasonDetailPage() {
   const canOpenDraft = contestants.length >= 2 && rules.length >= 1
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
   const memberUidMap = Object.fromEntries(members.map((m) => [m.uid, m]))
+  // The signed-in member's own roster row, when they have one. Everyone on this
+  // page can see the season; only somebody actually playing it has a team to
+  // name and a colour to claim.
+  const myMember = members.find((m) => m.uid === user?.uid)
+  // Colours other teams hold, so the picker can grey them out. Derived from the
+  // roster listener that is already open rather than read separately — the
+  // uniqueness rule itself is enforced by setTeamColor, server-side, so this is
+  // only what the picker draws.
+  const takenColors = takenTeamColors(members, user?.uid)
+  const colorHolder = (color: AccentColor) => teamHoldingColor(members, color, user?.uid)
   // The roster's rows, resolved to the text each cell shows before they are
   // sorted — see sortRosterRows for why the sort works on that text and not on
   // the contestant documents behind it.
   const rosterRows = useMemo(() => {
-    const rows = contestants.map((c) => ({
-      id: c.id,
-      photoUrl: c.photoUrl,
-      eliminated: c.eliminatedEpisode !== null,
-      contestant: c.name,
-      owner: c.draftedByUid
-        ? (memberUidMap[c.draftedByUid]?.displayName ?? '\u2014')
-        : t('contestant.freeAgent'),
-      status: c.eliminatedEpisode !== null ? t('contestant.eliminated') : t('contestant.active'),
-    }))
+    const rows = contestants.map((c) => {
+      const owner = c.draftedByUid ? memberUidMap[c.draftedByUid] : undefined
+      return {
+        id: c.id,
+        photoUrl: c.photoUrl,
+        eliminated: c.eliminatedEpisode !== null,
+        contestant: c.name,
+        owner: c.draftedByUid ? (owner?.displayName ?? '\u2014') : t('contestant.freeAgent'),
+        // Carried alongside the owner's name rather than looked up in the
+        // cell, so the sort still works on exactly the text it renders.
+        ownerColor: owner ? teamColorFor(owner) : null,
+        ownerTeamName: owner?.teamName ?? '',
+        status: c.eliminatedEpisode !== null ? t('contestant.eliminated') : t('contestant.active'),
+      }
+    })
     return sortRosterRows(rows, rosterSort)
     // memberUidMap is rebuilt on every render, so `members` is the real
     // dependency; listing the map itself would defeat the memo.
@@ -694,6 +713,25 @@ export function SeasonDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Your team, in every state of the season.
+          It used to live only in the draft room, which meant a member who
+          joined a season already under way — or who came back to a finished
+          one — had nowhere to name their team at all. Nothing in a season
+          depends on the name or the colour, so there is nothing to protect by
+          taking them away; the only test is whether this is your season. */}
+      {myMember && seasonId && leagueId && (
+        <TeamIdentityCard
+          seasonId={seasonId}
+          leagueId={leagueId}
+          uid={myMember.uid}
+          teamName={myMember.teamName}
+          teamColor={teamColorFor(myMember)}
+          takenColors={takenColors}
+          takenLabel={colorHolder}
+          seasonState={season.state}
+        />
+      )}
 
       {/* Setup panel */}
       {season.state === 'setup' && isAdmin && (
@@ -985,6 +1023,7 @@ export function SeasonDetailPage() {
                       teamName: member?.teamName ?? '',
                       displayName: member?.displayName ?? uid,
                       photoUrl: member?.photoUrl,
+                      teamColor: teamColorFor(member ?? { uid }),
                     }
                   })}
                 />
@@ -1019,7 +1058,7 @@ export function SeasonDetailPage() {
                         playerPhotoUrl={member.photoUrl}
                         totalPoints={season.teamTotals[member.uid] ?? 0}
                         delta={delta}
-                        accentColor={season.accentColor}
+                        teamColor={teamColorFor(member)}
                         contestants={teamContestants.map((c) => ({
                           contestant: c,
                           seasonTotal: calcContestantTotal(c.id, episodeScoreDocs),
@@ -1073,7 +1112,15 @@ export function SeasonDetailPage() {
                           ' '
                         )}
                       >
-                        {row.owner}
+                        <span className="flex items-center gap-2">
+                          {/* A free agent has no team, so no dot — the gap is
+                              what says so, and the cell already reads "Free
+                              agent" beside it. */}
+                          {row.ownerColor && (
+                            <TeamColorDot color={row.ownerColor} teamName={row.ownerTeamName} />
+                          )}
+                          {row.owner}
+                        </span>
                       </td>
                       <td
                         className={['py-3', row.eliminated ? 'text-red-600' : 'text-gray-400'].join(
@@ -1366,7 +1413,7 @@ export function SeasonDetailPage() {
               key={m.uid}
               type="button"
               onClick={() => handleAssignFreeAgent(assignFreeAgentOpen!, m.uid)}
-              className="rounded-lg border border-gray-200 px-4 py-3 text-left hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              className={`rounded-lg border border-l-4 border-gray-200 px-4 py-3 text-left hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${accentLeftBorder[teamColorFor(m)]}`}
             >
               {m.teamName} <span className="text-gray-400 text-sm">({m.displayName})</span>
             </button>

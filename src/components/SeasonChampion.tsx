@@ -1,12 +1,16 @@
 import { t } from '../lib/i18n'
 import { UserAvatar } from './UserAvatar'
+import { accentLeftBorder } from './accentStyles'
 import type { SeasonWinner } from '../lib/seasonCompletion'
+import type { AccentColor } from '../lib/types'
 
 interface ChampionTeam {
   uid: string
   teamName: string
   displayName: string
   photoUrl?: string
+  /** The team's colour, so a shared win still says which team is which. */
+  teamColor: AccentColor
 }
 
 interface SeasonChampionProps {
@@ -67,7 +71,12 @@ export function SeasonChampion({ winner, teams }: SeasonChampionProps) {
 
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
           {teams.map((team) => (
-            <div key={team.uid} className="flex items-center gap-2">
+            // The colour edge matters most on a tie, where this banner names
+            // two or three teams side by side and nothing else separates them.
+            <div
+              key={team.uid}
+              className={`flex items-center gap-2 border-l-4 bg-white/60 py-1 pl-3 ${accentLeftBorder[team.teamColor]}`}
+            >
               <UserAvatar displayName={team.displayName} photoUrl={team.photoUrl} />
               <div className="text-left">
                 <p className="font-semibold text-gray-900">{team.teamName}</p>
