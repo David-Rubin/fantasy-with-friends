@@ -20,6 +20,7 @@ import {
   resolvePickOrder,
 } from './draft'
 import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
+import { isTeamColor, pickTeamColor, takenBy, type TeamColor } from './teamColor'
 import { userDeletionProblem, userDeletionMessage } from './deletion'
 import type { ContestantScoreDoc } from './scoring'
 
@@ -1467,6 +1468,131 @@ export const deleteUser = functions.https.onCall(
       seasonsLeft: plan.leaving.length,
       seasonsKept: plan.keeping.length,
     }
+  }
+)
+
+// ── Season rosters: team colours ─────────────────────────────────────────────
+
+/**
+ * Every colour held in a season, read inside a transaction so a concurrent
+ * claim cannot slip in between the read and the write that follows it.
+ */
+async function rosterColors(
+  tx: FirebaseFirestore.Transaction,
+  seasonId: string
+): Promise<{ uid: string; teamColor?: string }[]> {
+  const snap = await tx.get(db.collection(`seasons/${seasonId}/members`))
+  return snap.docs.map((d) => ({ uid: d.id, teamColor: d.data().teamColor as string | undefined }))
+}
+
+/**
+ * Give a new team a colour.
+ *
+ * A trigger rather than something the joining client writes, for two reasons.
+ * The colour has to be one nobody else in the season holds, which means reading
+ * the whole roster — a security rule cannot, so a client doing it would be
+ * making a promise nothing enforced. And there are three ways into a season
+ * roster (joining one in setup, being approved into the league, being carried
+ * in when the season is created), so a client-side default would have to be
+ * remembered in three places and would be missing from the fourth somebody
+ * adds. `teamColor` is refused to clients in firestore.rules, which leaves this
+ * and the setTeamColor callable as the only ways it is ever written.
+ *
+ * Fires on write rather than on create so a member document from before the
+ * field existed picks a colour up the next time anything touches it — a rename,
+ * a pick position, a display-name sync.
+ */
+export const onSeasonMemberWritten = onDocumentWritten(
+  'seasons/{seasonId}/members/{uid}',
+  async (event) => {
+    const after = event.data?.after.data()
+    // Removed from the season, or already holding a colour — including the
+    // write this trigger makes itself, which is what stops it re-firing.
+    if (!after || isTeamColor(after.teamColor)) return
+
+    const { seasonId, uid } = event.params
+
+    await db.runTransaction(async (tx) => {
+      const memberRef = db.doc(`seasons/${seasonId}/members/${uid}`)
+      const roster = await rosterColors(tx, seasonId)
+      const mine = roster.find((m) => m.uid === uid)
+      // Gone, or given a colour by something else while this was queued.
+      if (!mine || isTeamColor(mine.teamColor)) return
+
+      const taken = roster
+        .map((m) => m.teamColor)
+        .filter((color): color is TeamColor => isTeamColor(color))
+      tx.update(memberRef, { teamColor: pickTeamColor(taken) })
+    })
+  }
+)
+
+/**
+ * A member changing their own team's colour.
+ *
+ * A callable rather than a client write because the rule that matters —
+ * "no other team in this season holds this colour" — needs the whole roster,
+ * and a security rule can neither query a collection nor read an unbounded set
+ * of documents. Left in the client it would be advice: two members picking
+ * sage within a second of each other would both be told yes. The transaction
+ * here is what makes it a constraint, and `teamColor` is closed to clients in
+ * firestore.rules so this is the only way through.
+ *
+ * Own team only. An admin has no business repainting somebody else's, and the
+ * colour carries no meaning a season depends on.
+ */
+export const setTeamColor = functions.https.onCall(
+  async (
+    data: { seasonId: string; teamColor: string },
+    context
+  ): Promise<{ teamColor: TeamColor }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    const { seasonId, teamColor } = data ?? {}
+    if (!seasonId || !isTeamColor(teamColor)) {
+      throw new functions.https.HttpsError('invalid-argument', 'A season and a colour are required')
+    }
+
+    const uid = context.auth.uid
+    const memberRef = db.doc(`seasons/${seasonId}/members/${uid}`)
+
+    const { previous, leagueId } = await db.runTransaction(async (tx) => {
+      const [mine, season] = await Promise.all([
+        tx.get(memberRef),
+        tx.get(db.doc(`seasons/${seasonId}`)),
+      ])
+      if (!mine.exists) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'You are not a member of this season'
+        )
+      }
+
+      const roster = await rosterColors(tx, seasonId)
+      if (takenBy(roster, teamColor, uid)) {
+        throw new functions.https.HttpsError('failed-precondition', 'color-taken')
+      }
+
+      tx.update(memberRef, { teamColor })
+      return {
+        previous: (mine.data()?.teamColor as string | undefined) ?? null,
+        leagueId: season.data()?.leagueId as string | undefined,
+      }
+    })
+
+    await db.collection('auditLogs').add({
+      action: 'team_color_changed',
+      actorUid: uid,
+      targetUid: uid,
+      seasonId,
+      ...(leagueId ? { leagueId } : {}),
+      oldValue: previous,
+      newValue: teamColor,
+      timestamp: Date.now(),
+    })
+
+    return { teamColor }
   }
 )
 

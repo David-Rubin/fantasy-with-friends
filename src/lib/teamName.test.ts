@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { canRenameTeam, normalizeTeamName, teamNameProblem, TEAM_NAME_MAX_LENGTH } from './teamName'
+import { normalizeTeamName, teamNameProblem, TEAM_NAME_MAX_LENGTH } from './teamName'
 
 /**
  * These import ./teamName rather than ./seasonApi on purpose — the latter
@@ -44,33 +44,5 @@ describe('teamNameProblem', () => {
 
   it('measures the name as it would be stored, not as typed', () => {
     expect(teamNameProblem(`  ${'a'.repeat(TEAM_NAME_MAX_LENGTH)}  `)).toBeNull()
-  })
-})
-
-describe('canRenameTeam', () => {
-  it('allows it before the draft opens', () => {
-    expect(canRenameTeam({ state: 'setup', firstEpisodeScoredAt: null })).toBe(true)
-  })
-
-  it('allows it while the draft is running', () => {
-    expect(canRenameTeam({ state: 'draft', firstEpisodeScoredAt: null })).toBe(true)
-  })
-
-  // The draft ending moves the season to `active` in the same write, so the
-  // member reading "Draft complete!" is already looking at an active season.
-  it('allows it while the draft-complete banner is up', () => {
-    expect(canRenameTeam({ state: 'active', firstEpisodeScoredAt: null })).toBe(true)
-  })
-
-  it('refuses once an episode has been scored', () => {
-    expect(canRenameTeam({ state: 'active', firstEpisodeScoredAt: 1_700_000_000_000 })).toBe(false)
-  })
-
-  it('refuses once the season is over', () => {
-    expect(canRenameTeam({ state: 'complete', firstEpisodeScoredAt: null })).toBe(false)
-  })
-
-  it('treats a season document without the field as unscored', () => {
-    expect(canRenameTeam({ state: 'active' })).toBe(true)
   })
 })

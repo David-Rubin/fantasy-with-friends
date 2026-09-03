@@ -3,21 +3,7 @@ import type { AccentColor, Contestant } from '../lib/types'
 import { Badge } from './Badge'
 import { t } from '../lib/i18n'
 import { UserAvatar } from './UserAvatar'
-
-const accentBorder: Record<AccentColor, string> = {
-  violet: 'border-l-violet-600',
-  purple: 'border-l-purple-600',
-  pink: 'border-l-pink-600',
-  rose: 'border-l-rose-600',
-  orange: 'border-l-orange-600',
-  amber: 'border-l-amber-500',
-  emerald: 'border-l-emerald-600',
-  teal: 'border-l-teal-600',
-  cyan: 'border-l-cyan-500',
-  blue: 'border-l-blue-600',
-  indigo: 'border-l-indigo-600',
-  slate: 'border-l-slate-600',
-}
+import { accentLeftBorder } from './accentStyles'
 
 interface ContestantBreakdown {
   contestant: Contestant
@@ -35,7 +21,12 @@ interface LeaderboardRowProps {
   playerPhotoUrl?: string
   totalPoints: number
   delta: number | null
-  accentColor: AccentColor
+  /**
+   * The team's own colour, not the season's. Every row on this board is a
+   * different colour, which is what makes a team recognisable at a glance
+   * here and on every other panel of the season.
+   */
+  teamColor: AccentColor
   contestants: ContestantBreakdown[]
   /** The episode "Latest Episode" refers to, or null before any are scored. */
   latestEpisodeNumber: number | null
@@ -48,7 +39,7 @@ export function LeaderboardRow({
   playerPhotoUrl,
   totalPoints,
   delta,
-  accentColor,
+  teamColor,
   contestants,
   latestEpisodeNumber,
 }: LeaderboardRowProps) {
@@ -56,7 +47,7 @@ export function LeaderboardRow({
 
   return (
     <div
-      className={`rounded-xl border-l-4 border border-gray-200 bg-white shadow-sm ${accentBorder[accentColor]}`}
+      className={`rounded-xl border-l-4 border border-gray-200 bg-white shadow-sm ${accentLeftBorder[teamColor]}`}
     >
       <button
         type="button"
@@ -65,7 +56,7 @@ export function LeaderboardRow({
         aria-expanded={expanded}
       >
         <span className="w-8 text-lg font-bold text-gray-400">#{rank}</span>
-        <UserAvatar displayName={playerName} photoUrl={playerPhotoUrl} />
+        <UserAvatar displayName={playerName} photoUrl={playerPhotoUrl} ringColor={teamColor} />
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-gray-900 truncate">{teamName}</p>
           <p className="text-xs text-gray-500 truncate">{playerName}</p>

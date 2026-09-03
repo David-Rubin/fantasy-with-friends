@@ -12,7 +12,7 @@ import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import { UserAvatar } from '../components/UserAvatar'
 import { ContestantCard } from '../components/ContestantCard'
-import { TeamNameCard } from '../components/TeamNameCard'
+import { TeamIdentityCard } from '../components/TeamIdentityCard'
 import { TimerBanner } from '../components/TimerBanner'
 import type {
   SeasonDoc,
@@ -23,7 +23,8 @@ import type {
   Contestant,
 } from '../lib/types'
 import { draftRoomShouldRedirect } from '../lib/draft'
-import { canRenameTeam } from '../lib/teamName'
+import { takenTeamColors, teamColorFor, teamHoldingColor } from '../lib/teamColor'
+import { accentLeftBorder } from '../components/accentStyles'
 import {
   reopenSeasonSetup,
   submitPick,
@@ -392,16 +393,21 @@ export function DraftRoomPage() {
         </div>
       )}
 
-      {/* Above every phase of the draft, and only here: the lobby, the board,
-          and the completion banner are the whole window a member has to name
-          their team. See ../lib/teamName for where it closes. */}
+      {/* Above every phase of the draft: the lobby, the board, and the
+          completion banner. The same card is on the season page, which is
+          where a team is named before the draft opens and after it closes —
+          this is here because the draft room is where a member spends the
+          hour in which they most want to change their mind. */}
       {myMember && seasonId && leagueId && (
-        <TeamNameCard
+        <TeamIdentityCard
           seasonId={seasonId}
           leagueId={leagueId}
           uid={myMember.uid}
           teamName={myMember.teamName}
-          canEdit={canRenameTeam(season)}
+          teamColor={teamColorFor(myMember)}
+          takenColors={takenTeamColors(members, user?.uid)}
+          takenLabel={(color) => teamHoldingColor(members, color, user?.uid)}
+          seasonState={season.state}
         />
       )}
 
@@ -652,7 +658,7 @@ export function DraftRoomPage() {
                     return (
                       <div
                         key={member.uid}
-                        className={`rounded-xl border p-4 ${isCurrentPicker ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}
+                        className={`rounded-xl border border-l-4 p-4 ${accentLeftBorder[teamColorFor(member)]} ${isCurrentPicker ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}
                       >
                         <p className="text-sm font-semibold text-gray-800 mb-2">
                           {member.teamName}

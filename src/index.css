@@ -15,18 +15,32 @@
   --color-warning: #d97706;
   --color-info: #2563eb;
 
-  /* Accent palette (12 options) */
+  /* Two colours Tailwind does not ship, needed by the accent palette below.
+     Declared as full 100/500/800 steps because a palette entry is drawn three
+     ways: a filled swatch and border at 500, and a Badge as 100 behind 800. */
+  --color-brown-100: #ede0d4;
+  --color-brown-500: #8b5e34;
+  --color-brown-800: #523620;
+  --color-sage-100: #e5eadb;
+  --color-sage-500: #7f9463;
+  --color-sage-800: #45543a;
+
+  /* Accent palette (12 options).
+     Chosen so that no two are mistakable for each other at swatch size or as a
+     4px border — which is what they mostly are, since a team's colour is how it
+     is picked out of a leaderboard. See src/lib/accentColor.ts for the retired names
+     that documents still carry. */
   --color-accent-violet: #7c3aed;
-  --color-accent-purple: #9333ea;
-  --color-accent-pink: #db2777;
+  --color-accent-lavender: #c084fc;
+  --color-accent-pink: #f472b6;
   --color-accent-rose: #e11d48;
   --color-accent-orange: #ea580c;
   --color-accent-amber: #d97706;
   --color-accent-emerald: #059669;
-  --color-accent-teal: #0d9488;
+  --color-accent-sage: #7f9463;
   --color-accent-cyan: #0891b2;
   --color-accent-blue: #2563eb;
-  --color-accent-indigo: #4f46e5;
+  --color-accent-brown: #8b5e34;
   --color-accent-slate: #475569;
 
   /* Typography */
