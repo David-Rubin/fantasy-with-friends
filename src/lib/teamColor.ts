@@ -8,8 +8,9 @@ import { ACCENT_COLORS, accent } from './accentColor'
  * "no two teams in a season share a colour" is a fact about the whole roster,
  * which a security rule cannot check.
  *
- * The palette is the same one leagues and seasons pick their accent from — see
- * ./accentColor, which is where the list and the retired names live.
+ * The palette lives in ./accentColor. Leagues and seasons drew their accent
+ * from the same list until that was removed; a team is the only thing with a
+ * colour now.
  */
 export const TEAM_COLORS: AccentColor[] = ACCENT_COLORS
 

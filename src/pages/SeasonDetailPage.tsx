@@ -9,7 +9,7 @@ import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMembe
 import { seasonTrail } from '../lib/breadcrumbs'
 import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
-import { Badge } from '../components/Badge'
+import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { LeaderboardRow } from '../components/LeaderboardRow'
 import type {
   ScoreProposalDoc,
@@ -31,7 +31,6 @@ import { Input } from '../components/Input'
 import { Modal } from '../components/Modal'
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal'
 import { deleteSeason, deletionErrorMessage } from '../lib/deleteApi'
-import { AccentColorPicker } from '../components/AccentColorPicker'
 import { ScoringRulesPanel } from '../components/ScoringRulesPanel'
 import { ScoringRulesCard } from '../components/ScoringRulesCard'
 import {
@@ -176,11 +175,7 @@ export function SeasonDetailPage() {
   const [openingDraft, setOpeningDraft] = useState(false)
   const [assignFreeAgentOpen, setAssignFreeAgentOpen] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
-  const [editForm, setEditForm] = useState({
-    label: '',
-    episodeCount: '',
-    accentColor: 'blue' as AccentColor,
-  })
+  const [editForm, setEditForm] = useState({ label: '', episodeCount: '' })
   const [savingEdit, setSavingEdit] = useState(false)
   const [completeConfirm, setCompleteConfirm] = useState(false)
   const [reopenConfirm, setReopenConfirm] = useState(false)
@@ -613,11 +608,7 @@ export function SeasonDetailPage() {
 
   function openEditSeason() {
     if (!season) return
-    setEditForm({
-      label: season.label,
-      episodeCount: String(season.episodeCount),
-      accentColor: season.accentColor,
-    })
+    setEditForm({ label: season.label, episodeCount: String(season.episodeCount) })
     setEditError('')
     setEditOpen(true)
   }
@@ -647,16 +638,8 @@ export function SeasonDetailPage() {
       await updateSeasonDetails(
         seasonId,
         leagueId,
-        {
-          label: season.label,
-          episodeCount: season.episodeCount,
-          accentColor: season.accentColor,
-        },
-        {
-          label: editForm.label.trim(),
-          episodeCount,
-          accentColor: editForm.accentColor,
-        }
+        { label: season.label, episodeCount: season.episodeCount },
+        { label: editForm.label.trim(), episodeCount }
       )
       setEditOpen(false)
     } catch (error) {
@@ -693,7 +676,7 @@ export function SeasonDetailPage() {
           <p className="text-gray-500">{showName}</p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge accent={season.accentColor}>{t(`season.states.${season.state}`)}</Badge>
+          <SeasonStateBadge state={season.state} />
           {/* Deliberately not gated on season.state — a name or episode count
               can need correcting long after the draft has opened. */}
           {isAdmin && (
@@ -1366,10 +1349,6 @@ export function SeasonDetailPage() {
             value={editForm.episodeCount}
             onChange={(e) => setEditForm((f) => ({ ...f, episodeCount: e.target.value }))}
             required
-          />
-          <AccentColorPicker
-            value={editForm.accentColor}
-            onChange={(c) => setEditForm((f) => ({ ...f, accentColor: c }))}
           />
           {editError && <p className="text-sm text-red-600">{editError}</p>}
         </form>

@@ -20,13 +20,11 @@ import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import { Input, Textarea } from '../components/Input'
-import { AccentColorPicker } from '../components/AccentColorPicker'
-import { Badge } from '../components/Badge'
+import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
 import { dashboardTrail } from '../lib/breadcrumbs'
 import { useMyJoinRequests } from '../lib/joinRequests'
 import type { LeagueDoc, LeagueMemberDoc, SeasonDoc } from '../lib/types'
-import type { AccentColor } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 
@@ -51,7 +49,6 @@ export function DashboardPage() {
   const [leagueName, setLeagueName] = useState('')
   const [leagueShow, setLeagueShow] = useState('')
   const [leagueDesc, setLeagueDesc] = useState('')
-  const [accentColor, setAccentColor] = useState<AccentColor>('blue')
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
@@ -137,7 +134,6 @@ export function DashboardPage() {
         description: leagueDesc.trim(),
         ownerId: user.uid,
         createdAt: Date.now(),
-        accentColor,
         // Derived state owned by the onLeagueMemberWritten trigger, which sets
         // it to 1 as soon as the owner's member document lands below. The rules
         // require it to start at 0 so a client cannot inflate a league's size.
@@ -193,11 +189,7 @@ export function DashboardPage() {
         <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <Badge accent={featuredSeason.season.accentColor}>
-                {featuredSeason.season.state === 'draft'
-                  ? t('season.states.draft')
-                  : t('season.states.active')}
-              </Badge>
+              <SeasonStateBadge state={featuredSeason.season.state} />
               <h2 className="mt-2 text-xl font-semibold text-gray-900">
                 {featuredSeason.league.showName}
               </h2>
@@ -248,11 +240,7 @@ export function DashboardPage() {
                       </p>
                     )}
                   </div>
-                  {latestSeason && (
-                    <Badge accent={latestSeason.accentColor}>
-                      {t(`season.states.${latestSeason.state}`)}
-                    </Badge>
-                  )}
+                  {latestSeason && <SeasonStateBadge state={latestSeason.state} />}
                 </Link>
               ))}
             </div>
@@ -338,7 +326,6 @@ export function DashboardPage() {
             value={leagueDesc}
             onChange={(e) => setLeagueDesc(e.target.value)}
           />
-          <AccentColorPicker value={accentColor} onChange={setAccentColor} />
         </form>
       </Modal>
     </Layout>

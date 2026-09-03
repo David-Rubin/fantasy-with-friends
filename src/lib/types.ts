@@ -42,8 +42,9 @@ export type DraftStatus = 'lobby' | 'active' | 'paused' | 'awaiting-close' | 'co
  */
 export type ScoringRuleType = 'binary'
 /**
- * The palette leagues, seasons and teams pick from. The list as it is offered,
- * and why these twelve, is in ./accentColor.
+ * The palette a team's colour is picked from — the only thing that has one.
+ * Leagues and seasons used to carry an accent too; it decided nothing a reader
+ * could use, so it went. The list, and why these twelve, is in ./accentColor.
  */
 export type AccentColor =
   | 'violet'
@@ -86,7 +87,6 @@ export interface LeagueDoc {
   description: string
   ownerId: string
   createdAt: number
-  accentColor: AccentColor
   /**
    * Denormalized count of `leagues/{id}/members`, maintained by the
    * onLeagueMemberWritten trigger. The dashboard lists every league to every
@@ -180,7 +180,6 @@ export interface SeasonDoc {
   adminPickOrder?: string[]
   timerSeconds: number
   timerExpiry: TimerExpiry
-  accentColor: AccentColor
   createdAt: number
   firstEpisodeScoredAt: number | null
   /** Written by Cloud Function after each episode score submission */

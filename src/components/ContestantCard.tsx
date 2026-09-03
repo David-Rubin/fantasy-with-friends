@@ -150,7 +150,7 @@ export function ContestantCard({
         )}
         {isEliminated && (
           <div className="absolute top-2 right-2">
-            <Badge variant="eliminated">{t('contestant.eliminated')}</Badge>
+            <Badge tone="eliminated">{t('contestant.eliminated')}</Badge>
           </div>
         )}
       </div>
