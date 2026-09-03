@@ -15,7 +15,11 @@ import { t } from '../lib/i18n'
  * places this appears, which is what stops them drifting apart.
  */
 const tones: Record<SeasonState, BadgeTone> = {
-  setup: 'neutral',
+  // Brown rather than grey. Setup and complete are the two states nothing is
+  // happening in, and as two greys they were the pair hardest to tell apart —
+  // which is the wrong pair to lose, since one means the season has not begun
+  // and the other means it is over.
+  setup: 'pending',
   draft: 'info',
   active: 'success',
   complete: 'muted',

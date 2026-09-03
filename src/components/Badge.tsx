@@ -10,6 +10,8 @@ import type { ReactNode } from 'react'
 const tones = {
   /** Nothing in particular. Also what a badge with no tone gets. */
   neutral: 'bg-gray-100 text-gray-700',
+  /** Not started yet. Warm rather than grey, so it does not read as finished. */
+  pending: 'bg-brown-100 text-brown-800',
   /** Under way, and worth glancing at. */
   info: 'bg-blue-100 text-blue-800',
   /** Running normally. */
