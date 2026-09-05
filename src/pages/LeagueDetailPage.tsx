@@ -1,15 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import {
-  doc,
-  collection,
-  collectionGroup,
-  query,
-  where,
-  addDoc,
-  setDoc,
-  updateDoc,
-} from 'firebase/firestore'
+import { doc, collection, collectionGroup, query, where, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
@@ -17,6 +8,7 @@ import { Layout } from '../components/Layout'
 import { Button } from '../components/Button'
 import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { Modal } from '../components/Modal'
+import { NewSeasonModal } from '../components/NewSeasonModal'
 import { UserAvatar } from '../components/UserAvatar'
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal'
 import { deleteLeague, deleteSeason, deletionErrorMessage } from '../lib/deleteApi'
@@ -65,8 +57,10 @@ export function LeagueDetailPage() {
   const { seasonIds: mySeasonIds, resolved: seasonMembershipResolved } = useMySeasonIds()
   const [joiningSeason, setJoiningSeason] = useState<string | null>(null)
   const [newSeasonOpen, setNewSeasonOpen] = useState(false)
-  const [seasonForm, setSeasonForm] = useState({ label: '', episodeCount: '' })
-  const [creating, setCreating] = useState(false)
+  // Bumped every time the dialog is opened, and used as its key: the dialog
+  // then mounts fresh each time, so yesterday's half-typed label and answers
+  // are gone without the dialog having to empty itself on the way in.
+  const [newSeasonMount, setNewSeasonMount] = useState(0)
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState({ name: '', showName: '', description: '' })
   const [savingEdit, setSavingEdit] = useState(false)
@@ -311,6 +305,11 @@ export function LeagueDetailPage() {
     })
   }
 
+  function openNewSeason() {
+    setNewSeasonMount((n) => n + 1)
+    setNewSeasonOpen(true)
+  }
+
   async function handleJoinSeason(seasonId: string) {
     if (!leagueId || !user || !userDoc) return
     setJoiningSeason(seasonId)
@@ -318,45 +317,6 @@ export function LeagueDetailPage() {
       await joinSeason(seasonId, leagueId, user.uid, userDoc.displayName, userDoc.photoUrl)
     } finally {
       setJoiningSeason(null)
-    }
-  }
-
-  async function handleCreateSeason(e: React.FormEvent) {
-    e.preventDefault()
-    if (!leagueId || !user || !league) return
-    setCreating(true)
-    try {
-      const seasonRef = await addDoc(collection(db, 'seasons'), {
-        leagueId,
-        label: seasonForm.label.trim(),
-        episodeCount: parseInt(seasonForm.episodeCount, 10),
-        state: 'setup',
-        draftFormat: 'snake',
-        pickOrderMethod: 'admin-set',
-        timerSeconds: 60,
-        timerExpiry: 'auto-pick',
-        createdAt: Date.now(),
-        firstEpisodeScoredAt: null,
-        teamTotals: {},
-        teamEpisodeTotals: {},
-      } satisfies SeasonDoc)
-
-      // Add league members to the season by default
-      for (const member of members) {
-        await setDoc(doc(db, 'seasons', seasonRef.id, 'members', member.uid), {
-          uid: member.uid,
-          displayName: member.displayName,
-          teamName: `${member.displayName}'s Team`,
-          pickPosition: null,
-          joinedAt: Date.now(),
-        })
-      }
-
-      trackEvent('season_created', { show_name: league.showName })
-      setNewSeasonOpen(false)
-      navigate(`/leagues/${leagueId}/seasons/${seasonRef.id}`)
-    } finally {
-      setCreating(false)
     }
   }
 
@@ -453,15 +413,13 @@ export function LeagueDetailPage() {
         <section className="lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Seasons</h2>
-            {isAdmin && (
-              <Button onClick={() => setNewSeasonOpen(true)}>{t('league.newSeason')}</Button>
-            )}
+            {isAdmin && <Button onClick={openNewSeason}>{t('league.newSeason')}</Button>}
           </div>
           {seasons.length === 0 ? (
             <div className="rounded-xl border-2 border-dashed border-gray-200 p-8 text-center">
               <p className="text-gray-400">No seasons yet.</p>
               {isAdmin && (
-                <Button className="mt-4" onClick={() => setNewSeasonOpen(true)}>
+                <Button className="mt-4" onClick={openNewSeason}>
                   {t('league.newSeason')}
                 </Button>
               )}
@@ -730,41 +688,24 @@ export function LeagueDetailPage() {
         {removeError && <p className="mt-3 text-sm text-red-600">{removeError}</p>}
       </Modal>
 
-      {/* New Season Modal */}
-      <Modal
-        open={newSeasonOpen}
-        onClose={() => setNewSeasonOpen(false)}
-        title={t('season.create')}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setNewSeasonOpen(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button form="new-season-form" type="submit" loading={creating}>
-              {t('season.create')}
-            </Button>
-          </>
-        }
-      >
-        <form id="new-season-form" onSubmit={handleCreateSeason} className="flex flex-col gap-4">
-          <Input
-            label={t('season.label')}
-            value={seasonForm.label}
-            onChange={(e) => setSeasonForm((f) => ({ ...f, label: e.target.value }))}
-            placeholder="Season 15 — 2026"
-            required
-            autoFocus
-          />
-          <Input
-            label={t('season.episodeCount')}
-            type="number"
-            min={1}
-            value={seasonForm.episodeCount}
-            onChange={(e) => setSeasonForm((f) => ({ ...f, episodeCount: e.target.value }))}
-            required
-          />
-        </form>
-      </Modal>
+      {/* New Season Modal. Everything about creating a season lives in the
+          component, including the questions a second season asks about the
+          first — see NewSeasonModal. */}
+      {leagueId && (
+        <NewSeasonModal
+          key={newSeasonMount}
+          open={newSeasonOpen}
+          onClose={() => setNewSeasonOpen(false)}
+          leagueId={leagueId}
+          seasons={seasons}
+          leagueMembers={members}
+          onCreated={(seasonId) => {
+            trackEvent('season_created', { show_name: league.showName })
+            setNewSeasonOpen(false)
+            navigate(`/leagues/${leagueId}/seasons/${seasonId}`)
+          }}
+        />
+      )}
     </Layout>
   )
 }

@@ -219,7 +219,12 @@ service cloud.firestore {
       allow delete: if false;
 
       match /members/{uid} {
-        allow read: if isSeasonMember(seasonId);
+        // A season's own players, plus the league's admins. An admin already
+        // holds `allow write` on every document in this roster — the season
+        // they are reading is one they can rewrite — so refusing them the read
+        // protected nothing and stopped the new-season dialog showing whose
+        // names it is about to copy across. See NewSeasonModal.
+        allow read: if isSeasonMember(seasonId) || isSeasonAdmin(seasonId);
         // Team name update — own record only, in any state of the season.
         //
         // Naming used to close the moment an episode was scored, on the
@@ -286,7 +291,10 @@ service cloud.firestore {
       }
 
       match /scoringRules/{ruleId} {
-        allow read: if isSeasonMember(seasonId);
+        // Readable by the season's players and by the league's admins, who can
+        // already write every rule here — see the roster above for why the two
+        // now match.
+        allow read: if isSeasonMember(seasonId) || isSeasonAdmin(seasonId);
         // Editable at any point in a season. A show changes its own rules
         // mid-run, so a league has to be able to follow — the old cutoff at the
         // first scored episode meant a season could be wrong for the rest of its
