@@ -306,9 +306,10 @@ export function NewSeasonModal({
 /**
  * One yes/no question, with last season's answer to it behind a toggle.
  *
- * A `<fieldset>` and `<legend>` rather than a paragraph and two labels: the two
- * radios are one control answering one question, and that is the only markup
- * that says so to a screen reader.
+ * A `<fieldset>` rather than two loose labels: the two radios are one control
+ * answering one question, and that is the only markup that says so to a screen
+ * reader. Its name comes from `aria-labelledby` rather than a `<legend>` — see
+ * the comment on the element.
  *
  * `required` on both inputs is what makes the question required — a constraint
  * the browser enforces on submit and names on screen, rather than a disabled
@@ -337,17 +338,23 @@ function CarryOverQuestion({
   children: ReactNode
 }) {
   const panelId = `carry-over-${topic}-preview`
+  const questionId = `carry-over-${topic}-question`
   return (
-    <fieldset className="flex flex-col gap-2 py-4">
+    // Labelled by a paragraph rather than by a <legend>. A legend is laid out
+    // against the fieldset's top border and ignores its padding, so the
+    // question sat on the divider above it and overlapped the padding meant to
+    // separate the two. `aria-labelledby` names the group just as a legend
+    // would — a fieldset is a group either way.
+    <fieldset className="flex flex-col gap-2 py-4" aria-labelledby={questionId}>
       {/* The asterisk matches the one Input puts beside a required field, so
           the two kinds of required control on this form look required in the
           same way. */}
-      <legend className="mb-2 text-sm font-medium text-gray-700">
+      <p id={questionId} className="mb-2 text-sm font-medium text-gray-700">
         {question}
         <span aria-hidden="true" className="ml-1 text-red-500">
           *
         </span>
-      </legend>
+      </p>
       {(['yes', 'no'] as const).map((value) => (
         <label key={value} className="flex items-center gap-2 text-sm text-gray-700">
           <input
