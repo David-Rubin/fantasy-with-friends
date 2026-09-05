@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 /**
- * The approval path writes to several collections at once and decides which
- * seasons a new member lands in. Both are easy to get wrong in ways no type
- * catches — a member admitted to a season already drafting would sit in the
- * roster with no pick position — so the batch contents are asserted directly.
+ * The approval path writes the membership and the decision together, and — the
+ * part worth pinning down — writes nothing else. It used to add the new member
+ * to every season still in setup; a season is now something an admin composes,
+ * so a league admission that put somebody on a season roster would undo that
+ * silently. Neither is visible in a type, so the batch contents are asserted
+ * directly.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -75,20 +77,7 @@ describe('requestToJoin', () => {
 })
 
 describe('approveJoinRequest', () => {
-  it('only considers seasons that have not started', async () => {
-    await approveJoinRequest('league-1', request, 'owner-1')
-
-    const { base, constraints } = mocks.getDocs.mock.calls[0][0]
-    expect(base.path).toBe('seasons')
-    expect(constraints).toEqual([
-      { field: 'leagueId', op: '==', value: 'league-1' },
-      { field: 'state', op: '==', value: 'setup' },
-    ])
-  })
-
-  it('admits the member to the league and to every setup season', async () => {
-    mocks.getDocs.mockResolvedValue({ docs: [{ id: 'season-a' }, { id: 'season-b' }] })
-
+  it('admits the member to the league', async () => {
     await approveJoinRequest('league-1', request, 'owner-1')
 
     const written = Object.fromEntries(
@@ -100,19 +89,21 @@ describe('approveJoinRequest', () => {
       displayName: 'Ada',
       role: 'member',
     })
-    for (const seasonId of ['season-a', 'season-b']) {
-      expect(written[`seasons/${seasonId}/members/user-1`]).toMatchObject({
-        uid: 'user-1',
-        displayName: 'Ada',
-        teamName: "Ada's Team",
-        pickPosition: null,
-      })
-    }
+  })
+
+  it('puts them on no season roster, and does not even look for one', async () => {
+    // A season in setup is one the new member may join — from the Join button
+    // on the league page, when they want to. Being let into the league is not
+    // that decision, and an admin who created a season with nobody on it meant
+    // it.
+    await approveJoinRequest('league-1', request, 'owner-1')
+
+    const paths = mocks.batchSet.mock.calls.map(([ref]) => ref.path)
+    expect(paths).toEqual(['leagues/league-1/members/user-1'])
+    expect(mocks.getDocs).not.toHaveBeenCalled()
   })
 
   it('records who decided, and commits every write together', async () => {
-    mocks.getDocs.mockResolvedValue({ docs: [{ id: 'season-a' }] })
-
     await approveJoinRequest('league-1', request, 'owner-1')
 
     const [ref, data] = mocks.batchUpdate.mock.calls[0]

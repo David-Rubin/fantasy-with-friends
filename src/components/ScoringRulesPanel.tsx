@@ -43,10 +43,16 @@ export function RuleSummary({ rule }: { rule: ScoringRule }) {
       {rule.points} {t('rules.pts')}
       {' · '}
       {/* Named episodes rather than a count: "Ep 2, 5" is the thing a reader
-          wants, and a rule covering the season says so in as few words. */}
-      {rule.episodeNumbers
-        ? t('rules.episodes.listed', { list: rule.episodeNumbers.join(', ') })
-        : t('rules.episodes.all')}
+          wants, and a rule covering the season says so in as few words. An
+          empty list is not the same as an absent one — it is a rule scored
+          nowhere, which happens when a season's episode count no longer
+          reaches the episodes the rule named, and reading as a bare "Ep" hid
+          exactly the rule an admin needs to notice. */}
+      {!rule.episodeNumbers
+        ? t('rules.episodes.all')
+        : rule.episodeNumbers.length === 0
+          ? t('rules.episodes.none')
+          : t('rules.episodes.listed', { list: rule.episodeNumbers.join(', ') })}
     </div>
   )
 }

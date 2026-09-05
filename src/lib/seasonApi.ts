@@ -1,11 +1,12 @@
-import { doc, setDoc, updateDoc } from 'firebase/firestore'
+import { addDoc, collection, doc, getDocs, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { logAuditEvent } from './audit'
 import type { SeasonDetails } from './seasonDetails'
+import type { CarriedDraftSettings } from './seasonCarryOver'
 import type { AccentColor, SeasonState } from './types'
 import { normalizeTeamName } from './teamName'
-import type { SeasonMemberDoc } from './types'
+import type { ScoringRule, ScoringRuleDoc, SeasonDoc, SeasonMember, SeasonMemberDoc } from './types'
 
 /**
  * Writing a season's edited details.
@@ -40,6 +41,100 @@ export async function updateSeasonDetails(
     oldValue: previous,
     newValue: next,
   })
+}
+
+/**
+ * Everything a new season needs, with every choice already made.
+ *
+ * The roster and the rules arrive as documents rather than as "copy last
+ * season": what a copy comes out as is decided in ./seasonCarryOver, which can
+ * be tested without Firebase, and this only writes what it is handed. An empty
+ * roster is a legitimate answer — a season nobody has been added to yet, which
+ * league members join themselves from the league page.
+ */
+export interface NewSeason {
+  leagueId: string
+  label: string
+  episodeCount: number
+  draftSettings: CarriedDraftSettings
+  members: SeasonMemberDoc[]
+  scoringRules: ScoringRuleDoc[]
+  /** The season these were copied from, for the audit trail. */
+  copiedFromSeasonId?: string
+}
+
+/**
+ * Creating a season, with whatever it inherits from the season before it.
+ *
+ * The season document goes first and alone, because everything else is written
+ * beneath it and the rules authorising those writes read it: `isSeasonAdmin`
+ * resolves the league through the season document, so a roster written before
+ * the season exists is a roster nobody is allowed to write. What follows is one
+ * batch, so a season never comes into being with half a roster or half its
+ * rules — the two states an admin would have to spot and unpick by hand.
+ *
+ * `teamTotals` and `teamEpisodeTotals` start empty and are the Cloud Functions'
+ * from then on; `firstEpisodeScoredAt` is null because nothing has been scored.
+ */
+export async function createSeason(input: NewSeason): Promise<string> {
+  const seasonRef = await addDoc(collection(db, 'seasons'), {
+    leagueId: input.leagueId,
+    label: input.label,
+    episodeCount: input.episodeCount,
+    state: 'setup',
+    ...input.draftSettings,
+    createdAt: Date.now(),
+    firstEpisodeScoredAt: null,
+    teamTotals: {},
+    teamEpisodeTotals: {},
+  } satisfies SeasonDoc)
+
+  const batch = writeBatch(db)
+  for (const member of input.members) {
+    batch.set(doc(db, 'seasons', seasonRef.id, 'members', member.uid), member)
+  }
+  const rulesRef = collection(db, 'seasons', seasonRef.id, 'scoringRules')
+  for (const rule of input.scoringRules) batch.set(doc(rulesRef), rule)
+  await batch.commit()
+
+  await logAuditEvent({
+    action: 'season_created',
+    seasonId: seasonRef.id,
+    leagueId: input.leagueId,
+    newValue: {
+      label: input.label,
+      episodeCount: input.episodeCount,
+      members: input.members.length,
+      scoringRules: input.scoringRules.length,
+      copiedFromSeasonId: input.copiedFromSeasonId ?? null,
+    },
+  })
+
+  return seasonRef.id
+}
+
+/** Last season's roster and rules, as the new-season dialog shows them. */
+export interface CarryOverSourceData {
+  members: SeasonMember[]
+  scoringRules: ScoringRule[]
+}
+
+/**
+ * Read the season a new one would copy from.
+ *
+ * One-shot rather than a listener: this is a dialog reading a season that has
+ * already been played, so there is nothing live to follow, and a listener left
+ * open behind a closed dialog is a subscription nobody cancels.
+ */
+export async function readCarryOverSource(seasonId: string): Promise<CarryOverSourceData> {
+  const [memberDocs, ruleDocs] = await Promise.all([
+    getDocs(collection(db, 'seasons', seasonId, 'members')),
+    getDocs(collection(db, 'seasons', seasonId, 'scoringRules')),
+  ])
+  return {
+    members: memberDocs.docs.map((d) => ({ ...(d.data() as SeasonMemberDoc), uid: d.id })),
+    scoringRules: ruleDocs.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })),
+  }
 }
 
 /**

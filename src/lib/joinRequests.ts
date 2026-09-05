@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  collection,
   collectionGroup,
   doc,
-  getDocs,
   query,
   setDoc,
   updateDoc,
@@ -13,20 +11,15 @@ import {
 import { db } from './firebase'
 import { listenQuery } from './listen'
 import { logAuditEvent } from './audit'
-import type {
-  JoinRequestStatus,
-  LeagueJoinRequestDoc,
-  LeagueMemberDoc,
-  SeasonMemberDoc,
-} from './types'
+import type { JoinRequestStatus, LeagueJoinRequestDoc, LeagueMemberDoc } from './types'
 
 /**
  * Joining a league: a user asks, the league's owner decides.
  *
  * Every write here is one the security rules already permit the caller to make —
  * a requester writing their own pending request, an owner writing their league's
- * membership — so none of this needs a Cloud Function. Approval touches several
- * documents at once and goes through a batch so a half-admitted member is not a
+ * membership — so none of this needs a Cloud Function. Approval writes the membership and the
+ * decision at once and goes through a batch so a half-admitted member is not a
  * reachable state.
  */
 
@@ -52,14 +45,21 @@ export async function requestToJoin(
 }
 
 /**
- * Admit a requester to the league, and to any season that has not started yet.
+ * Admit a requester to the league, and to no season at all.
  *
- * Seasons still in `setup` are safe to join: pick order is assigned when the
- * draft is randomized, so a member added beforehand is indistinguishable from
- * one who was there when the season was created. A season already drafting or
- * scoring is not — a late arrival would carry a null pickPosition into a
- * computed snake order — so those are deliberately left alone, and the new
- * member plays from the next season.
+ * Membership of a league is not membership of its seasons. Approval used to add
+ * the new member to every season still in `setup`, on the reasoning that such a
+ * season had nothing for an arrival to disturb — but "nothing to disturb" is a
+ * reason it is *allowed*, not a reason it should happen. A season is now
+ * something an admin composes: it can be created with last season's players, or
+ * with nobody at all (see ../components/NewSeasonModal), and a league admitting
+ * a member should not quietly undo that by putting them on a roster the admin
+ * had just decided to leave empty.
+ *
+ * Nobody is shut out by this. A league member joins a season in `setup` for
+ * themselves, from the Join button on the league page — the same rule that made
+ * the automatic write legal is what makes their own click legal. See
+ * ./seasonMembership and the `create` rule on the season roster.
  */
 export async function approveJoinRequest(
   leagueId: string,
@@ -67,14 +67,6 @@ export async function approveJoinRequest(
   approverUid: string
 ): Promise<void> {
   const { uid, displayName, photoUrl } = request
-
-  const setupSeasons = await getDocs(
-    query(
-      collection(db, 'seasons'),
-      where('leagueId', '==', leagueId),
-      where('state', '==', 'setup')
-    )
-  )
 
   const batch = writeBatch(db)
 
@@ -94,25 +86,9 @@ export async function approveJoinRequest(
     joinedAt: Date.now(),
   } satisfies LeagueMemberDoc)
 
-  for (const season of setupSeasons.docs) {
-    batch.set(doc(db, 'seasons', season.id, 'members', uid), {
-      uid,
-      displayName,
-      ...(photoUrl ? { photoUrl } : {}),
-      teamName: `${displayName}'s Team`,
-      pickPosition: null,
-      joinedAt: Date.now(),
-    } satisfies SeasonMemberDoc)
-  }
-
   await batch.commit()
 
-  await logAuditEvent({
-    action: 'join_request_approved',
-    leagueId,
-    targetUid: uid,
-    newValue: { seasonsJoined: setupSeasons.docs.map((d) => d.id) },
-  })
+  await logAuditEvent({ action: 'join_request_approved', leagueId, targetUid: uid })
 }
 
 /**
