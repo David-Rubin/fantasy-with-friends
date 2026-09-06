@@ -20,12 +20,18 @@ import type {
   ContestantScoreDoc,
   ContestantScoreEntry,
   ScoringRule,
+  ScoringRuleType,
   Contestant,
 } from '../lib/types'
-import { evaluateRule, isPenalty } from '../lib/scoring'
+import { evaluateRule, isPenalty, scoredCount } from '../lib/scoring'
 import { scorecardState } from '../lib/scorecard'
 import { decideProposal, proposeScores } from '../lib/scoreProposalApi'
-import { fingerprintOf, ruleCoversEpisode, rulesFingerprint } from '../lib/scoringRules'
+import {
+  DEFAULT_RULE_TYPE,
+  fingerprintOf,
+  ruleCoversEpisode,
+  rulesFingerprint,
+} from '../lib/scoringRules'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
@@ -73,6 +79,92 @@ function ScoreMark({
     >
       {!on ? '\u2014' : penalty ? '\u00d7' : '\u2713'}
     </span>
+  )
+}
+
+/**
+ * A count, on a card nobody can edit.
+ *
+ * Zero is drawn as the dash an unticked box gets rather than as "0": both mean
+ * the same thing here — it did not happen — and a table of zeroes reads as
+ * noise between the counts that matter.
+ */
+function ScoreCount({
+  count,
+  penalty = false,
+  rule,
+  contestant,
+}: {
+  count: number
+  penalty?: boolean
+  rule: string
+  contestant: string
+}) {
+  const label =
+    count === 0
+      ? t('scoring.mark.notScored', { rule, contestant })
+      : t(penalty ? 'scoring.count.penalised' : 'scoring.count.scored', {
+          rule,
+          contestant,
+          n: count,
+        })
+
+  return (
+    <span
+      className={
+        count === 0
+          ? 'text-gray-300'
+          : penalty
+            ? 'font-semibold text-red-600'
+            : 'font-semibold text-green-600'
+      }
+      title={label}
+      aria-label={label}
+    >
+      {count === 0 ? '\u2014' : count}
+    </span>
+  )
+}
+
+/**
+ * How many times a rule applied to one contestant, while the card is editable.
+ *
+ * Whole numbers from zero up: a count of a thing that happened cannot be
+ * negative or a fraction, and the points that multiply it are where a penalty
+ * lives.
+ *
+ * It keeps what has been typed as text while the field has focus, and falls
+ * back to the stored count once it loses it. Without that, clearing the box to
+ * replace 1 with 12 would put a 0 back under the cursor and leave "012" behind
+ * — the same reason the pick timer in the setup panel settles on blur.
+ */
+function CountInput({
+  count,
+  onChange,
+  label,
+}: {
+  count: number
+  onChange: (next: number) => void
+  label: string
+}) {
+  const [typed, setTyped] = useState<string | null>(null)
+
+  return (
+    <input
+      type="number"
+      min={0}
+      step={1}
+      inputMode="numeric"
+      value={typed ?? String(count)}
+      onChange={(e) => {
+        setTyped(e.target.value)
+        const parsed = parseInt(e.target.value, 10)
+        onChange(Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0)
+      }}
+      onBlur={() => setTyped(null)}
+      className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-center text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+      aria-label={label}
+    />
   )
 }
 
@@ -264,9 +356,12 @@ export function EpisodeScoringPage() {
   const showingAsRecorded = hasPendingRuleChanges && appliedRules !== undefined
 
   /** The columns to draw — what was recorded, or what applies now. */
-  const displayRules: Array<{ id: string; name: string; points: number }> = showingAsRecorded
-    ? appliedRules
-    : episodeRules
+  const displayRules: Array<{
+    id: string
+    name: string
+    points: number
+    type?: ScoringRuleType
+  }> = showingAsRecorded ? appliedRules : episodeRules
 
   /**
    * Who may do what to this card. See src/lib/scorecard.ts — the branches got
@@ -300,7 +395,7 @@ export function EpisodeScoringPage() {
     setRuleChangesApplied(true)
   }
 
-  function setScore(contestantId: string, ruleId: string, value: boolean) {
+  function setScore(contestantId: string, ruleId: string, value: boolean | number) {
     setScores((prev) => ({
       ...prev,
       [contestantId]: { ...(prev[contestantId] ?? {}), [ruleId]: value },
@@ -326,7 +421,15 @@ export function EpisodeScoringPage() {
         locked: true,
         // The rules as they stood, so this episode can be drawn again exactly
         // as it was however the season's rules move afterwards.
-        appliedRules: episodeRules.map((r) => ({ id: r.id, name: r.name, points: r.points })),
+        appliedRules: episodeRules.map((r) => ({
+          id: r.id,
+          name: r.name,
+          points: r.points,
+          // Recorded alongside the points: a column answered with a count is
+          // multiplied by it, so redrawing this episode needs to know which
+          // kind it was even after the rule itself changes. See AppliedRule.
+          type: r.type ?? DEFAULT_RULE_TYPE,
+        })),
       } satisfies EpisodeScoreDoc)
 
       // Write per-contestant scores
@@ -510,33 +613,51 @@ export function EpisodeScoringPage() {
                   {contestant.name}
                 </td>
                 {displayRules.map((rule) => {
-                  const val = scores[contestant.id]?.[rule.id]
-                  // A checkbox is an invitation to tick it. An admin looking at
-                  // a locked episode — or at one still showing the rules it was
+                  const entry = scores[contestant.id] ?? {}
+                  const count = scoredCount(rule, entry)
+                  const isCount = (rule.type ?? DEFAULT_RULE_TYPE) === 'number'
+                  // A control is an invitation to use it. An admin looking at a
+                  // locked episode — or at one still showing the rules it was
                   // recorded under — cannot, so they get the same marks
-                  // everybody else gets rather than a row of dead boxes.
+                  // everybody else gets rather than a row of dead inputs.
                   if (readOnlyTable) {
                     return (
                       <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
-                        <ScoreMark
-                          on={val === true}
-                          penalty={isPenalty(rule.points)}
-                          rule={rule.name}
-                          contestant={contestant.name}
-                        />
+                        {isCount ? (
+                          <ScoreCount
+                            count={count}
+                            penalty={isPenalty(rule.points)}
+                            rule={rule.name}
+                            contestant={contestant.name}
+                          />
+                        ) : (
+                          <ScoreMark
+                            on={count > 0}
+                            penalty={isPenalty(rule.points)}
+                            rule={rule.name}
+                            contestant={contestant.name}
+                          />
+                        )}
                       </td>
                     )
                   }
                   return (
                     <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={val === true}
-                        disabled={readOnlyTable}
-                        onChange={(e) => setScore(contestant.id, rule.id, e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        aria-label={`${rule.name} for ${contestant.name}`}
-                      />
+                      {isCount ? (
+                        <CountInput
+                          count={count}
+                          onChange={(next) => setScore(contestant.id, rule.id, next)}
+                          label={`${rule.name} for ${contestant.name}`}
+                        />
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={count > 0}
+                          onChange={(e) => setScore(contestant.id, rule.id, e.target.checked)}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          aria-label={`${rule.name} for ${contestant.name}`}
+                        />
+                      )}
                     </td>
                   )
                 })}

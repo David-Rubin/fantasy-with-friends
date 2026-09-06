@@ -1,4 +1,4 @@
-import type { ScoringRuleDoc } from './types'
+import type { ScoringRuleDoc, ScoringRuleType } from './types'
 
 /**
  * Turning what an admin typed into a scoring rule, and deciding when the rules
@@ -8,8 +8,20 @@ import type { ScoringRuleDoc } from './types'
  * ./scoringRulesApi.
  */
 
+/**
+ * The kinds of rule an admin can choose between, in the order the dropdown
+ * offers them. Binary first because it is the default and what nearly every
+ * rule is.
+ */
+export const SCORING_RULE_TYPES: readonly ScoringRuleType[] = ['binary', 'number']
+
+/** What a rule with no stored type is: every rule was binary before the choice existed. */
+export const DEFAULT_RULE_TYPE: ScoringRuleType = 'binary'
+
 /** The form an admin fills in, before anything is parsed. */
 export interface RuleDraft {
+  /** How the scorecard asks about it — a tick or a count. See ScoringRuleType. */
+  type: ScoringRuleType
   name: string
   /** Text, because a half-typed "-" or "1." is not yet a number. */
   points: string
@@ -30,9 +42,10 @@ export function allEpisodeNumbers(episodeCount: number): number[] {
   return Array.from({ length: Math.floor(episodeCount) }, (_, i) => i + 1)
 }
 
-/** A blank rule, starting out covering the whole season. */
+/** A blank rule: binary, worth nothing yet, covering the whole season. */
 export function emptyRuleDraft(episodeCount: number): RuleDraft {
   return {
+    type: DEFAULT_RULE_TYPE,
     name: '',
     points: '',
     episodeNumbers: allEpisodeNumbers(episodeCount),
@@ -87,7 +100,7 @@ export function draftToRule(draft: RuleDraft, episodeCount: number): ScoringRule
   const episodes = [...new Set(draft.episodeNumbers)].sort((a, b) => a - b)
   const coversEverything = episodes.length >= allEpisodeNumbers(episodeCount).length
   return {
-    type: 'binary',
+    type: draft.type,
     name: draft.name.trim(),
     points: parseInt(draft.points.trim(), 10),
     episodeNumbers: coversEverything ? null : episodes,
@@ -104,6 +117,8 @@ export function draftToRule(draft: RuleDraft, episodeCount: number): ScoringRule
 export function ruleToDraft(rule: ScoringRuleDoc, episodeCount: number): RuleDraft {
   const all = allEpisodeNumbers(episodeCount)
   return {
+    // A rule stored before the field existed edits as what it has always been.
+    type: rule.type ?? DEFAULT_RULE_TYPE,
     name: rule.name,
     points: String(rule.points),
     episodeNumbers: rule.episodeNumbers ? all.filter((n) => rule.episodeNumbers!.includes(n)) : all,
@@ -121,16 +136,21 @@ export type EditableRule = ScoringRuleDoc & { id?: string }
 /**
  * The scoring-relevant identity of the rules that apply to one episode.
  *
- * Only what changes a score goes in: which rules cover the episode and what
- * each is worth. A rule renamed, or one whose episodes changed so it no longer
- * covers this one, both land correctly — the first is not a scoring change and
- * leaves the fingerprint alone, the second drops out of it.
+ * Only what changes a score goes in: which rules cover the episode, what each
+ * is worth, and whether it is answered with a tick or a count — a rule turned
+ * from one into the other multiplies by something different, which is a scoring
+ * change even when the points are untouched. A rule renamed, or one whose
+ * episodes changed so it no longer covers this one, both land correctly — the
+ * first is not a scoring change and leaves the fingerprint alone, the second
+ * drops out of it.
  *
  * Stored on an episode when its scores are submitted, then compared against the
  * live rules to tell whether that episode's recorded totals still reflect them.
  */
 export function rulesFingerprint(
-  rules: Array<Pick<ScoringRuleDoc, 'points' | 'episodeNumbers'> & { id: string }>,
+  rules: Array<
+    Pick<ScoringRuleDoc, 'points' | 'episodeNumbers'> & { id: string; type?: ScoringRuleType }
+  >,
   episodeNumber: number
 ): string {
   return fingerprintOf(rules.filter((r) => ruleCoversEpisode(r, episodeNumber)))
@@ -141,9 +161,11 @@ export function rulesFingerprint(
  * snapshot, say, which carries no episode numbers because every rule in it
  * covered the episode by definition.
  */
-export function fingerprintOf(rules: Array<{ id: string; points: number }>): string {
+export function fingerprintOf(
+  rules: Array<{ id: string; points: number; type?: ScoringRuleType }>
+): string {
   return rules
-    .map((r) => `${r.id}:${r.points}`)
+    .map((r) => `${r.id}:${r.points}:${r.type ?? DEFAULT_RULE_TYPE}`)
     .sort()
     .join('|')
 }

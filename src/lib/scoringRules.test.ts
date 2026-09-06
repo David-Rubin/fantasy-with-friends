@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  DEFAULT_RULE_TYPE,
+  SCORING_RULE_TYPES,
   allEpisodeNumbers,
   diffRuleSets,
   fingerprintOf,
@@ -115,6 +117,7 @@ describe('ruleToDraft', () => {
     expect(
       ruleToDraft({ type: 'binary', name: 'x', points: -1, episodeNumbers: null }, EPISODES)
     ).toEqual({
+      type: 'binary',
       name: 'x',
       points: '-1',
       episodeNumbers: [1, 2, 3, 4, 5],
@@ -267,5 +270,44 @@ describe('fingerprintOf', () => {
     const base = [{ id: 'r1', name: 'Original', points: 3 }]
     expect(fingerprintOf([{ id: 'r1', name: 'Renamed', points: 3 }])).toBe(fingerprintOf(base))
     expect(fingerprintOf([{ id: 'r1', name: 'Original', points: 4 }])).not.toBe(fingerprintOf(base))
+  })
+})
+
+describe('the rule type', () => {
+  it('starts a new rule as binary, which is what every rule used to be', () => {
+    expect(emptyRuleDraft(EPISODES).type).toBe('binary')
+    expect(DEFAULT_RULE_TYPE).toBe('binary')
+    expect(SCORING_RULE_TYPES).toEqual(['binary', 'number'])
+  })
+
+  it('stores what the dropdown was set to', () => {
+    expect(draftToRule(draft({ type: 'number' }), EPISODES).type).toBe('number')
+  })
+
+  it('edits a rule written before the field existed as binary', () => {
+    expect(ruleToDraft({ name: 'x', points: 1 } as never, EPISODES).type).toBe('binary')
+  })
+
+  it('round-trips a count rule through editing unchanged', () => {
+    const rule = draftToRule(draft({ type: 'number' }), EPISODES)
+    expect(draftToRule(ruleToDraft(rule, EPISODES), EPISODES)).toEqual(rule)
+  })
+
+  it('counts a changed type as an update, not as no change at all', () => {
+    const before = { id: 'r1', ...draftToRule(draft(), EPISODES) }
+    const after = { id: 'r1', ...draftToRule(draft({ type: 'number' }), EPISODES) }
+    expect(diffRuleSets([before], [after]).updated).toEqual([after])
+  })
+
+  it('changes the fingerprint, because it changes what a score is worth', () => {
+    const binary = { id: 'r1', points: 5, type: 'binary' as const, episodeNumbers: null }
+    const counted = { ...binary, type: 'number' as const }
+    expect(rulesFingerprint([binary], 1)).not.toBe(rulesFingerprint([counted], 1))
+  })
+
+  it('reads a snapshot with no type as the binary rule it was', () => {
+    expect(fingerprintOf([{ id: 'r1', points: 5 }])).toBe(
+      fingerprintOf([{ id: 'r1', points: 5, type: 'binary' }])
+    )
   })
 })

@@ -3,6 +3,8 @@ import { Button } from './Button'
 import { Input } from './Input'
 import { InfoTooltip } from './InfoTooltip'
 import {
+  DEFAULT_RULE_TYPE,
+  SCORING_RULE_TYPES,
   allEpisodeNumbers,
   emptyRuleDraft,
   ruleToDraft,
@@ -12,7 +14,7 @@ import {
 } from '../lib/scoringRules'
 import { EpisodeMultiSelect } from './EpisodeMultiSelect'
 import { addScoringRule, deleteScoringRule, updateScoringRule } from '../lib/scoringRulesApi'
-import type { ScoringRule, ScoringRuleDoc } from '../lib/types'
+import type { ScoringRule, ScoringRuleDoc, ScoringRuleType } from '../lib/types'
 import { t } from '../lib/i18n'
 
 /**
@@ -39,8 +41,11 @@ export function RuleSummary({ rule }: { rule: ScoringRule }) {
     <div className="text-sm text-gray-700">
       <span className="font-medium text-gray-900">{rule.name}</span>
       {' · '}
+      {/* "each" on a count rule, because the number beside a rule that pays per
+          occurrence is not what the rule is worth — it is what one of them is
+          worth, and the two read identically without it. */}
       {rule.points > 0 ? '+' : ''}
-      {rule.points} {t('rules.pts')}
+      {rule.points} {rule.type === 'number' ? t('rules.ptsEach') : t('rules.pts')}
       {' · '}
       {/* Named episodes rather than a count: "Ep 2, 5" is the thing a reader
           wants, and a rule covering the season says so in as few words. An
@@ -77,6 +82,11 @@ interface ScoringRulesPanelProps {
   episodeCount: number
 }
 
+/** The label for one kind of rule, for the dropdown and anywhere else. */
+export function ruleTypeLabel(type: ScoringRuleType | undefined): string {
+  return t(`rules.type.${type ?? DEFAULT_RULE_TYPE}`)
+}
+
 export function RuleFields({
   draft,
   onChange,
@@ -88,6 +98,37 @@ export function RuleFields({
 }) {
   return (
     <>
+      {/* First, because it decides what the rest of the row means: the points
+          box beside it is worth once under Yes/No and worth per occurrence
+          under Count. Styled to match Input's label rather than reusing it —
+          Input renders an <input>, and this is a <select>. */}
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-gray-700">{t('rules.type')}</span>
+        <select
+          value={draft.type}
+          onChange={(e) => onChange({ ...draft, type: e.target.value as ScoringRuleType })}
+          // The caret is drawn here rather than by the browser. Chromium paints
+          // a native select's arrow against the border box and ignores
+          // padding-right, so widening the padding moved the text and left the
+          // arrow touching the edge. `appearance-none` takes the native one
+          // away, and the chevron below sits 0.75rem in, matching the padding
+          // on the other side.
+          style={{
+            backgroundImage:
+              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236b7280' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 8l5 5 5-5'/%3E%3C/svg%3E\")",
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'right 0.75rem center',
+            backgroundSize: '1rem 1rem',
+          }}
+          className="min-h-[42px] appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+        >
+          {SCORING_RULE_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {ruleTypeLabel(type)}
+            </option>
+          ))}
+        </select>
+      </label>
       <Input
         label={t('rules.name')}
         value={draft.name}
@@ -197,11 +238,28 @@ export function ScoringRulesPanel({
                       onChange={setEditDraft}
                       episodeNumbers={episodeNumbers}
                     />
-                    <div className="flex items-end gap-2">
-                      <Button loading={savingEdit} onClick={() => handleSaveEdit(rule)}>
+                    {/* The same size, and the same place, as the Edit and
+                        Delete they replace: `ml-auto` holds the pair against
+                        the right edge of the card whatever the fields beside
+                        them do, so nothing jumps as a row goes in and out of
+                        edit mode. */}
+                    <div className="ml-auto flex items-end gap-2">
+                      {/* Save keeps the primary blue it always had — it is
+                          the action of the row — and Cancel is the plain grey
+                          ghost. Only the size and the position are borrowed
+                          from Edit and Delete. */}
+                      <Button
+                        loading={savingEdit}
+                        className="!min-h-0 !px-3 !py-1 text-xs"
+                        onClick={() => handleSaveEdit(rule)}
+                      >
                         {t('common.save')}
                       </Button>
-                      <Button variant="secondary" onClick={() => setEditingId(null)}>
+                      <Button
+                        variant="ghost"
+                        className="!min-h-0 !px-3 !py-1 text-xs"
+                        onClick={() => setEditingId(null)}
+                      >
                         {t('common.cancel')}
                       </Button>
                     </div>
