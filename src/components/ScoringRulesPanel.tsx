@@ -107,10 +107,20 @@ export function RuleFields({
         <select
           value={draft.type}
           onChange={(e) => onChange({ ...draft, type: e.target.value as ScoringRuleType })}
-          // pr-8 rather than the px-3 the text inputs use: the caret a native
-          // select draws sits inside the padding box, so an even inset leaves it
-          // touching the border.
-          className="min-h-[42px] rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          // The caret is drawn here rather than by the browser. Chromium paints
+          // a native select's arrow against the border box and ignores
+          // padding-right, so widening the padding moved the text and left the
+          // arrow touching the edge. `appearance-none` takes the native one
+          // away, and the chevron below sits 0.75rem in, matching the padding
+          // on the other side.
+          style={{
+            backgroundImage:
+              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236b7280' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 8l5 5 5-5'/%3E%3C/svg%3E\")",
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'right 0.75rem center',
+            backgroundSize: '1rem 1rem',
+          }}
+          className="min-h-[42px] appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
         >
           {SCORING_RULE_TYPES.map((type) => (
             <option key={type} value={type}>
@@ -228,14 +238,17 @@ export function ScoringRulesPanel({
                       onChange={setEditDraft}
                       episodeNumbers={episodeNumbers}
                     />
-                    {/* Save and Cancel wear the styling of the Edit and Delete
-                        they replace, and sit where those two sat: `ml-auto`
-                        holds them against the right edge of the card whatever
-                        the fields beside them do, so the pair does not move as
-                        a row goes in and out of edit mode. */}
+                    {/* The same size, and the same place, as the Edit and
+                        Delete they replace: `ml-auto` holds the pair against
+                        the right edge of the card whatever the fields beside
+                        them do, so nothing jumps as a row goes in and out of
+                        edit mode. */}
                     <div className="ml-auto flex items-end gap-2">
+                      {/* Save keeps the primary blue it always had — it is
+                          the action of the row — and Cancel is the plain grey
+                          ghost. Only the size and the position are borrowed
+                          from Edit and Delete. */}
                       <Button
-                        variant="secondary"
                         loading={savingEdit}
                         className="!min-h-0 !px-3 !py-1 text-xs"
                         onClick={() => handleSaveEdit(rule)}
@@ -244,7 +257,7 @@ export function ScoringRulesPanel({
                       </Button>
                       <Button
                         variant="ghost"
-                        className="!min-h-0 !px-3 !py-1 text-xs !text-red-600 hover:!bg-red-50"
+                        className="!min-h-0 !px-3 !py-1 text-xs"
                         onClick={() => setEditingId(null)}
                       >
                         {t('common.cancel')}
