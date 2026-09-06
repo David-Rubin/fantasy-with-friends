@@ -107,7 +107,10 @@ export function RuleFields({
         <select
           value={draft.type}
           onChange={(e) => onChange({ ...draft, type: e.target.value as ScoringRuleType })}
-          className="min-h-[42px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          // pr-8 rather than the px-3 the text inputs use: the caret a native
+          // select draws sits inside the padding box, so an even inset leaves it
+          // touching the border.
+          className="min-h-[42px] rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
         >
           {SCORING_RULE_TYPES.map((type) => (
             <option key={type} value={type}>
@@ -225,11 +228,25 @@ export function ScoringRulesPanel({
                       onChange={setEditDraft}
                       episodeNumbers={episodeNumbers}
                     />
-                    <div className="flex items-end gap-2">
-                      <Button loading={savingEdit} onClick={() => handleSaveEdit(rule)}>
+                    {/* Save and Cancel wear the styling of the Edit and Delete
+                        they replace, and sit where those two sat: `ml-auto`
+                        holds them against the right edge of the card whatever
+                        the fields beside them do, so the pair does not move as
+                        a row goes in and out of edit mode. */}
+                    <div className="ml-auto flex items-end gap-2">
+                      <Button
+                        variant="secondary"
+                        loading={savingEdit}
+                        className="!min-h-0 !px-3 !py-1 text-xs"
+                        onClick={() => handleSaveEdit(rule)}
+                      >
                         {t('common.save')}
                       </Button>
-                      <Button variant="secondary" onClick={() => setEditingId(null)}>
+                      <Button
+                        variant="ghost"
+                        className="!min-h-0 !px-3 !py-1 text-xs !text-red-600 hover:!bg-red-50"
+                        onClick={() => setEditingId(null)}
+                      >
                         {t('common.cancel')}
                       </Button>
                     </div>
