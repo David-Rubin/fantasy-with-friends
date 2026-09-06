@@ -1,3 +1,7 @@
+import type { PhotoCrop } from './photoCrop'
+
+export type { PhotoCrop }
+
 // ── Role / State enums ────────────────────────────────────────────────────────
 
 /**
@@ -80,6 +84,11 @@ export interface UserDoc {
   createdAt: number // epoch ms
   /** Storage URL of an uploaded profile picture. Absent until one is uploaded. */
   photoUrl?: string
+  /**
+   * Which part of that picture to show. Absent means all of it, cover-fitted —
+   * what every avatar did before the crop existed. See src/lib/photoCrop.ts.
+   */
+  photoCrop?: PhotoCrop
 }
 
 export interface LeagueDoc {
@@ -126,6 +135,8 @@ export interface LeagueMemberDoc {
    * written before this field existed — both fall back to the lettered circle.
    */
   photoUrl?: string
+  /** Denormalized beside `photoUrl`, and kept current by the same trigger. */
+  photoCrop?: PhotoCrop
 }
 
 export type JoinRequestStatus = 'pending' | 'approved' | 'rejected'
@@ -155,6 +166,8 @@ export interface LeagueJoinRequestDoc {
    * until their next profile edit.
    */
   photoUrl?: string
+  /** Carried beside `photoUrl`, and stamped onto the member document with it. */
+  photoCrop?: PhotoCrop
   status: JoinRequestStatus
   requestedAt: number
   /** Set when an owner approves or rejects; null while pending */
@@ -223,11 +236,19 @@ export interface SeasonMemberDoc {
    * written before this field existed — both fall back to the lettered circle.
    */
   photoUrl?: string
+  /** Denormalized beside `photoUrl`, and kept current by the same trigger. */
+  photoCrop?: PhotoCrop
 }
 
 export interface ContestantDoc {
   name: string
   photoUrl: string
+  /**
+   * Which part of the photo at that address to show. Absent means all of it,
+   * cover-fitted, which is what every contestant photo was before the crop
+   * existed. See src/lib/photoCrop.ts.
+   */
+  photoCrop?: PhotoCrop
   bio: string
   draftedByUid: string | null
   draftedRound: number | null

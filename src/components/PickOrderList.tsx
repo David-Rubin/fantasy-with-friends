@@ -4,12 +4,14 @@ import { movePickOrder } from '../lib/draft'
 import { UserAvatar } from './UserAvatar'
 import { accentLeftBorder } from './accentStyles'
 import { teamColorFor } from '../lib/teamColor'
-import type { AccentColor } from '../lib/types'
+import type { AccentColor, PhotoCrop } from '../lib/types'
 
 export interface PickOrderPlayer {
   uid: string
   displayName: string
   photoUrl?: string
+  /** Travels with the URL — see UserAvatar. */
+  photoCrop?: PhotoCrop
   /** Absent on a roster row written before teams had colours. */
   teamColor?: AccentColor
 }
@@ -93,7 +95,11 @@ export function PickOrderList({ players, order, onChange }: PickOrderListProps) 
           <span className="w-14 shrink-0 text-xs font-medium text-gray-500">
             {t('draft.pickOrder.position', { n: index + 1 })}
           </span>
-          <UserAvatar displayName={player.displayName} photoUrl={player.photoUrl} />
+          <UserAvatar
+            displayName={player.displayName}
+            photoUrl={player.photoUrl}
+            photoCrop={player.photoCrop}
+          />
           <span className="min-w-0 flex-1 truncate text-sm text-gray-800">
             {player.displayName}
           </span>

@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { UserAvatar } from './UserAvatar'
 import { Button } from './Button'
 import { Input } from './Input'
-import { uploadAvatar, removeAvatar, updateDisplayName } from '../lib/avatarApi'
+import { PhotoCropDialog } from './PhotoCropDialog'
+import { uploadAvatar, removeAvatar, setAvatarCrop, updateDisplayName } from '../lib/avatarApi'
 import { avatarFileProblem, AVATAR_ACCEPT, MAX_AVATAR_MB } from '../lib/avatarFile'
+import type { PhotoCrop } from '../lib/photoCrop'
 import { t } from '../lib/i18n'
 
 interface AccountUserInfoProps {
@@ -11,6 +13,14 @@ interface AccountUserInfoProps {
   displayName: string
   email: string
   photoUrl?: string
+  photoCrop?: PhotoCrop
+}
+
+/** A picture chosen but not yet uploaded, held while it is being framed. */
+interface PendingPhoto {
+  file: File
+  /** An object URL for the local file, revoked when the dialog closes. */
+  src: string
 }
 
 /**
@@ -21,11 +31,27 @@ interface AccountUserInfoProps {
  * lands in the header and here at the same moment, and there is no second copy
  * to drift out of step with Firestore.
  */
-export function AccountUserInfo({ uid, displayName, email, photoUrl }: AccountUserInfoProps) {
+export function AccountUserInfo({
+  uid,
+  displayName,
+  email,
+  photoUrl,
+  photoCrop,
+}: AccountUserInfoProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [photoError, setPhotoError] = useState('')
   const [photoNotice, setPhotoNotice] = useState('')
+  const [pending, setPending] = useState<PendingPhoto | null>(null)
+  const [adjusting, setAdjusting] = useState(false)
+
+  // An object URL is a handle on memory the browser holds until it is told
+  // otherwise, so the one for a picture that was cancelled or uploaded has to
+  // go back.
+  useEffect(() => {
+    if (!pending) return
+    return () => URL.revokeObjectURL(pending.src)
+  }, [pending])
 
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(displayName)
@@ -52,12 +78,37 @@ export function AccountUserInfo({ uid, displayName, email, photoUrl }: AccountUs
       return
     }
 
+    // Framed before it is uploaded: the crop is part of the picture, and
+    // sending the file first would put an unframed one in front of everybody
+    // for as long as it took to adjust it.
+    setPending({ file, src: URL.createObjectURL(file) })
+  }
+
+  async function handleUploadCropped(crop: PhotoCrop) {
+    if (!pending) return
     setBusy(true)
+    setPhotoError('')
     try {
-      await uploadAvatar(uid, file)
+      await uploadAvatar(uid, pending.file, crop)
+      setPending(null)
       setPhotoNotice(t('settings.userInfo.photoSaved'))
     } catch (err) {
       console.error('Could not upload the profile picture', err)
+      setPhotoError(t('settings.userInfo.uploadFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleAdjust(crop: PhotoCrop) {
+    setBusy(true)
+    setPhotoError('')
+    try {
+      await setAvatarCrop(uid, crop)
+      setAdjusting(false)
+      setPhotoNotice(t('settings.userInfo.photoSaved'))
+    } catch (err) {
+      console.error('Could not save the crop', err)
       setPhotoError(t('settings.userInfo.uploadFailed'))
     } finally {
       setBusy(false)
@@ -113,7 +164,12 @@ export function AccountUserInfo({ uid, displayName, email, photoUrl }: AccountUs
           {t('settings.userInfo.photo')}
         </h2>
         <div className="flex items-center gap-5">
-          <UserAvatar displayName={displayName} photoUrl={photoUrl} size="lg" />
+          <UserAvatar
+            displayName={displayName}
+            photoUrl={photoUrl}
+            photoCrop={photoCrop}
+            size="lg"
+          />
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">
               <Button
@@ -128,6 +184,20 @@ export function AccountUserInfo({ uid, displayName, email, photoUrl }: AccountUs
                     ? t('settings.userInfo.replace')
                     : t('settings.userInfo.upload')}
               </Button>
+              {photoUrl && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    setPhotoError('')
+                    setPhotoNotice('')
+                    setAdjusting(true)
+                  }}
+                >
+                  {t('settings.userInfo.adjust')}
+                </Button>
+              )}
               {photoUrl && (
                 <Button type="button" variant="ghost" disabled={busy} onClick={handleRemove}>
                   {t('settings.userInfo.remove')}
@@ -160,6 +230,37 @@ export function AccountUserInfo({ uid, displayName, email, photoUrl }: AccountUs
           </p>
         )}
       </section>
+
+      {/* One dialog for a new picture and another for adjusting the one that is
+          there: the two differ only in what Save does, and keeping them apart
+          means neither has to ask which case it is in. */}
+      {pending && (
+        <PhotoCropDialog
+          key={pending.src}
+          open
+          onClose={() => setPending(null)}
+          onSave={handleUploadCropped}
+          src={pending.src}
+          displayName={displayName}
+          title={t('photoCrop.titleAvatar')}
+          saving={busy}
+          error={photoError}
+        />
+      )}
+      {photoUrl && (
+        <PhotoCropDialog
+          key={photoUrl}
+          open={adjusting}
+          onClose={() => setAdjusting(false)}
+          onSave={handleAdjust}
+          src={photoUrl}
+          crop={photoCrop}
+          displayName={displayName}
+          title={t('photoCrop.titleAvatar')}
+          saving={busy}
+          error={photoError}
+        />
+      )}
 
       <section>
         <h2 className="mb-4 text-base font-semibold text-gray-900">

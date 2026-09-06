@@ -1,11 +1,14 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react'
 import { Link } from 'react-router-dom'
 import { UserAvatar } from './UserAvatar'
+import type { PhotoCrop } from '../lib/types'
 import { t } from '../lib/i18n'
 
 interface UserMenuProps {
   displayName: string
   photoUrl?: string
+  /** Travels with the URL — see UserAvatar. */
+  photoCrop?: PhotoCrop
   /** App-level role. Only a superadmin is offered the user directory. */
   isSuperadmin: boolean
   onLogOut: () => void
@@ -23,7 +26,13 @@ interface UserMenuProps {
  * up: on a phone the button is just the avatar, and without the name it would
  * announce as an unlabelled button.
  */
-export function UserMenu({ displayName, photoUrl, isSuperadmin, onLogOut }: UserMenuProps) {
+export function UserMenu({
+  displayName,
+  photoUrl,
+  photoCrop,
+  isSuperadmin,
+  onLogOut,
+}: UserMenuProps) {
   // data-focus, not focus: Headless UI v2 tracks the highlighted item virtually
   // and marks it with that attribute rather than moving DOM focus to it, so a
   // plain focus: variant never fires and arrow-key users see nothing move.
@@ -33,7 +42,7 @@ export function UserMenu({ displayName, photoUrl, isSuperadmin, onLogOut }: User
   return (
     <Menu as="div" className="relative">
       <MenuButton className="flex cursor-pointer items-center gap-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
-        <UserAvatar displayName={displayName} photoUrl={photoUrl} />
+        <UserAvatar displayName={displayName} photoUrl={photoUrl} photoCrop={photoCrop} />
         <span className="sr-only text-sm text-gray-600 sm:not-sr-only sm:block">{displayName}</span>
       </MenuButton>
 

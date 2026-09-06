@@ -535,7 +535,11 @@ export function LeagueDetailPage() {
                   className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-4 py-3"
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <UserAvatar displayName={m.displayName} photoUrl={m.photoUrl} />
+                    <UserAvatar
+                      displayName={m.displayName}
+                      photoUrl={m.photoUrl}
+                      photoCrop={m.photoCrop}
+                    />
                     <span className="truncate text-sm font-medium text-gray-800">
                       {m.displayName}
                     </span>

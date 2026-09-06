@@ -2,13 +2,15 @@ import { t } from '../lib/i18n'
 import { UserAvatar } from './UserAvatar'
 import { accentLeftBorder } from './accentStyles'
 import type { SeasonWinner } from '../lib/seasonCompletion'
-import type { AccentColor } from '../lib/types'
+import type { AccentColor, PhotoCrop } from '../lib/types'
 
 interface ChampionTeam {
   uid: string
   teamName: string
   displayName: string
   photoUrl?: string
+  /** Travels with the URL — see UserAvatar. */
+  photoCrop?: PhotoCrop
   /** The team's colour, so a shared win still says which team is which. */
   teamColor: AccentColor
 }
@@ -77,7 +79,11 @@ export function SeasonChampion({ winner, teams }: SeasonChampionProps) {
               key={team.uid}
               className={`flex items-center gap-2 border-l-4 bg-white/60 py-1 pl-3 ${accentLeftBorder[team.teamColor]}`}
             >
-              <UserAvatar displayName={team.displayName} photoUrl={team.photoUrl} />
+              <UserAvatar
+                displayName={team.displayName}
+                photoUrl={team.photoUrl}
+                photoCrop={team.photoCrop}
+              />
               <div className="text-left">
                 <p className="font-semibold text-gray-900">{team.teamName}</p>
                 <p className="text-xs text-gray-500">{team.displayName}</p>

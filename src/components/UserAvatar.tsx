@@ -1,6 +1,7 @@
 import { avatarInitial } from '../lib/initial'
 import { accentRing } from './accentStyles'
-import type { AccentColor } from '../lib/types'
+import { CroppedPhoto } from './CroppedPhoto'
+import type { AccentColor, PhotoCrop } from '../lib/types'
 
 const sizes = {
   sm: 'h-8 w-8 text-sm',
@@ -11,6 +12,8 @@ interface UserAvatarProps {
   displayName: string
   /** An uploaded picture. Falls back to the initial when absent. */
   photoUrl?: string
+  /** Which part of it to show. Absent means all of it — see CroppedPhoto. */
+  photoCrop?: PhotoCrop
   size?: keyof typeof sizes
   /**
    * A team colour to ring the circle in. A ring rather than a border so the
@@ -27,19 +30,22 @@ interface UserAvatarProps {
  * from screen readers rather than announcing the same person twice — the same
  * reasoning as ContestantAvatar.
  */
-export function UserAvatar({ displayName, photoUrl, size = 'sm', ringColor }: UserAvatarProps) {
+export function UserAvatar({
+  displayName,
+  photoUrl,
+  photoCrop,
+  size = 'sm',
+  ringColor,
+}: UserAvatarProps) {
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-600 font-semibold text-white ${sizes[size]} ${
+      // `relative`, because a cropped photo positions itself against the frame.
+      className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-600 font-semibold text-white ${sizes[size]} ${
         ringColor ? `ring-2 ring-offset-2 ${accentRing[ringColor]}` : ''
       }`}
     >
-      {photoUrl ? (
-        <img src={photoUrl} alt="" className="h-full w-full object-cover" />
-      ) : (
-        avatarInitial(displayName)
-      )}
+      {photoUrl ? <CroppedPhoto src={photoUrl} crop={photoCrop} /> : avatarInitial(displayName)}
     </span>
   )
 }

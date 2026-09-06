@@ -4,6 +4,7 @@ import { Badge } from './Badge'
 import { Button } from './Button'
 import { t } from '../lib/i18n'
 import { useTooltipDisclosure } from '../lib/useTooltipDisclosure'
+import { CroppedPhoto } from './CroppedPhoto'
 
 /**
  * A contestant's bio, clipped to two lines, with the whole of it on hover.
@@ -131,10 +132,10 @@ export function ContestantCard({
         ].join(' ')}
       >
         {contestant.photoUrl ? (
-          <img
+          <CroppedPhoto
             src={contestant.photoUrl}
+            crop={contestant.photoCrop}
             alt={contestant.name}
-            className="h-full w-full object-cover"
           />
         ) : (
           <div className="flex h-full items-center justify-center text-gray-300">
