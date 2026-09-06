@@ -34,13 +34,19 @@ export type TimerExpiry = 'auto-pick' | 'admin-picks' | 'skip'
  */
 export type DraftStatus = 'lobby' | 'active' | 'paused' | 'awaiting-close' | 'complete'
 /**
- * One kind, deliberately. A rule names something that either happened to a
- * contestant in an episode or did not, and pays its points when it did.
- * Numeric and bonus-challenge rules existed alongside it and were dropped: each
- * needed its own scoring input, its own scope, and its own explanation, for a
- * league that only ever wanted to tick boxes.
+ * What a scorecard asks about a rule, and how the answer becomes points.
+ *
+ * `binary` — did this happen to this contestant in this episode? A tick, worth
+ * the rule's points once.
+ *
+ * `number` — how many times did it happen? A count, worth the rule's points
+ * multiplied by it. "Three votes received" at two points each is six, from one
+ * column rather than three.
+ *
+ * Absent on rules written before the field existed; reads treat that as
+ * `binary`, which is what every rule was. See scoredCount in ./scoring.
  */
-export type ScoringRuleType = 'binary'
+export type ScoringRuleType = 'binary' | 'number'
 /**
  * The palette a team's colour is picked from — the only thing that has one.
  * Leagues and seasons used to carry an accent too; it decided nothing a reader
@@ -276,6 +282,16 @@ export interface AppliedRule {
   id: string
   name: string
   points: number
+  /**
+   * How the column was answered when this episode was recorded — a tick or a
+   * count. Kept for the same reason as `points`: a rule that has since become a
+   * count would otherwise redraw a recorded episode with the wrong control and
+   * the wrong arithmetic behind the total beside it.
+   *
+   * Optional: snapshots taken before the field existed carry no type, and are
+   * read as `binary`, which is what every rule was then.
+   */
+  type?: ScoringRuleType
 }
 
 /**
@@ -317,8 +333,19 @@ export interface ScoreProposalDoc {
   decidedBy: string | null
 }
 
-// ruleId → whether that rule applied to this contestant in this episode
-export type ContestantScoreEntry = Record<string, boolean>
+/**
+ * ruleId → what was recorded against that rule for this contestant.
+ *
+ * `boolean` for a binary rule — whether it applied. `number` for a count rule,
+ * which is how many times it did.
+ *
+ * Both shapes are read for either kind of rule rather than trusted to match the
+ * rule's current type, because a rule's type can be changed after scores exist
+ * and nothing rewrites the documents behind it: a tick read as a count is one,
+ * and a count read as a tick is whether it happened at all. See scoredCount in
+ * ./scoring.
+ */
+export type ContestantScoreEntry = Record<string, boolean | number>
 
 export interface ContestantScoreDoc {
   scores: ContestantScoreEntry

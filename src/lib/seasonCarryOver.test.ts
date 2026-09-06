@@ -157,6 +157,10 @@ describe('carriedRule', () => {
     })
   })
 
+  it('carries the type, so a count rule does not arrive as a tick box', () => {
+    expect(carriedRule(rule({ type: 'number' }), 8).type).toBe('number')
+  })
+
   it('carries the name and the points untouched, penalties included', () => {
     expect(carriedRule(rule({ name: 'Voted out', points: -3 }), 4)).toMatchObject({
       name: 'Voted out',

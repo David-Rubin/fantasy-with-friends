@@ -1,18 +1,61 @@
-import type { ScoringRuleDoc, ScoringRule, ContestantScoreEntry, ContestantScoreDoc } from './types'
+import type {
+  ScoringRuleDoc,
+  ScoringRule,
+  ScoringRuleType,
+  ContestantScoreEntry,
+  ContestantScoreDoc,
+} from './types'
 
 // ── Per-rule evaluators ───────────────────────────────────────────────────────
 
-export function evaluateRule(rule: ScoringRule, entry: ContestantScoreEntry): number {
-  return entry[rule.id] === true ? rule.points : 0
+/** What a rule needs to be worth points: how it is answered, and what it pays. */
+type ScorableRule = { id: string; points: number; type?: ScoringRuleType }
+
+/**
+ * How many times a rule counts for this contestant in this episode.
+ *
+ * One for a binary rule that was ticked, the recorded count for a `number`
+ * rule, zero for anything untouched.
+ *
+ * Both stored shapes are read whatever the rule now says it is, because a rule's
+ * type is editable and nothing rewrites the scores behind it. A tick found under
+ * a rule that has become a count is one occurrence — the thing happened, and
+ * once is what was recorded. A count found under a rule that has gone back to
+ * binary is a tick when it is more than zero — it happened at least once. The
+ * alternative is a scored episode silently dropping to nothing the moment an
+ * admin changes a dropdown.
+ *
+ * A count is floored and never negative: the input only offers whole numbers
+ * from zero up, and a hand-edited document should not be able to invent points
+ * by going the other way.
+ */
+export function scoredCount(rule: ScorableRule, entry: ContestantScoreEntry): number {
+  const recorded = entry[rule.id]
+  if (recorded === true) return 1
+  if (typeof recorded !== 'number' || !Number.isFinite(recorded)) return 0
+  if (rule.type === 'number') return Math.max(0, Math.floor(recorded))
+  return recorded > 0 ? 1 : 0
+}
+
+/** What a rule is worth to this contestant: its points, times how often it counted. */
+export function evaluateRule(
+  rule: ScorableRule | ScoringRule,
+  entry: ContestantScoreEntry
+): number {
+  const count = scoredCount(rule, entry)
+  // Zero returned flat rather than multiplied: `0 * -3` is -0, which is a
+  // perfectly good zero everywhere except where something compares it, and
+  // there is no reason to store one.
+  return count === 0 ? 0 : count * rule.points
 }
 
 /**
  * Whether a rule takes points away rather than awarding them.
  *
- * A rule is only ever ticked or not, so what a scorecard cell means is decided
- * entirely by the column it sits in: the same tick is worth having under
- * "Wins HOH" and worth avoiding under "Sent to jury". The read-only card draws
- * the two differently, and this is the line between them.
+ * What a scorecard cell means is decided entirely by the column it sits in: the
+ * same tick — or the same count — is worth having under "Wins HOH" and worth
+ * avoiding under "Sent to jury". The read-only card draws the two differently,
+ * and this is the line between them.
  *
  * Zero is not a penalty. It takes nothing away, so it reads as the ordinary
  * mark — a rule worth no points is a strange thing to have written, but it is

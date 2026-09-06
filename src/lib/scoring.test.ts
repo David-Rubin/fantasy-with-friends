@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   evaluateRule,
+  scoredCount,
   isPenalty,
   calcContestantTotal,
   calcTeamTotal,
@@ -32,6 +33,55 @@ describe('evaluateRule', () => {
   it('negative points deduct correctly', () => {
     const negRule: ScoringRuleDoc & { id: string } = { ...binaryRule, id: 'neg', points: -1 }
     expect(evaluateRule(negRule, { neg: true })).toBe(-1)
+  })
+
+  it('scores a rule written before the type field existed as binary', () => {
+    const untyped = { id: 'r1', name: 'Star Baker', points: 3 } as ScoringRuleDoc & { id: string }
+    expect(evaluateRule(untyped, { r1: true })).toBe(3)
+  })
+})
+
+const countRule: ScoringRuleDoc & { id: string } = {
+  id: 'r1',
+  type: 'number',
+  name: 'Votes received',
+  points: 2,
+}
+
+describe('evaluateRule for a count rule', () => {
+  it('pays its points once per occurrence', () => {
+    expect(evaluateRule(countRule, { r1: 3 })).toBe(6)
+  })
+
+  it('is worth nothing at zero, and nothing when untouched', () => {
+    expect(evaluateRule(countRule, { r1: 0 })).toBe(0)
+    expect(evaluateRule(countRule, {})).toBe(0)
+  })
+
+  it('deducts once per occurrence when the rule is a penalty', () => {
+    expect(evaluateRule({ ...countRule, points: -3 }, { r1: 4 })).toBe(-12)
+  })
+
+  it('refuses to invent points from a count no input could produce', () => {
+    // Only reachable by editing the document by hand.
+    expect(evaluateRule({ ...countRule, points: -3 }, { r1: -2 })).toBe(0)
+    expect(evaluateRule(countRule, { r1: 2.7 })).toBe(4)
+    expect(evaluateRule(countRule, { r1: NaN })).toBe(0)
+  })
+})
+
+describe('scoredCount when a rule changes type under stored scores', () => {
+  // Nothing rewrites a scored episode when an admin changes a dropdown, so both
+  // stored shapes have to mean something sensible under either kind of rule.
+  it('reads a tick under a rule that has become a count as one occurrence', () => {
+    expect(scoredCount(countRule, { r1: true })).toBe(1)
+    expect(evaluateRule(countRule, { r1: true })).toBe(2)
+  })
+
+  it('reads a count under a rule that has gone back to binary as whether it happened', () => {
+    expect(scoredCount(binaryRule, { r1: 4 })).toBe(1)
+    expect(evaluateRule(binaryRule, { r1: 4 })).toBe(3)
+    expect(scoredCount(binaryRule, { r1: 0 })).toBe(0)
   })
 })
 
