@@ -4,7 +4,7 @@ import { Button } from './Button'
 import { CroppedPhoto } from './CroppedPhoto'
 import { PhotoCropDialog } from './PhotoCropDialog'
 import { BIO_MAX_LENGTH, normaliseBio } from '../lib/contestants'
-import type { PhotoCrop } from '../lib/photoCrop'
+import { CONTESTANT_CROP_SHAPE, type PhotoCrop } from '../lib/photoCrop'
 import { t } from '../lib/i18n'
 
 export interface ContestantFormValues {
@@ -175,11 +175,9 @@ export function ContestantFields({
           }}
           src={previewUrl}
           crop={values.photoCrop}
-          displayName={values.name}
-          // A contestant is drawn as a circle on the roster and as the banner
-          // across the top of their card, so both are previewed: one crop, two
-          // shapes, and the admin can see what each of them does with it.
-          shapes={['avatar', 'card']}
+          // The shape of a draft-board card, which is the biggest a contestant's
+          // photo is ever drawn. The roster's circle cover-fits the same region.
+          shape={CONTESTANT_CROP_SHAPE}
           title={t('photoCrop.titleContestant')}
         />
       )}

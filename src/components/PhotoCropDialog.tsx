@@ -1,37 +1,38 @@
 import { useRef, useState } from 'react'
 import { Button } from './Button'
 import { Modal } from './Modal'
-import { CroppedPhoto } from './CroppedPhoto'
 import {
+  AVATAR_CROP_SHAPE,
   DEFAULT_CROP_VIEW,
   MAX_ZOOM,
   MIN_ZOOM,
   ZOOM_STEP,
   cropFromView,
+  cutoutBox,
   isUsableSize,
   panView,
+  stageImageStyle,
   viewFromCrop,
   zoomView,
+  type CropShape,
   type CropView,
   type ImageSize,
   type PhotoCrop,
 } from '../lib/photoCrop'
 import { t } from '../lib/i18n'
 
-/** The shapes a picture is drawn in, so the preview can show all of them. */
-export type PreviewShape = 'avatar' | 'card'
-
-/** The viewport's width in the layout, used only until it has been measured. */
-const VIEWPORT_PX = 288
+/** The stage's width in the layout, used only until it has been measured. */
+const STAGE_PX = 320
 
 /**
  * Choosing which part of a photo is the photo.
  *
- * A square viewport showing what will be kept, a slider for how far in, and
- * beside them the picture drawn at the sizes and shapes the app actually uses.
- * The previews are the same CroppedPhoto every one of those places renders, so
- * "this is what it will look like" is not an approximation of the real thing —
- * it is the real thing, in a dialog.
+ * The whole picture is on the stage and can be dragged and zoomed under a
+ * cutout in the shape it will actually be drawn in — a circle for a person, the
+ * shape of a draft-board card for a contestant. Everything outside the cutout
+ * is dimmed, so the preview is not a thumbnail off to one side claiming to
+ * represent the result: it is the picture itself, with the part that will be
+ * kept picked out of it.
  *
  * Nothing is written from here. The dialog hands back a crop and the caller
  * decides what that means: a new picture to upload, or an adjustment to one
@@ -47,8 +48,7 @@ export function PhotoCropDialog({
   onSave,
   src,
   crop,
-  displayName,
-  shapes = ['avatar'],
+  shape = AVATAR_CROP_SHAPE,
   title,
   saving = false,
   error = '',
@@ -60,9 +60,8 @@ export function PhotoCropDialog({
   src: string
   /** The crop being adjusted, if this photo already has one. */
   crop?: PhotoCrop
-  /** Shown under the previews so a face has something to sit beside. */
-  displayName?: string
-  shapes?: PreviewShape[]
+  /** The shape the picture will be drawn in. See CropShape. */
+  shape?: CropShape
   title: string
   saving?: boolean
   error?: string
@@ -70,7 +69,7 @@ export function PhotoCropDialog({
   const [natural, setNatural] = useState<ImageSize | null>(null)
   const [view, setView] = useState<CropView>(DEFAULT_CROP_VIEW)
   const [failed, setFailed] = useState(false)
-  const viewport = useRef<HTMLDivElement>(null)
+  const stage = useRef<HTMLDivElement>(null)
   const dragging = useRef<{ x: number; y: number } | null>(null)
 
   // The stored crop can only be turned back into a zoom and a centre once the
@@ -88,7 +87,8 @@ export function PhotoCropDialog({
     setView(crop ? viewFromCrop(crop, size) : DEFAULT_CROP_VIEW)
   }
 
-  const liveCrop = natural ? cropFromView(view, natural) : undefined
+  const cutout = cutoutBox(shape.aspect)
+  const liveCrop = natural ? cropFromView(view, natural, shape) : undefined
 
   function startDrag(event: React.PointerEvent) {
     if (!natural) return
@@ -99,13 +99,17 @@ export function PhotoCropDialog({
   function onDrag(event: React.PointerEvent) {
     const from = dragging.current
     if (!from || !natural) return
-    const box = viewport.current?.getBoundingClientRect()
+    // Measured rather than assumed: the stage is a percentage of a dialog that
+    // is itself a percentage of the window, so its size on screen is only known
+    // once it is on screen.
+    const stagePx = stage.current?.getBoundingClientRect().width ?? STAGE_PX
     setView((current) =>
       panView(
         current,
         { dx: event.clientX - from.x, dy: event.clientY - from.y },
-        box?.width ?? VIEWPORT_PX,
-        natural
+        { width: stagePx * cutout.w, height: stagePx * cutout.h },
+        natural,
+        shape
       )
     )
     dragging.current = { x: event.clientX, y: event.clientY }
@@ -123,7 +127,6 @@ export function PhotoCropDialog({
       open={open}
       onClose={onClose}
       title={title}
-      size="wide"
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={saving}>
@@ -142,81 +145,71 @@ export function PhotoCropDialog({
       {failed ? (
         <p className="text-sm text-red-600">{t('photoCrop.failed')}</p>
       ) : (
-        <div className="flex flex-col gap-6 sm:flex-row">
-          <div className="flex flex-col gap-3">
-            <p className="text-sm text-gray-600">{t('photoCrop.help')}</p>
-            {/* The viewport shows exactly the square that will be kept, so what
-                is inside it is the answer and what is outside is not. Nothing
-                dims the surroundings because there are none — the image is
-                drawn cropped, not full-bleed behind a mask. */}
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-gray-600">{t('photoCrop.help')}</p>
+
+          <div
+            ref={stage}
+            onPointerDown={startDrag}
+            onPointerMove={onDrag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            className="relative mx-auto aspect-square w-full max-w-80 cursor-grab touch-none select-none overflow-hidden rounded-xl bg-gray-900 active:cursor-grabbing"
+          >
+            {/* The whole picture, placed so the cutout below lands on the crop.
+                Hidden until its own size is known, because until then there is
+                no crop and so nowhere to put it. */}
+            <img
+              src={src}
+              alt=""
+              onLoad={handleLoaded}
+              onError={() => setFailed(true)}
+              style={liveCrop ? stageImageStyle(liveCrop, cutout) : { opacity: 0 }}
+              className="pointer-events-none absolute max-w-none"
+            />
+
+            {/* The dim is this element's own shadow, spread far enough to fill
+                the stage: one box, and it follows the border radius, which four
+                panels around a rectangle could not do for a circle. */}
             <div
-              ref={viewport}
-              onPointerDown={startDrag}
-              onPointerMove={onDrag}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
-              className="relative aspect-square w-full max-w-72 shrink-0 cursor-grab touch-none select-none overflow-hidden rounded-xl border border-gray-300 bg-gray-100 active:cursor-grabbing"
+              aria-hidden="true"
+              style={{
+                width: `${cutout.w * 100}%`,
+                height: `${cutout.h * 100}%`,
+                // The dim, and — inside the white ring — a dark hairline, so
+                // the edge of the frame is visible against a pale photo as well
+                // as a dark one.
+                boxShadow:
+                  '0 0 0 9999px rgba(17, 24, 39, 0.6), inset 0 0 0 1px rgba(17, 24, 39, 0.35)',
+              }}
+              className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ring-2 ring-white/90 ${
+                shape.round ? 'rounded-full' : 'rounded-md'
+              }`}
+            />
+          </div>
+
+          <label className="mx-auto flex w-full max-w-80 items-center gap-3">
+            <span className="text-sm font-medium text-gray-700">{t('photoCrop.zoom')}</span>
+            <input
+              type="range"
+              min={MIN_ZOOM}
+              max={MAX_ZOOM}
+              step={ZOOM_STEP}
+              value={view.zoom}
+              disabled={!natural}
+              onChange={(e) => setView((v) => zoomView(v, Number(e.target.value)))}
+              className="h-1 flex-1 cursor-pointer accent-blue-600"
+              aria-label={t('photoCrop.zoom')}
+            />
+            <Button
+              variant="ghost"
+              className="!min-h-0 !px-3 !py-1 text-xs"
+              disabled={!natural}
+              onClick={() => setView(DEFAULT_CROP_VIEW)}
             >
-              {/* Loaded once, hidden, purely to learn the image's own size. The
-                  visible copies are all CroppedPhoto, which needs the crop that
-                  cannot be computed until this has landed. */}
-              <img
-                src={src}
-                alt=""
-                onLoad={handleLoaded}
-                onError={() => setFailed(true)}
-                className="pointer-events-none absolute h-px w-px opacity-0"
-              />
-              {liveCrop && (
-                <CroppedPhoto src={src} crop={liveCrop} className="pointer-events-none" />
-              )}
-            </div>
-
-            <label className="flex items-center gap-3">
-              <span className="text-sm font-medium text-gray-700">{t('photoCrop.zoom')}</span>
-              <input
-                type="range"
-                min={MIN_ZOOM}
-                max={MAX_ZOOM}
-                step={ZOOM_STEP}
-                value={view.zoom}
-                disabled={!natural}
-                onChange={(e) => setView((v) => zoomView(v, Number(e.target.value)))}
-                className="h-1 flex-1 cursor-pointer accent-blue-600"
-                aria-label={t('photoCrop.zoom')}
-              />
-              <Button
-                variant="ghost"
-                className="!min-h-0 !px-3 !py-1 text-xs"
-                disabled={!natural}
-                onClick={() => setView(DEFAULT_CROP_VIEW)}
-              >
-                {t('photoCrop.reset')}
-              </Button>
-            </label>
-          </div>
-
-          <div className="flex flex-col gap-4">
-            <p className="text-sm font-medium text-gray-700">{t('photoCrop.previewTitle')}</p>
-            {shapes.includes('avatar') && (
-              <div className="flex items-end gap-4">
-                {/* The two sizes the app draws a person at, both of them real:
-                    the header's 32px circle and the account page's 80px one. */}
-                <Preview label={t('photoCrop.previewLarge')} className="h-20 w-20 rounded-full">
-                  {liveCrop && <CroppedPhoto src={src} crop={liveCrop} />}
-                </Preview>
-                <Preview label={t('photoCrop.previewSmall')} className="h-8 w-8 rounded-full">
-                  {liveCrop && <CroppedPhoto src={src} crop={liveCrop} />}
-                </Preview>
-              </div>
-            )}
-            {shapes.includes('card') && (
-              <Preview label={t('photoCrop.previewCard')} className="h-24 w-40 rounded-t-xl">
-                {liveCrop && <CroppedPhoto src={src} crop={liveCrop} />}
-              </Preview>
-            )}
-            {displayName && <p className="text-sm text-gray-500">{displayName}</p>}
-          </div>
+              {t('photoCrop.reset')}
+            </Button>
+          </label>
         </div>
       )}
       {error && (
@@ -225,23 +218,5 @@ export function PhotoCropDialog({
         </p>
       )}
     </Modal>
-  )
-}
-
-/** One shape the photo is drawn in, with the name of where it appears. */
-function Preview({
-  label,
-  className,
-  children,
-}: {
-  label: string
-  className: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <span className={`relative block overflow-hidden bg-gray-100 ${className}`}>{children}</span>
-      <span className="text-xs text-gray-400">{label}</span>
-    </div>
   )
 }

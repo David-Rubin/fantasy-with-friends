@@ -241,7 +241,6 @@ export function AccountUserInfo({
           onClose={() => setPending(null)}
           onSave={handleUploadCropped}
           src={pending.src}
-          displayName={displayName}
           title={t('photoCrop.titleAvatar')}
           saving={busy}
           error={photoError}
@@ -255,7 +254,6 @@ export function AccountUserInfo({
           onSave={handleAdjust}
           src={photoUrl}
           crop={photoCrop}
-          displayName={displayName}
           title={t('photoCrop.titleAvatar')}
           saving={busy}
           error={photoError}

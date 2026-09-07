@@ -14,12 +14,12 @@ import { croppedImageStyle, readCrop, type PhotoCrop } from '../lib/photoCrop'
  * keeping the two paths identical means adding this changed nothing about how
  * existing pictures look.
  *
- * With one, an invisible square sits in the middle of the frame, big enough to
- * cover it whatever its shape, and the image is laid out inside that square so
- * the crop fills it exactly — see croppedImageStyle for why the arithmetic
- * comes out undistorted. The square is what makes a non-square frame behave:
- * the banner on a contestant card shows a wide slice through the middle of the
- * crop, rather than the crop squeezed into a letterbox.
+ * With one, an invisible box of the crop's own shape sits in the middle of the
+ * frame, big enough to cover it whatever shape the frame is, and the image is
+ * laid out inside that box so the crop fills it exactly — see croppedImageStyle
+ * for why the arithmetic comes out undistorted. That box is what makes a frame
+ * of a different shape behave: a round roster thumbnail shows the middle of a
+ * contestant's wider crop, rather than the crop squeezed into a circle.
  */
 export function CroppedPhoto({
   src,
@@ -43,7 +43,10 @@ export function CroppedPhoto({
   }
 
   return (
-    <span className="absolute left-1/2 top-1/2 block aspect-square min-h-full min-w-full -translate-x-1/2 -translate-y-1/2">
+    <span
+      style={{ aspectRatio: safe.aspect }}
+      className="absolute left-1/2 top-1/2 block min-h-full min-w-full -translate-x-1/2 -translate-y-1/2"
+    >
       {/* max-w-none because the width below is deliberately far more than 100%
           and Tailwind's preflight caps images at their container otherwise. */}
       <img
