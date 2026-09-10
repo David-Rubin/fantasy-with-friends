@@ -128,8 +128,12 @@ export function ContestantFields({
               <>
                 {/* The thumbnail is the frame the roster draws, at the size the
                     roster draws it, so the field shows the crop rather than
-                    describing it. */}
-                <span className="relative block h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gray-200">
+                    describing it — which means it is shaped from the same
+                    constant as the card and the roster row, not a square. */}
+                <span
+                  style={{ aspectRatio: CONTESTANT_CROP_SHAPE.aspect }}
+                  className="relative block h-10 shrink-0 overflow-hidden rounded-lg border border-gray-200"
+                >
                   <CroppedPhoto
                     src={previewUrl}
                     crop={values.photoCrop}
