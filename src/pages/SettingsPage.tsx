@@ -69,6 +69,7 @@ export function SettingsPage() {
               displayName={userDoc.displayName}
               email={userDoc.email}
               photoUrl={userDoc.photoUrl}
+              photoCrop={userDoc.photoCrop}
             />
           )}
           {tab === 'password' && <AccountPassword />}

@@ -7,6 +7,7 @@ import { documentTitle } from '../lib/documentTitle'
 import { tabScopedAuthEnabled } from '../lib/authPersistence'
 import { markTabSignedIn } from '../lib/tabSession'
 import { db } from '../lib/firebase'
+import type { PhotoCrop } from '../lib/types'
 
 const TAB_SCOPED_AUTH = tabScopedAuthEnabled(import.meta.env)
 
@@ -16,6 +17,8 @@ interface UserDoc {
   email: string
   /** An uploaded profile picture. Absent until someone uploads one. */
   photoUrl?: string
+  /** Which part of it to show. Absent means all of it — see CroppedPhoto. */
+  photoCrop?: PhotoCrop
 }
 
 interface AuthContextValue {

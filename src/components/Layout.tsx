@@ -40,6 +40,7 @@ export function Layout({ children, breadcrumbs }: LayoutProps) {
             <UserMenu
               displayName={userDoc.displayName}
               photoUrl={userDoc.photoUrl}
+              photoCrop={userDoc.photoCrop}
               isSuperadmin={isSuperadmin}
               onLogOut={handleSignOut}
             />

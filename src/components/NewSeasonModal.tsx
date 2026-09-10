@@ -18,7 +18,8 @@ import {
   type CarryOverTopic,
 } from '../lib/seasonCarryOver'
 import { createSeason, readCarryOverSource, type CarryOverSourceData } from '../lib/seasonApi'
-import type { Season, SeasonMemberDoc } from '../lib/types'
+import { storedPhotoFields } from '../lib/photoCrop'
+import type { PhotoCrop, Season, SeasonMemberDoc } from '../lib/types'
 import { t } from '../lib/i18n'
 
 /** A member of the league, as this dialog needs them. */
@@ -26,6 +27,8 @@ export interface LeagueRosterEntry {
   uid: string
   displayName: string
   photoUrl?: string
+  /** Which part of it to show. Travels with the URL — see storedPhotoFields. */
+  photoCrop?: PhotoCrop
 }
 
 interface NewSeasonModalProps {
@@ -147,7 +150,7 @@ export function NewSeasonModal({
           : leagueMembers.map((member) => ({
               uid: member.uid,
               displayName: member.displayName,
-              ...(member.photoUrl ? { photoUrl: member.photoUrl } : {}),
+              ...storedPhotoFields(member),
               teamName: `${member.displayName}'s Team`,
               pickPosition: null,
               joinedAt: now,

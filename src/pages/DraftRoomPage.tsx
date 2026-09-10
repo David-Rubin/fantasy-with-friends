@@ -419,7 +419,11 @@ export function DraftRoomPage() {
             {members.map((m) => (
               <div key={m.uid} className="flex items-center justify-between gap-2 text-sm">
                 <span className="flex min-w-0 items-center gap-2">
-                  <UserAvatar displayName={m.displayName} photoUrl={m.photoUrl} />
+                  <UserAvatar
+                    displayName={m.displayName}
+                    photoUrl={m.photoUrl}
+                    photoCrop={m.photoCrop}
+                  />
                   <span className="truncate font-medium text-gray-800">{m.displayName}</span>
                 </span>
                 {m.pickPosition && (

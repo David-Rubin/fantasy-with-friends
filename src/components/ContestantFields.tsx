@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Input, Textarea } from './Input'
+import { Button } from './Button'
+import { CroppedPhoto } from './CroppedPhoto'
+import { PhotoCropDialog } from './PhotoCropDialog'
 import { BIO_MAX_LENGTH, normaliseBio } from '../lib/contestants'
+import { CONTESTANT_CROP_SHAPE, type PhotoCrop } from '../lib/photoCrop'
 import { t } from '../lib/i18n'
 
 export interface ContestantFormValues {
   name: string
   photoUrl: string
+  /** Which part of the photo to show. Absent until somebody frames it. */
+  photoCrop?: PhotoCrop
   bio: string
 }
 
@@ -37,6 +43,7 @@ export function ContestantFields({
   // clears itself the moment a different address is being shown, with nothing
   // to reset.
   const [failedUrl, setFailedUrl] = useState('')
+  const [cropping, setCropping] = useState(false)
 
   /**
    * Fetch a second after typing stops, rather than on every keystroke.
@@ -80,7 +87,11 @@ export function ContestantFields({
           <Input
             label={t('contestant.photo')}
             value={values.photoUrl}
-            onChange={(e) => onChange({ ...values, photoUrl: e.target.value })}
+            // A crop belongs to one picture. Pointing the field at another one
+            // and keeping the old crop would frame a face that is not there.
+            onChange={(e) =>
+              onChange({ ...values, photoUrl: e.target.value, photoCrop: undefined })
+            }
             placeholder="https://…"
             className="flex-1"
           />
@@ -114,12 +125,38 @@ export function ContestantFields({
           ) : (
             previewUrl &&
             !previewFailed && (
-              <img
-                src={previewUrl}
-                alt={t('contestant.photoPreviewAlt')}
-                onError={() => setFailedUrl(previewUrl)}
-                className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 object-cover"
-              />
+              <>
+                {/* The thumbnail is the frame the roster draws, at the size the
+                    roster draws it, so the field shows the crop rather than
+                    describing it — which means it is shaped from the same
+                    constant as the card and the roster row, not a square. */}
+                <span
+                  style={{ aspectRatio: CONTESTANT_CROP_SHAPE.aspect }}
+                  className="relative block h-10 shrink-0 overflow-hidden rounded-lg border border-gray-200"
+                >
+                  <CroppedPhoto
+                    src={previewUrl}
+                    crop={values.photoCrop}
+                    alt={t('contestant.photoPreviewAlt')}
+                  />
+                </span>
+                {/* Hidden from the loading branch above deliberately: framing a
+                    picture that has not arrived would open on an empty box. */}
+                <img
+                  src={previewUrl}
+                  alt=""
+                  onError={() => setFailedUrl(previewUrl)}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="!min-h-0 shrink-0 !px-3 !py-2 text-xs"
+                  onClick={() => setCropping(true)}
+                >
+                  {t('contestant.adjustPhoto')}
+                </Button>
+              </>
             )
           )}
         </div>
@@ -129,6 +166,24 @@ export function ContestantFields({
           there is no room for it next to a 40px thumbnail. */}
       {!loading && previewUrl && previewFailed && (
         <p className="text-sm text-red-600">{t('contestant.photoFailed')}</p>
+      )}
+
+      {previewUrl && !previewFailed && (
+        <PhotoCropDialog
+          key={previewUrl}
+          open={cropping}
+          onClose={() => setCropping(false)}
+          onSave={(crop) => {
+            onChange({ ...values, photoCrop: crop })
+            setCropping(false)
+          }}
+          src={previewUrl}
+          crop={values.photoCrop}
+          // The shape of a draft-board card, which is the biggest a contestant's
+          // photo is ever drawn. The roster's circle cover-fits the same region.
+          shape={CONTESTANT_CROP_SHAPE}
+          title={t('photoCrop.titleContestant')}
+        />
       )}
 
       {/* Its own line rather than a third column: a bio runs to a paragraph,

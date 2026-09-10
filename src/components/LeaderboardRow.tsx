@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AccentColor, Contestant } from '../lib/types'
+import type { AccentColor, Contestant, PhotoCrop } from '../lib/types'
 import { Badge } from './Badge'
 import { t } from '../lib/i18n'
 import { UserAvatar } from './UserAvatar'
@@ -19,6 +19,8 @@ interface LeaderboardRowProps {
   playerName: string
   /** The player's picture, when they have uploaded one. */
   playerPhotoUrl?: string
+  /** Travels with the URL — see UserAvatar. */
+  playerPhotoCrop?: PhotoCrop
   totalPoints: number
   delta: number | null
   /**
@@ -37,6 +39,7 @@ export function LeaderboardRow({
   teamName,
   playerName,
   playerPhotoUrl,
+  playerPhotoCrop,
   totalPoints,
   delta,
   teamColor,
@@ -56,7 +59,12 @@ export function LeaderboardRow({
         aria-expanded={expanded}
       >
         <span className="w-8 text-lg font-bold text-gray-400">#{rank}</span>
-        <UserAvatar displayName={playerName} photoUrl={playerPhotoUrl} ringColor={teamColor} />
+        <UserAvatar
+          displayName={playerName}
+          photoUrl={playerPhotoUrl}
+          photoCrop={playerPhotoCrop}
+          ringColor={teamColor}
+        />
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-gray-900 truncate">{teamName}</p>
           <p className="text-xs text-gray-500 truncate">{playerName}</p>

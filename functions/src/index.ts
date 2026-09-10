@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin'
+import { FieldValue } from 'firebase-admin/firestore'
 import * as functions from 'firebase-functions/v1'
 import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore'
 
@@ -76,7 +77,11 @@ export const onUserProfileWritten = onDocumentWritten('users/{uid}', async (even
   if (!after) return
 
   const nameChanged = before?.displayName !== after.displayName
-  const photoChanged = (before?.photoUrl ?? '') !== (after.photoUrl ?? '')
+  const photoChanged =
+    (before?.photoUrl ?? '') !== (after.photoUrl ?? '') ||
+    // Compared as JSON because a crop is a small flat object and this only has
+    // to answer "did it move": four numbers either match or they do not.
+    JSON.stringify(before?.photoCrop ?? null) !== JSON.stringify(after.photoCrop ?? null)
   if (!nameChanged && !photoChanged) return
 
   const { uid } = event.params
@@ -91,6 +96,11 @@ export const onUserProfileWritten = onDocumentWritten('users/{uid}', async (even
   // lose it too — writing '' rather than deleting keeps the shape predictable
   // and reads the same as absent at every call site.
   update.photoUrl = after.photoUrl ?? ''
+  // The crop rides along, because a roster draws from its own copy and would
+  // otherwise keep framing the picture the way it was framed the day somebody
+  // joined. Deleted rather than blanked when there is none: absent is what the
+  // renderer reads as "all of it", and there is no empty crop to write.
+  update.photoCrop = after.photoCrop ?? FieldValue.delete()
 
   // Firestore caps a batch at 500 writes. A user in more leagues and seasons
   // than that is not a case worth failing on silently.

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { doc, getDoc, collection, updateDoc, addDoc } from 'firebase/firestore'
+import { doc, getDoc, collection, deleteField, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery, guarded } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
@@ -403,6 +403,9 @@ export function SeasonDetailPage() {
       await addDoc(collection(db, 'seasons', seasonId, 'contestants'), {
         name: contestantForm.name.trim(),
         photoUrl: contestantForm.photoUrl.trim(),
+        // Left off entirely when nobody framed the picture: absent is what the
+        // renderer reads as "all of it", and Firestore refuses an undefined.
+        ...(contestantForm.photoCrop ? { photoCrop: contestantForm.photoCrop } : {}),
         bio: normaliseBio(contestantForm.bio),
         draftedByUid: null,
         draftedRound: null,
@@ -419,6 +422,7 @@ export function SeasonDetailPage() {
     setEditContestantForm({
       name: contestant.name,
       photoUrl: contestant.photoUrl,
+      photoCrop: contestant.photoCrop,
       bio: contestant.bio,
     })
     setEditingContestantId(contestant.id)
@@ -434,12 +438,16 @@ export function SeasonDetailPage() {
     setEditContestantError('')
     setSavingContestant(true)
     try {
-      // Only the three fields the form owns. A contestant document also carries
-      // who drafted them and when they went out, and spreading the form over
-      // the document would take those with it.
+      // Only the fields the form owns. A contestant document also carries who
+      // drafted them and when they went out, and spreading the form over the
+      // document would take those with it.
       await updateDoc(doc(db, 'seasons', seasonId, 'contestants', editingContestantId), {
         name: editContestantForm.name.trim(),
         photoUrl: editContestantForm.photoUrl.trim(),
+        // deleteField rather than omitted: a picture that was framed and then
+        // pointed somewhere else has to lose the crop that no longer fits it,
+        // and an omitted key would leave the old one in place.
+        photoCrop: editContestantForm.photoCrop ?? deleteField(),
         bio: normaliseBio(editContestantForm.bio),
       })
       setEditingContestantId(null)
@@ -575,6 +583,7 @@ export function SeasonDetailPage() {
       return {
         id: c.id,
         photoUrl: c.photoUrl,
+        photoCrop: c.photoCrop,
         eliminated: c.eliminatedEpisode !== null,
         contestant: c.name,
         owner: c.draftedByUid ? (owner?.displayName ?? '\u2014') : t('contestant.freeAgent'),
@@ -1006,6 +1015,7 @@ export function SeasonDetailPage() {
                       teamName: member?.teamName ?? '',
                       displayName: member?.displayName ?? uid,
                       photoUrl: member?.photoUrl,
+                      photoCrop: member?.photoCrop,
                       teamColor: teamColorFor(member ?? { uid }),
                     }
                   })}
@@ -1039,6 +1049,7 @@ export function SeasonDetailPage() {
                         teamName={member.teamName}
                         playerName={member.displayName}
                         playerPhotoUrl={member.photoUrl}
+                        playerPhotoCrop={member.photoCrop}
                         totalPoints={season.teamTotals[member.uid] ?? 0}
                         delta={delta}
                         teamColor={teamColorFor(member)}
@@ -1086,7 +1097,7 @@ export function SeasonDetailPage() {
                         ].join(' ')}
                       >
                         <span className="flex items-center gap-3">
-                          <ContestantAvatar photoUrl={row.photoUrl} />
+                          <ContestantAvatar photoUrl={row.photoUrl} photoCrop={row.photoCrop} />
                           {row.contestant}
                         </span>
                       </td>
