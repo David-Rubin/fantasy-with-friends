@@ -50,13 +50,18 @@ export interface CropShape {
 export const AVATAR_CROP_SHAPE: CropShape = { aspect: 1, round: true }
 
 /**
- * A contestant: cropped to the shape of the photo on a draft-board card.
+ * A contestant: cropped to the shape of the photo on their card.
  *
- * That card is fluid — three to a column on a desktop board, two on a narrow
- * one — so its photo is about 207×160 at the width the board is usually read
- * at and wider on a phone. 4:3 is that desktop shape, and the card cover-fits
- * whatever it is given, so a board at another width shows a little more or a
- * little less of the same region rather than something else entirely.
+ * The card itself is drawn at this ratio — ContestantCard shapes its photo from
+ * this constant rather than from a fixed height — so the frame in the editor,
+ * the thumbnail in the setup panel and the card on the draft board are all the
+ * same shape, at every width any of them is drawn at. That is the whole point
+ * of it being one number: a card with a fixed height and a fluid width was a
+ * different shape in each of those places, and matched the editor in none.
+ *
+ * 4:3 because it is close to what the draft board already was (about 207×160
+ * at the width that board is usually read at), so the change is a nudge to the
+ * shape people know rather than a new one.
  */
 export const CONTESTANT_CROP_SHAPE: CropShape = { aspect: 4 / 3, round: false }
 

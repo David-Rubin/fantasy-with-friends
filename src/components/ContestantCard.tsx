@@ -5,6 +5,7 @@ import { Button } from './Button'
 import { t } from '../lib/i18n'
 import { useTooltipDisclosure } from '../lib/useTooltipDisclosure'
 import { CroppedPhoto } from './CroppedPhoto'
+import { CONTESTANT_CROP_SHAPE } from '../lib/photoCrop'
 
 /**
  * A contestant's bio, clipped to two lines, with the whole of it on hover.
@@ -124,12 +125,14 @@ export function ContestantCard({
         isDrafted || isEliminated ? 'opacity-50' : '',
       ].join(' ')}
     >
-      {/* Photo */}
+      {/* Photo. Shaped by a ratio rather than a fixed height, and by the same
+          ratio the crop editor frames a contestant with: the card is fluid — two
+          to a row on a phone, three on a draft board, five in the setup panel —
+          so a fixed height made it a different shape in each of those places,
+          and the frame somebody cropped to matched none of them. */}
       <div
-        className={[
-          'relative w-full overflow-hidden rounded-t-xl bg-gray-100',
-          compact ? 'h-24' : 'h-40',
-        ].join(' ')}
+        style={{ aspectRatio: CONTESTANT_CROP_SHAPE.aspect }}
+        className="relative w-full overflow-hidden rounded-t-xl bg-gray-100"
       >
         {contestant.photoUrl ? (
           <CroppedPhoto
