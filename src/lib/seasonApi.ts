@@ -4,6 +4,7 @@ import { db, functions } from './firebase'
 import { logAuditEvent } from './audit'
 import type { SeasonDetails } from './seasonDetails'
 import type { CarriedDraftSettings } from './seasonCarryOver'
+import { storedPhotoFields, type StoredPhoto } from './photoCrop'
 import type { AccentColor, SeasonState } from './types'
 import { normalizeTeamName } from './teamName'
 import type { ScoringRule, ScoringRuleDoc, SeasonDoc, SeasonMember, SeasonMemberDoc } from './types'
@@ -153,15 +154,16 @@ export async function joinSeason(
   leagueId: string,
   uid: string,
   displayName: string,
-  photoUrl?: string
+  photo?: StoredPhoto
 ): Promise<void> {
   await setDoc(doc(db, 'seasons', seasonId, 'members', uid), {
-    // uid, displayName and photoUrl are denormalized deliberately — see
+    // uid, displayName and the picture are denormalized deliberately — see
     // SeasonMemberDoc. Written here as well as by the trigger so a member is
-    // not a blank circle between joining and their next profile edit.
+    // not a blank circle between joining and their next profile edit, and the
+    // crop travels with the URL so they are not an unframed one either.
     uid,
     displayName,
-    ...(photoUrl ? { photoUrl } : {}),
+    ...storedPhotoFields(photo),
     teamName: `${displayName}'s Team`,
     pickPosition: null,
     joinedAt: Date.now(),

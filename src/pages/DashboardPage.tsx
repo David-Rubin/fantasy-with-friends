@@ -23,6 +23,7 @@ import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
 import { dashboardTrail } from '../lib/breadcrumbs'
 import { useMyJoinRequests } from '../lib/joinRequests'
+import { storedPhotoFields } from '../lib/photoCrop'
 import { leadingSeason, sortLeaguesByStatus } from '../lib/leagueStatus'
 import type { LeagueDoc, LeagueMemberDoc, SeasonDoc } from '../lib/types'
 import { t } from '../lib/i18n'
@@ -150,7 +151,7 @@ export function DashboardPage() {
       await setDoc(doc(db, 'leagues', leagueRef.id, 'members', user.uid), {
         uid: user.uid,
         displayName: userDoc.displayName,
-        ...(userDoc.photoUrl ? { photoUrl: userDoc.photoUrl } : {}),
+        ...storedPhotoFields(userDoc),
         role: 'owner',
         joinedAt: Date.now(),
       } satisfies LeagueMemberDoc)

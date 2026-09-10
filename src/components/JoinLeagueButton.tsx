@@ -44,7 +44,7 @@ export function JoinLeagueButton({
     setRequesting(true)
     setFailed(false)
     try {
-      await requestToJoin(leagueId, user.uid, userDoc.displayName, userDoc.photoUrl)
+      await requestToJoin(leagueId, user.uid, userDoc.displayName, userDoc)
     } catch (error) {
       // Without this the button would spin down and look as though it worked.
       console.error('Failed to request to join league', error)

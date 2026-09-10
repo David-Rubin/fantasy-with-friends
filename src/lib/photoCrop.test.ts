@@ -13,6 +13,7 @@ import {
   panView,
   readCrop,
   stageImageStyle,
+  storedPhotoFields,
   viewFromCrop,
   zoomView,
   type PhotoCrop,
@@ -261,6 +262,29 @@ describe('the editor stage', () => {
       const style = stageImageStyle(crop, cutoutBox(shape.aspect))
       const drawn = parseFloat(style.width) / parseFloat(style.height)
       expect(drawn).toBeCloseTo(landscape.width / landscape.height, 2)
+    }
+  })
+})
+
+describe('storedPhotoFields', () => {
+  const crop: PhotoCrop = { x: 0.1, y: 0.2, w: 0.5, h: 0.6, aspect: 4 / 3 }
+
+  it('copies the crop along with the address, never one without the other', () => {
+    expect(storedPhotoFields({ photoUrl: 'a.png', photoCrop: crop })).toEqual({
+      photoUrl: 'a.png',
+      photoCrop: crop,
+    })
+  })
+
+  it('copies an uncropped picture as just its address', () => {
+    expect(storedPhotoFields({ photoUrl: 'a.png' })).toEqual({ photoUrl: 'a.png' })
+  })
+
+  it('contributes no keys at all for a profile with no picture', () => {
+    // Firestore rejects an explicit undefined, so these have to be absent
+    // rather than present and empty.
+    for (const photo of [undefined, {}, { photoUrl: '' }, { photoCrop: crop }]) {
+      expect(storedPhotoFields(photo)).toEqual({})
     }
   })
 })

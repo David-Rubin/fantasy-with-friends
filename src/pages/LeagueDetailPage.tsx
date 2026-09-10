@@ -314,7 +314,7 @@ export function LeagueDetailPage() {
     if (!leagueId || !user || !userDoc) return
     setJoiningSeason(seasonId)
     try {
-      await joinSeason(seasonId, leagueId, user.uid, userDoc.displayName, userDoc.photoUrl)
+      await joinSeason(seasonId, leagueId, user.uid, userDoc.displayName, userDoc)
     } finally {
       setJoiningSeason(null)
     }

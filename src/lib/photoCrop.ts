@@ -281,3 +281,26 @@ export function stageImageStyle(
     top: `${(0.5 - cutout.h / 2 - crop.y * height) * 100}%`,
   }
 }
+
+/** A profile's picture, as the document that owns it stores it. */
+export interface StoredPhoto {
+  photoUrl?: string
+  photoCrop?: PhotoCrop
+}
+
+/**
+ * The picture fields to copy onto a denormalised document.
+ *
+ * Spread rather than assigned field by field, because the two travel together
+ * or not at all: a copy that took the URL and left the crop behind drew the
+ * middle of a photo somebody had deliberately framed elsewhere, which is what
+ * every roster written before this existed did. Firestore refuses an explicit
+ * `undefined`, so a profile with no picture contributes no keys at all.
+ */
+export function storedPhotoFields(photo: StoredPhoto | undefined): StoredPhoto {
+  if (!photo?.photoUrl) return {}
+  return {
+    photoUrl: photo.photoUrl,
+    ...(photo.photoCrop ? { photoCrop: photo.photoCrop } : {}),
+  }
+}

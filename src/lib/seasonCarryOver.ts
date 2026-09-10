@@ -1,4 +1,5 @@
 import { allEpisodeNumbers } from './scoringRules'
+import { storedPhotoFields } from './photoCrop'
 import type { ScoringRuleDoc, SeasonDoc, SeasonMemberDoc, SeasonState } from './types'
 
 /**
@@ -135,12 +136,14 @@ export function carriedDraftSettings(season: CarriedDraftSettings): CarriedDraft
  * `pickPosition`, which belongs to a draft that has not happened, and
  * `teamColor`, which has to be unique within a season and is handed out by the
  * onSeasonMemberWritten trigger the moment this document lands.
+ *
+ * The picture goes through storedPhotoFields so its crop comes with it.
  */
 export function carriedMember(member: SeasonMemberDoc, joinedAt: number): SeasonMemberDoc {
   return {
     uid: member.uid,
     displayName: member.displayName,
-    ...(member.photoUrl ? { photoUrl: member.photoUrl } : {}),
+    ...storedPhotoFields(member),
     teamName: member.teamName,
     pickPosition: null,
     joinedAt,

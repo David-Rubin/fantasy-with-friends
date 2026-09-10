@@ -11,6 +11,7 @@ import {
 import { db } from './firebase'
 import { listenQuery } from './listen'
 import { logAuditEvent } from './audit'
+import { storedPhotoFields, type StoredPhoto } from './photoCrop'
 import type { JoinRequestStatus, LeagueJoinRequestDoc, LeagueMemberDoc } from './types'
 
 /**
@@ -27,14 +28,14 @@ export async function requestToJoin(
   leagueId: string,
   uid: string,
   displayName: string,
-  photoUrl?: string
+  photo?: StoredPhoto
 ): Promise<void> {
   // Keyed by uid: asking twice rewrites one document instead of queueing two,
   // which is also how a rejected user asks again.
   await setDoc(doc(db, 'leagues', leagueId, 'joinRequests', uid), {
     uid,
     displayName,
-    ...(photoUrl ? { photoUrl } : {}),
+    ...storedPhotoFields(photo),
     status: 'pending',
     requestedAt: Date.now(),
     decidedAt: null,
@@ -66,7 +67,7 @@ export async function approveJoinRequest(
   request: LeagueJoinRequestDoc,
   approverUid: string
 ): Promise<void> {
-  const { uid, displayName, photoUrl } = request
+  const { uid, displayName } = request
 
   const batch = writeBatch(db)
 
@@ -77,11 +78,11 @@ export async function approveJoinRequest(
   })
 
   batch.set(doc(db, 'leagues', leagueId, 'members', uid), {
-    // uid, displayName and photoUrl are denormalized deliberately — see
-    // LeagueMemberDoc.
+    // uid, displayName and the picture are denormalized deliberately — see
+    // LeagueMemberDoc. The crop travels with the URL: see storedPhotoFields.
     uid,
     displayName,
-    ...(photoUrl ? { photoUrl } : {}),
+    ...storedPhotoFields(request),
     role: 'member',
     joinedAt: Date.now(),
   } satisfies LeagueMemberDoc)
