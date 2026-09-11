@@ -545,17 +545,22 @@ export function LeagueDetailPage() {
                     </span>
                   </span>
                   <div className="flex shrink-0 items-center gap-2">
-                    <span className="text-xs text-gray-400 capitalize">{m.role}</span>
-                    {isOwner && m.uid !== user?.uid && (
+                    {/* Either the role or a dropdown to change it, never both:
+                        the dropdown already shows the value, and the row has
+                        only so much width to spend before the name is cut to
+                        an initial and an ellipsis. */}
+                    {isOwner && m.uid !== user?.uid ? (
                       <select
                         value={m.role}
                         onChange={(e) => handleChangeRole(m.uid, e.target.value as MemberRole)}
                         className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        aria-label={`Role for ${m.displayName}`}
+                        aria-label={t('league.roleFor', { name: m.displayName })}
                       >
                         <option value="member">{t('league.roles.member')}</option>
                         <option value="admin">{t('league.roles.admin')}</option>
                       </select>
+                    ) : (
+                      <span className="text-xs text-gray-400">{t(`league.roles.${m.role}`)}</span>
                     )}
                     {/* The owner has nobody above them to be removed by, and a
                         league with no owner cannot get one back. */}

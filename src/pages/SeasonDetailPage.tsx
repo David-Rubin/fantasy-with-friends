@@ -39,6 +39,7 @@ import {
   highestScoredEpisode,
   TIMER_SECONDS_MAX,
   TIMER_SECONDS_MIN,
+  openDraftProblem,
 } from '../lib/seasonDetails'
 import { setSeasonCompleted, updateSeasonDetails } from '../lib/seasonApi'
 import { reconcilePickOrder } from '../lib/draft'
@@ -561,7 +562,12 @@ export function SeasonDetailPage() {
       )
     : null
 
-  const canOpenDraft = contestants.length >= 2 && rules.length >= 1
+  const openProblem = openDraftProblem(contestants.length, rules.length, members.length)
+  const canOpenDraft = openProblem === null
+  const openDraftHint =
+    openProblem === 'more-players-than-contestants'
+      ? t('season.openDraftTooManyPlayers')
+      : t('season.openDraftDisabled')
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
   const memberUidMap = Object.fromEntries(members.map((m) => [m.uid, m]))
   // The signed-in member's own roster row, when they have one. Everyone on this
@@ -890,7 +896,7 @@ export function SeasonDetailPage() {
               onClick={handleOpenDraft}
               loading={openingDraft}
               disabled={!canOpenDraft}
-              title={!canOpenDraft ? t('season.openDraftDisabled') : undefined}
+              title={!canOpenDraft ? openDraftHint : undefined}
             >
               {t('season.openDraft')}
             </Button>
@@ -920,9 +926,7 @@ export function SeasonDetailPage() {
               </svg>
             </p>
           )}
-          {!canOpenDraft && (
-            <p className="mt-2 text-xs text-gray-400">{t('season.openDraftDisabled')}</p>
-          )}
+          {!canOpenDraft && <p className="mt-2 text-xs text-gray-400">{openDraftHint}</p>}
         </div>
       )}
 
@@ -1166,13 +1170,15 @@ export function SeasonDetailPage() {
                     className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4"
                   >
                     <div>
-                      <p className="font-medium text-gray-900">Episode {n}</p>
+                      <p className="font-medium text-gray-900">
+                        {t('scoring.episodeTitle', { n })}
+                      </p>
                       <p className="text-xs text-gray-400">
                         {!scored
                           ? t('scoring.notScored')
                           : locked
                             ? t('scoring.submitted')
-                            : 'Unlocked for editing'}
+                            : t('scoring.unlockedForEditing')}
                       </p>
                     </div>
                     {/* Members get a way in to read the scores; the page
@@ -1202,6 +1208,9 @@ export function SeasonDetailPage() {
                         {/* Not alongside `Edit scores`, which is a link to the
                             same page — an unlocked episode an admin can still
                             edit needs one way in, not two. */}
+                        {/* A locked episode gets this alone: the unlock lives
+                            on the scorecard this opens, and a second button
+                            here led to the same page. */}
                         {scored && (locked || !canManageSeason) && (
                           <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
                             <Button variant="ghost">{t('scoring.viewScores')}</Button>
@@ -1219,14 +1228,9 @@ export function SeasonDetailPage() {
                             </Button>
                           </Link>
                         )}
-                        {canManageSeason && scored && locked && (
-                          <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
-                            <Button variant="secondary">{t('scoring.unlockEpisode')}</Button>
-                          </Link>
-                        )}
                         {canManageSeason && scored && !locked && (
                           <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
-                            <Button variant="secondary">Edit scores</Button>
+                            <Button variant="secondary">{t('scoring.editScores')}</Button>
                           </Link>
                         )}
                       </div>

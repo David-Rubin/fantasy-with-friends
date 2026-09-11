@@ -52,6 +52,27 @@ export function episodeCountProblem(
 }
 
 /**
+ * Why a season cannot be opened for drafting yet, or null when it can.
+ *
+ * Contestants are counted against the players because every team gets an
+ * equal share of the pool (see teamCapacity in functions/src/draft.ts): with
+ * more players than contestants somebody's team would be empty before the
+ * first pick. Checked here so the button says why it is disabled, and again
+ * in the startDraft Cloud Function, which is the check that actually holds —
+ * the roster can change between this page and the lobby.
+ */
+export function openDraftProblem(
+  contestantCount: number,
+  ruleCount: number,
+  playerCount: number
+): 'too-few-contestants' | 'no-rules' | 'more-players-than-contestants' | null {
+  if (contestantCount < 2) return 'too-few-contestants'
+  if (ruleCount < 1) return 'no-rules'
+  if (playerCount > contestantCount) return 'more-players-than-contestants'
+  return null
+}
+
+/**
  * The bounds on a draft pick timer, in seconds.
  *
  * Five is the floor because a turn has to be long enough to read the board and

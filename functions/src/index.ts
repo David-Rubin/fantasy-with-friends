@@ -640,9 +640,10 @@ export const startDraft = functions
       if (!seasonId) throw new functions.https.HttpsError('invalid-argument', 'seasonId required')
 
       const seasonRef = db.doc(`seasons/${seasonId}`)
-      const [seasonSnap, membersSnap, draftQuery] = await Promise.all([
+      const [seasonSnap, membersSnap, contestantsSnap, draftQuery] = await Promise.all([
         seasonRef.get(),
         db.collection(`seasons/${seasonId}/members`).get(),
+        db.collection(`seasons/${seasonId}/contestants`).get(),
         db.collection(`seasons/${seasonId}/draft`).limit(1).get(),
       ])
       if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
@@ -662,6 +663,19 @@ export const startDraft = functions
       }
       if (membersSnap.empty) {
         throw new functions.https.HttpsError('failed-precondition', 'Season has no members')
+      }
+      // Every team gets an equal share of the pool (see teamCapacity), so with
+      // more players than contestants somebody starts with nothing to pick.
+      // The season page disables opening the draft for the same reason, but
+      // the roster can change between there and here, and this is the write.
+      const draftable = contestantsSnap.docs.filter(
+        (d) => d.data().eliminatedEpisode === null
+      ).length
+      if (membersSnap.size > draftable) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'There are more players than contestants'
+        )
       }
 
       const memberUids = membersSnap.docs.map((d) => d.id)
