@@ -1,7 +1,7 @@
 # Product Requirements Document: Fantasy With Friends
 
-**Version**: 1.7
-**Date**: 2026-08-25
+**Version**: 1.8
+**Date**: 2026-09-10
 **Status**: Draft
 
 _1.1 — draft completion, timer expiry, and bench settlement revised to match the implemented behavior (3.3.1, 3.3.4, 3.3.5, 4.6, 4.9, 7.2, 8.2)._
@@ -10,6 +10,7 @@ _1.3 — invite codes replaced with request-to-join leagues (1.4, 3.1.1, 3.1.2, 
 _1.4 — league owners can rename a league, edit its description, and remove members (3.1.3, 4.9, 7.2, 10.1)._
 _1.5 — season details editable in any state by owners, admins and superadmins (3.2.3, 10.1)._
 _1.6 — the show moved from the season to the league: a league is one show (3.1.1, 3.2.1, 3.2.3, 4.3, 4.5)._
+_1.8 — a team has a fixed capacity and the draft circulates among the players with room until every team is full, so a skipped turn no longer needs settling by an Admin (3.3.1, 3.3.4, 3.3.5, 4.6)._
 _1.7 — seasons in setup are hidden from members, the draft format is shown, a drafting season can be reopened for editing, and scoring rules stay editable until the first episode is scored (3.2.1, 3.2.5, 3.3.1, 4.5, 7.2, 10.1)._
 
 ---
@@ -187,11 +188,11 @@ A single role that spans the whole app, separate from the per-league roles above
 
   **Timer expiry behavior** (what happens when a player's pick clock runs out):
 
-  | Option      | Description                                                                                                                                                                                                                                            |
-  | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | Auto-pick   | App automatically selects the first available contestant (default)                                                                                                                                                                                     |
-  | Admin picks | Draft pauses and an Admin selects on the player's behalf                                                                                                                                                                                               |
-  | Skip        | Player's turn is skipped. They receive no makeup picks. Their next opportunity is their natural next turn in the snake order. A skipped player therefore finishes a contestant short, which is settled from the bench at the end of the draft (3.3.5). |
+  | Option      | Description                                                                                                                                                                                                                                                                  |
+  | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Auto-pick   | App automatically selects the first available contestant (default)                                                                                                                                                                                                           |
+  | Admin picks | Draft pauses and an Admin selects on the player's behalf                                                                                                                                                                                                                     |
+  | Skip        | Player's turn is skipped. They receive no makeup picks. Their next opportunity is the next time the snake order reaches them — and it keeps reaching them until their team is full (3.3.4), so the cost of a skip is picking later from a thinner board, not a smaller team. |
 
 - Expiry is **decided server-side**. Clients display the countdown and prompt the server when it reaches zero, but the server re-checks its own clock and which turn it is before acting, so a disconnected player cannot stall the draft and simultaneous prompts from several clients only ever advance the turn once.
 - Under **Admin picks** the draft holds at `paused`: the turn stays with the player who missed it, the clock stops, nobody else may pick, and all participants see which player is being covered. The Admin's selection is untimed.
@@ -221,15 +222,15 @@ A single role that spans the whole app, separate from the per-league roles above
 
 **3.3.4 Draft Completion**
 
-- The draft ends on a **round boundary** — once every player has taken the same number of turns and fewer contestants remain than there are teams. It never ends mid-round, which would give players early in the order a contestant the rest never had a chance at.
-- Parity is measured in **turns taken**, not roster size. A player whose turn was skipped takes nothing that round and, with no makeup picks, can never draw level again; requiring equal rosters would leave the draft with no reachable ending.
-- Any remaining undrafted contestants are placed on a **free-agent bench**.
-- When the rounds end with every roster level, the draft closes automatically and the season transitions to `active`. A single contestant left over is simply a free agent and needs no intervention.
-- When the rounds end with **a roster short and the bench occupied** — which only happens after a skipped turn — the draft does **not** close automatically. It enters an `awaiting-close` state for an Admin to settle (below).
+- Every team has the same **capacity**: the draftable contestants divided evenly among the players, rounded down. It is fixed by the board when the draft opens, not configured.
+- The turn passes through the snake order to the **next player with room on their team**, skipping anyone already at capacity. So after a skipped turn the draft simply keeps circulating among whoever is still short — a skipped player gets their pick back around once the others are full, from whatever the board has left.
+- The draft ends when **every team is full**, or the board is bare. It never ends with a roster short while a contestant is still available.
+- The remainder the pool did not divide into — fewer than one per team — is placed on a **free-agent bench**. The draft closes automatically and the season transitions to `active`; leftovers need no intervention.
+- The one way a draft holds instead of finishing is a **stall**: under Skip, if a whole round goes by in which nobody picks, the draft enters `awaiting-close` for an Admin to settle (below) rather than cycling forever. A round with any pick in it, however many turns were skipped, is still a draft in progress — the players who skipped get their next turn in the following round before anything is decided.
 
 **3.3.5 Free-Agent Bench**
 
-- **Settling an unfinished draft**: while a draft is `awaiting-close`, an Admin can assign bench contestants to the teams that finished short. A team can be topped up to match the largest roster and no further, so this repairs a skipped turn rather than rewarding it. Only Admins can assign; members cannot claim from the bench themselves.
+- **Settling a stalled draft**: while a draft is `awaiting-close`, an Admin can assign bench contestants to the teams that are short. A team can be filled to its capacity and no further. Only Admins can assign; members cannot claim from the bench themselves.
 - The Admin must **explicitly confirm** closing the draft, whether or not they assigned anyone — leaving rosters uneven is a legitimate choice, and worth making deliberately. Only then does the season transition to `active`.
 - Admins can also assign free-agent contestants to a player's team mid-season (e.g. if rules change or a player wants to pick up an unowned contestant).
 - Free agents are visible to all members on the season page.
@@ -380,9 +381,9 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
   2. Drafted contestants — shown at the end, greyed out, bio still accessible on hover/tap, owner name displayed on the card.
 - Admin sees "Pick for [Member]" affordance on available cards during that member's turn.
 - **Team naming**: Each player sees an editable team name field in their team roster panel at all times during the draft. Name defaults to "[Player name]'s Team."
-- **Skip expiry**: When a player's timer expires and the behavior is set to "Skip," their turn is forfeited with no makeup picks. Their next pick opportunity is their natural next turn in the snake order.
+- **Skip expiry**: When a player's timer expires and the behavior is set to "Skip," their turn is forfeited with no makeup picks. Their next pick opportunity is the next time the snake order reaches them, and the order keeps reaching them — passing over players whose teams are already full — until their own team is (3.3.4).
 
-**Settling up (only when a roster finished short and the bench is occupied)**
+**Settling up (only when the draft stalled with players still short)**
 
 - All participants see that picking has finished and how many contestants remain on the bench.
 - The Admin sees each bench contestant alongside the teams with open slots, and a "Close draft" action that asks for confirmation — naming how many would be left behind — before it commits.
@@ -426,7 +427,7 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 | Season in `setup` with no rules   | "Open Draft" is disabled with tooltip explanation                                                               |
 | Draft room — player disconnects   | Reconnects automatically; expiry is judged from stored state, so their turn resolves whether or not they return |
 | Draft room — everyone disconnects | Nothing resolves until someone reopens the room, at which point the expired turn is applied from stored state   |
-| Draft ends with a roster short    | Draft holds at `awaiting-close` for an Admin to settle from the bench (3.3.5)                                   |
+| Draft stalls with a roster short  | Draft holds at `awaiting-close` for an Admin to settle from the bench (3.3.5)                                   |
 | Non-member opens a season page    | "You're not a member of this season." with a link back to the league                                            |
 | Join request rejected             | League page says the request was declined; the button returns to "Join"                                         |
 | Removing a member mid-season      | Refused, naming the seasons that are drafting or active                                                         |

@@ -13,11 +13,11 @@ import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/fire
 // change than the reason for it warrants.
 import { calcTeamTotal, calcTeamEpisodeTotals } from './scoring'
 import {
-  nextSlot,
-  pickerAt,
+  nextTurn,
+  teamCapacity,
   draftOutcome,
   openSlots,
-  skipLimitReached,
+  draftStalled,
   resolvePickOrder,
 } from './draft'
 import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
@@ -300,6 +300,7 @@ export const submitPick = functions
         throw new functions.https.HttpsError('not-found', 'Season not found')
       }
       const leagueId = seasonSnap.data()?.leagueId as string
+      const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
 
       // Proxy picks (PRD 3.3.2) are admin-only, and get recorded with the acting
       // admin's id so the audit trail shows who actually pressed the button.
@@ -374,42 +375,17 @@ export const submitPick = functions
           draftedRound: draft.currentRound,
         })
 
-        // The draft finishes on a round boundary once too few contestants remain
-        // to give everyone one more. If a roster is short and the bench still has
-        // someone on it, an admin settles that before the draft closes.
-        const remaining = allContestants.docs.filter(
-          (d) =>
-            !d.data().draftedByUid && d.data().eliminatedEpisode === null && d.id !== contestantId
-        ).length
-        const rosterCounts = countRosters(allContestants.docs, pickOrder, contestantId, pickerUid)
-
-        const outcome = draftOutcome(
-          draft.currentPickNumber as number,
-          pickOrder.length,
-          remaining,
-          rosterCounts
-        )
-
-        if (outcome !== 'continue') {
-          tx.update(draftRef, { status: outcome, currentPickerUid: null, timerExpiresAt: null })
-          if (outcome === 'complete') tx.update(seasonRef, { state: 'active' })
-          return { status: outcome }
+        // The draft finishes once every team is full. Until then the turn goes
+        // to the next player in the snake with room, past anyone already full.
+        const board = boardState(allContestants.docs, pickOrder, contestantId, pickerUid)
+        if (draftOutcome(board.remaining, board.rosterCounts, board.capacity) === 'complete') {
+          tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+          tx.update(seasonRef, { state: 'active' })
+          return { status: 'complete' as const }
         }
 
-        const next = nextSlot(
-          pickOrder,
-          draft.currentRound as number,
-          draft.currentPickNumber as number
-        )
-        tx.update(draftRef, {
-          status: 'active',
-          currentRound: next.round,
-          currentPickNumber: next.pickNumber,
-          currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
-          timerExpiresAt: Date.now() + ((seasonSnap.data()?.timerSeconds as number) ?? 60) * 1000,
-          // Somebody picked, so the room is not abandoned.
-          consecutiveSkips: 0,
-        })
+        // Somebody picked, so the room is not abandoned.
+        advanceTurn(tx, draftRef, pickOrder, draft, board, timerSeconds)
         return { status: 'active' as const }
       })
 
@@ -551,81 +527,78 @@ export const resolveExpiredTurn = functions.runWith(INTERACTIVE).https.onCall(
         })
         tx.update(chosen.ref, { draftedByUid: missedUid, draftedRound: draft.currentRound })
 
-        const autoOutcome = draftOutcome(
-          draft.currentPickNumber as number,
-          pickOrder.length,
-          undrafted.length - 1,
-          countRosters(allContestants.docs, pickOrder, chosen.id, missedUid)
-        )
-        if (autoOutcome !== 'continue') {
-          tx.update(draftRef, {
-            status: autoOutcome,
-            currentPickerUid: null,
-            timerExpiresAt: null,
-          })
-          if (autoOutcome === 'complete') tx.update(seasonRef, { state: 'active' })
-          return { outcome: 'auto-picked' as const, status: autoOutcome }
+        const board = boardState(allContestants.docs, pickOrder, chosen.id, missedUid)
+        if (draftOutcome(board.remaining, board.rosterCounts, board.capacity) === 'complete') {
+          tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+          tx.update(seasonRef, { state: 'active' })
+          return { outcome: 'auto-picked' as const, status: 'complete' }
         }
-        advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds)
+        advanceTurn(tx, draftRef, pickOrder, draft, board, timerSeconds)
         return { outcome: 'auto-picked' as const, status: 'active' }
       }
 
       // Skip: the turn passes with nothing taken. No makeup pick — their next
-      // chance is their natural next turn (PRD 3.3.1). The board is unchanged,
-      // but a skip still consumes the slot, so this can be the turn that carries
-      // the draft over a round boundary. It is also the turn most likely to leave
-      // a roster short, which is what hands the ending to an admin.
-      const skipOutcome = draftOutcome(
-        draft.currentPickNumber as number,
-        pickOrder.length,
-        undrafted.length,
-        countRosters(allContestants.docs, pickOrder)
-      )
-      if (skipOutcome !== 'continue') {
-        tx.update(draftRef, { status: skipOutcome, currentPickerUid: null, timerExpiresAt: null })
-        if (skipOutcome === 'complete') tx.update(seasonRef, { state: 'active' })
-        return { outcome: 'skipped' as const, status: skipOutcome }
-      }
+      // chance is the next time the rotation reaches them (PRD 3.3.1), which it
+      // keeps doing until their team is full. The board is unchanged, so this
+      // cannot finish the draft; it can only stall it.
+      const board = boardState(allContestants.docs, pickOrder)
 
-      // A skip that finishes a full lap of the order without anybody picking
-      // means the room has emptied out. Halt for an admin rather than cycling.
-      const consecutiveSkips = ((draft.consecutiveSkips as number) ?? 0) + 1
-      if (skipLimitReached(consecutiveSkips, pickOrder.length)) {
+      // A skip that closes a round in which nobody picked means the room has
+      // emptied out. Halt for an admin rather than cycling.
+      const next = nextTurn(
+        pickOrder,
+        draft.currentRound as number,
+        draft.currentPickNumber as number,
+        board.rosterCounts,
+        board.capacity
+      )
+      const lastPickRound = (draft.lastPickRound as number | null | undefined) ?? null
+      if (draftStalled(draft.currentRound as number, next?.round ?? null, lastPickRound)) {
         tx.update(draftRef, {
           status: 'awaiting-close',
           haltedReason: 'skips',
-          consecutiveSkips,
           currentPickerUid: null,
           timerExpiresAt: null,
         })
         return { outcome: 'halted' as const, status: 'awaiting-close' }
       }
 
-      advanceTurn(tx, draftRef, pickOrder, draft, timerSeconds, consecutiveSkips)
+      tx.update(draftRef, turnUpdate(next!, timerSeconds))
       return { outcome: 'skipped' as const, status: 'active' }
     })
   }
 )
 
 /**
- * Contestants held per team, in pickOrder order.
+ * The board as the turn logic sees it: who holds how many, how many are still
+ * to be had, and how many make a team full.
  *
  * `pendingId`/`pendingUid` let a caller count a pick that is being written in
  * the same transaction and so is not yet reflected in the snapshot.
  */
-function countRosters(
+interface BoardState {
+  /** Contestants held per team, in pickOrder order. */
+  rosterCounts: number[]
+  /** Undrafted, uneliminated contestants. */
+  remaining: number
+  /** See teamCapacity. */
+  capacity: number
+}
+
+function boardState(
   docs: FirebaseFirestore.QueryDocumentSnapshot[],
   pickOrder: string[],
   pendingId?: string,
   pendingUid?: string
-): number[] {
-  return pickOrder.map(
-    (uid) =>
-      docs.filter((d) => {
-        const owner = d.id === pendingId ? pendingUid : (d.data().draftedByUid as string | null)
-        return owner === uid
-      }).length
-  )
+): BoardState {
+  const ownerOf = (d: FirebaseFirestore.QueryDocumentSnapshot): string | null =>
+    d.id === pendingId ? (pendingUid ?? null) : ((d.data().draftedByUid as string | null) ?? null)
+  const draftable = docs.filter((d) => d.data().eliminatedEpisode === null)
+  return {
+    rosterCounts: pickOrder.map((uid) => docs.filter((d) => ownerOf(d) === uid).length),
+    remaining: draftable.filter((d) => !ownerOf(d)).length,
+    capacity: teamCapacity(draftable.length, pickOrder.length),
+  }
 }
 
 // ── Draft: opening the board ─────────────────────────────────────────────────
@@ -708,7 +681,7 @@ export const startDraft = functions
         currentPickNumber: 1,
         pickOrder,
         timerExpiresAt,
-        consecutiveSkips: 0,
+        lastPickRound: null,
         haltedReason: null,
         timerPausedRemainingMs: null,
       })
@@ -851,11 +824,12 @@ export const setTimerPaused = functions
 // ── Draft: bench assignment and closing ───────────────────────────────────────
 
 /**
- * Give a bench contestant to a team that finished a roster short.
+ * Give a bench contestant to a team that is short after a stalled draft.
  *
  * Only reachable while the draft is `awaiting-close`, and only by an admin —
- * members do not get to top themselves up. A team can be brought level with the
- * largest roster and no further, so this repairs a skip rather than rewarding it.
+ * members do not get to top themselves up. A team can be filled to capacity and
+ * no further, so this finishes what the rotation could not rather than
+ * rewarding anybody.
  */
 export const assignFromBench = functions.https.onCall(
   async (data: { seasonId: string; contestantId: string; toUid: string }, context) => {
@@ -912,12 +886,12 @@ export const assignFromBench = functions.https.onCall(
       }
 
       const pickOrder = (draft.pickOrder ?? []) as string[]
-      const rosterCounts = countRosters(allContestants.docs, pickOrder)
+      const board = boardState(allContestants.docs, pickOrder)
       const idx = pickOrder.indexOf(toUid)
       if (idx === -1) {
         throw new functions.https.HttpsError('failed-precondition', 'That member is not drafting')
       }
-      if (openSlots(rosterCounts[idx], rosterCounts) === 0) {
+      if (openSlots(board.rosterCounts[idx], board.capacity) === 0) {
         throw new functions.https.HttpsError(
           'failed-precondition',
           'That team has no open slots left'
@@ -1083,28 +1057,48 @@ export const reopenSeasonSetup = functions.https.onCall(
 )
 
 /**
- * Hand the turn to the next player.
+ * Hand the turn to the next player with room on their team, after a pick.
  *
- * `consecutiveSkips` defaults to 0 because most callers got here by way of a
- * pick, and a pick is what proves the draft is still moving.
+ * Callers check draftOutcome first, so somebody always has room here; the
+ * throw is a guard against the two disagreeing, not a case that happens.
+ *
+ * Records the round the pick fell in, which is what a later skip checks to
+ * tell a round that is merely thinning out from one nobody is picking in.
+ * Skips write their own turn — see resolveExpiredTurn.
  */
 function advanceTurn(
   tx: FirebaseFirestore.Transaction,
   draftRef: FirebaseFirestore.DocumentReference,
   pickOrder: string[],
   draft: FirebaseFirestore.DocumentData,
-  timerSeconds: number,
-  consecutiveSkips = 0
+  board: BoardState,
+  timerSeconds: number
 ) {
-  const next = nextSlot(pickOrder, draft.currentRound as number, draft.currentPickNumber as number)
-  tx.update(draftRef, {
+  const next = nextTurn(
+    pickOrder,
+    draft.currentRound as number,
+    draft.currentPickNumber as number,
+    board.rosterCounts,
+    board.capacity
+  )
+  if (!next) {
+    throw new functions.https.HttpsError('internal', 'No player has room left to pick')
+  }
+  tx.update(draftRef, { ...turnUpdate(next, timerSeconds), lastPickRound: draft.currentRound })
+}
+
+/** The fields that move the draft on to a given turn and start its clock. */
+function turnUpdate(
+  next: { round: number; pickNumber: number; uid: string },
+  timerSeconds: number
+): FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData> {
+  return {
     status: 'active',
     currentRound: next.round,
     currentPickNumber: next.pickNumber,
-    currentPickerUid: pickerAt(pickOrder, next.round, next.pickNumber),
+    currentPickerUid: next.uid,
     timerExpiresAt: Date.now() + timerSeconds * 1000,
-    consecutiveSkips,
-  })
+  }
 }
 
 /**
