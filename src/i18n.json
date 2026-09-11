@@ -30,7 +30,6 @@
   "dashboard.createLeague": "Create a league",
   "dashboard.noLeagues": "You're not in any leagues yet.",
   "dashboard.noLeaguesSubtext": "Create a league, or join one from the list below.",
-  "dashboard.viewSeason": "View season",
   "dashboard.joinDraft": "Join draft",
   "dashboard.currentEpisode": "Episode {n}",
   "dashboard.myLeagues": "Your leagues",

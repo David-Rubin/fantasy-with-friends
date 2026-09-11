@@ -179,47 +179,12 @@ export function DashboardPage() {
   // The leagues in the order they should be read — see sortLeaguesByStatus.
   const sortedLeagues = sortLeaguesByStatus(leagues)
 
-  // The one season worth putting at the top of the page: whatever is furthest
-  // up the same precedence order, provided it is something to act on. A season
-  // in setup or already over has nothing here for anybody, so the card stays
-  // away rather than pointing at it.
-  const featuredSeason = sortedLeagues.flatMap((l) =>
-    l.currentSeason && ['draft', 'active'].includes(l.currentSeason.state)
-      ? [{ ...l, season: l.currentSeason }]
-      : []
-  )[0]
-
   return (
     <Layout breadcrumbs={dashboardTrail()}>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('dashboard.title')}</h1>
         <Button onClick={() => setCreateOpen(true)}>{t('dashboard.createLeague')}</Button>
       </div>
-
-      {/* Featured season */}
-      {featuredSeason && (
-        <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <SeasonStateBadge state={featuredSeason.season.state} />
-              <h2 className="mt-2 text-xl font-semibold text-gray-900">
-                {featuredSeason.league.showName}
-              </h2>
-              <p className="text-sm text-gray-500">{featuredSeason.season.label}</p>
-              <p className="mt-1 text-sm text-gray-500">{featuredSeason.league.name}</p>
-            </div>
-            <Link
-              to={`/leagues/${featuredSeason.id}/seasons/${featuredSeason.season.id}${featuredSeason.season.state === 'draft' ? '/draft' : ''}`}
-            >
-              <Button>
-                {featuredSeason.season.state === 'draft'
-                  ? t('dashboard.joinDraft')
-                  : t('dashboard.viewSeason')}
-              </Button>
-            </Link>
-          </div>
-        </div>
-      )}
 
       {/* Leagues this user belongs to */}
       {loading ? (
