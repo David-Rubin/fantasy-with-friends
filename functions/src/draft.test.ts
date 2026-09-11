@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   nextSlot,
+  nextTurn,
   pickerAt,
-  isDraftComplete,
+  teamCapacity,
   draftOutcome,
   openSlots,
-  skipLimitReached,
+  draftStalled,
   reconcilePickOrder,
   resolvePickOrder,
 } from './draft'
@@ -23,7 +24,8 @@ describe('nextSlot', () => {
 
   it('keeps going past the round count a full board would imply', () => {
     // Skipped turns burn slots without taking anyone, so a draft can run well
-    // past the rounds its contestant count first suggested.
+    // past the rounds its contestant count first suggested, until the skipped
+    // player has caught up.
     expect(nextSlot(twoTeams, 7, 2)).toEqual({ round: 8, pickNumber: 1 })
   })
 })
@@ -47,119 +49,154 @@ describe('pickerAt', () => {
   })
 })
 
-describe('isDraftComplete', () => {
-  it('does not end mid-round, even with too few left for everyone', () => {
-    // 3 teams, slot 2 of the round used, 1 contestant left. Ending here would
-    // give the player at slot 3 nothing while slots 1 and 2 both drafted.
-    expect(isDraftComplete(2, 3, 1)).toBe(false)
+describe('teamCapacity', () => {
+  it('shares the pool out evenly', () => {
+    expect(teamCapacity(12, 4)).toBe(3)
   })
 
-  it('ends on a round boundary when too few remain for another full round', () => {
-    expect(isDraftComplete(3, 3, 2)).toBe(true)
+  it('leaves the remainder for the bench', () => {
+    // 5 across 2 teams: 2 each, one free agent.
+    expect(teamCapacity(5, 2)).toBe(2)
   })
 
-  it('continues when exactly enough remain for another full round', () => {
-    expect(isDraftComplete(3, 3, 3)).toBe(false)
+  it('is at least one when the pool is smaller than the field', () => {
+    // Zero would call every team full before anybody picked.
+    expect(teamCapacity(3, 4)).toBe(1)
   })
 
-  it('ends the moment the board empties, whatever the slot', () => {
-    // The backstop: nothing left to draft, so there is nothing to continue for
-    // even mid-round with uneven rosters after skips.
-    expect(isDraftComplete(1, 3, 0)).toBe(true)
+  it('is zero with no teams, rather than dividing by nothing', () => {
+    expect(teamCapacity(5, 0)).toBe(0)
+  })
+})
+
+describe('nextTurn', () => {
+  const order = ['alice', 'bob', 'cara']
+
+  it('is the next slot in the snake when everyone has room', () => {
+    expect(nextTurn(order, 1, 1, [1, 0, 0], 2)).toEqual({ round: 1, pickNumber: 2, uid: 'bob' })
+    expect(nextTurn(order, 1, 3, [1, 1, 1], 2)).toEqual({ round: 2, pickNumber: 1, uid: 'cara' })
   })
 
-  it('walks the 2-team, 5-contestant draft to a single free agent', () => {
-    const teams = 2
-    // R1P1 -> 4 left, R1P2 -> 3 left, R2P1 -> 2 left, R2P2 -> 1 left
-    expect(isDraftComplete(1, teams, 4)).toBe(false)
-    expect(isDraftComplete(2, teams, 3)).toBe(false) // boundary, 3 >= 2, keep going
-    expect(isDraftComplete(1, teams, 2)).toBe(false)
-    expect(isDraftComplete(2, teams, 1)).toBe(true) // boundary, 1 < 2, done
-    // Both teams hold 2, one contestant is left over as a free agent.
+  it('passes over a player whose team is full', () => {
+    // Cara is full; the round-2 slot that would be hers goes to bob instead.
+    expect(nextTurn(order, 1, 3, [1, 1, 2], 2)).toEqual({ round: 2, pickNumber: 2, uid: 'bob' })
   })
 
-  it('walks the 2-team, 4-contestant draft to no free agents', () => {
-    const teams = 2
-    expect(isDraftComplete(1, teams, 3)).toBe(false)
-    expect(isDraftComplete(2, teams, 2)).toBe(false) // boundary, 2 >= 2, keep going
-    expect(isDraftComplete(1, teams, 1)).toBe(false)
-    expect(isDraftComplete(2, teams, 0)).toBe(true) // board empty
+  it('keeps circulating back to the one player still short', () => {
+    // Alice was skipped once. Everyone else is full, so the rotation runs on
+    // to the next slot that is hers, however far away that is.
+    expect(nextTurn(order, 2, 3, [1, 2, 2], 2)).toEqual({ round: 3, pickNumber: 1, uid: 'alice' })
+    expect(nextTurn(order, 3, 1, [1, 2, 2], 2)).toEqual({ round: 4, pickNumber: 3, uid: 'alice' })
   })
 
-  it('stays reachable after a skip has made rosters uneven', () => {
-    // Parity is counted in turns, not rosters. A skipped player can never draw
-    // level again (no makeup picks), so a roster-equality rule would never fire
-    // and the draft would drain the board instead of stopping.
-    const teams = 2
-    expect(isDraftComplete(2, teams, 1)).toBe(true)
+  it('is null once every team is full', () => {
+    expect(nextTurn(order, 2, 1, [2, 2, 2], 2)).toBeNull()
+  })
+
+  it('finds the last player short from any slot', () => {
+    // Consecutive snake slots double up at the turn, so a single lap from some
+    // slots never visits some players. Two laps must reach anybody.
+    for (let round = 1; round <= 4; round++) {
+      for (let pickNumber = 1; pickNumber <= order.length; pickNumber++) {
+        expect(nextTurn(order, round, pickNumber, [2, 1, 2], 2)?.uid).toBe('bob')
+      }
+    }
   })
 })
 
 describe('draftOutcome', () => {
-  it('keeps going while the finish condition is unmet', () => {
-    expect(draftOutcome(1, 2, 4, [1, 0])).toBe('continue')
+  it('keeps going while somebody has room', () => {
+    expect(draftOutcome(4, [1, 0], 2)).toBe('continue')
   })
 
-  it('closes outright when everyone is level and the board is bare', () => {
-    expect(draftOutcome(2, 2, 0, [2, 2])).toBe('complete')
+  it('closes once every team is full, with the leftovers as free agents', () => {
+    // The 2-team, 5-contestant ending: nobody is short, so the spare is simply
+    // a free agent and there is nothing for an admin to settle.
+    expect(draftOutcome(1, [2, 2], 2)).toBe('complete')
   })
 
-  it('closes outright when everyone is level and a contestant is spare', () => {
-    // The 2-team, 5-contestant ending: nobody is short, so the leftover is
-    // simply a free agent and there is nothing for an admin to settle.
-    expect(draftOutcome(2, 2, 1, [2, 2])).toBe('complete')
+  it('closes the moment the board empties, whatever the rosters', () => {
+    expect(draftOutcome(0, [2, 1], 2)).toBe('complete')
   })
 
-  it('waits for an admin when a roster is short and the bench is not empty', () => {
-    // The skip case: one player took a turn fewer, and a contestant is going
-    // spare that could fill the gap.
-    expect(draftOutcome(2, 2, 1, [1, 2])).toBe('awaiting-close')
+  it('does not close on a round boundary while a skipped player is short', () => {
+    // Under the old rule this was the awaiting-close case. Now the draft just
+    // carries on to alice, who still has room.
+    expect(draftOutcome(1, [1, 2], 2)).toBe('continue')
   })
 
-  it('closes outright when a roster is short but nothing is left to give', () => {
-    // Uneven, but the bench is empty — an admin has no decision to make.
-    expect(draftOutcome(2, 2, 0, [1, 2])).toBe('complete')
+  it('walks a 3-team, 7-contestant draft with a skip through to the end', () => {
+    const order = ['alice', 'bob', 'cara']
+    const capacity = teamCapacity(7, 3) // 2 each, one free agent
+    const rosters = [0, 0, 0]
+    let remaining = 7
+    let turn = { round: 1, pickNumber: 0, uid: '' }
+    const picks: string[] = []
+    // Cara's clock expires under skip in round 1; every other turn is a pick.
+    for (let guard = 0; guard < 20; guard++) {
+      const next = nextTurn(order, turn.round, turn.pickNumber, rosters, capacity)
+      expect(next).not.toBeNull()
+      turn = next!
+      if (turn.round === 1 && turn.uid === 'cara') continue
+      rosters[order.indexOf(turn.uid)]++
+      remaining--
+      picks.push(`R${turn.round} ${turn.uid}`)
+      if (draftOutcome(remaining, rosters, capacity) === 'complete') break
+    }
+    // Round 2 runs backwards; cara's makeup comes only once the others are full.
+    expect(picks).toEqual(['R1 alice', 'R1 bob', 'R2 cara', 'R2 bob', 'R2 alice', 'R3 cara'])
+    expect(rosters).toEqual([2, 2, 2])
+    expect(remaining).toBe(1)
   })
 })
 
 describe('openSlots', () => {
-  it('is the gap up to the largest roster', () => {
-    expect(openSlots(1, [1, 3])).toBe(2)
+  it('is the gap up to capacity', () => {
+    expect(openSlots(1, 3)).toBe(2)
   })
 
-  it('is zero for a team already at the top', () => {
-    expect(openSlots(3, [1, 3])).toBe(0)
+  it('is zero for a full team', () => {
+    expect(openSlots(3, 3)).toBe(0)
   })
 
   it('never goes negative', () => {
-    expect(openSlots(5, [1, 3])).toBe(0)
-  })
-
-  it('is zero when everyone is level', () => {
-    expect(openSlots(2, [2, 2, 2])).toBe(0)
+    expect(openSlots(5, 3)).toBe(0)
   })
 })
 
-describe('skipLimitReached', () => {
-  it('allows each player one missed turn', () => {
-    // 3 players, two turns skipped — somebody may still be about to pick.
-    expect(skipLimitReached(2, 3)).toBe(false)
+describe('draftStalled', () => {
+  it('does not stall mid-round, however many turns were skipped', () => {
+    // Round 1 still has turns to come.
+    expect(draftStalled(1, 1, null)).toBe(false)
   })
 
-  it('halts once every player has passed without picking', () => {
-    expect(skipLimitReached(3, 3)).toBe(true)
+  it('does not stall at the end of a round that had a pick in it', () => {
+    // 5 contestants, 4 players: alice and bob picked, cara and dan skipped.
+    // Two skips against two players short is not a lap — the round had picks,
+    // and neither cara nor dan has yet been offered a second turn.
+    expect(draftStalled(1, 2, 1)).toBe(false)
   })
 
-  it('halts if the count somehow overshoots', () => {
-    expect(skipLimitReached(5, 3)).toBe(true)
+  it('stalls once a round closes with nothing picked in it', () => {
+    // Round 2 came back round to dan and cara and both let it pass again.
+    expect(draftStalled(2, 3, 1)).toBe(true)
   })
 
-  it('does not halt a draft that has not skipped at all', () => {
-    expect(skipLimitReached(0, 3)).toBe(false)
+  it('stalls when a round with no picks at all closes', () => {
+    // Nobody has picked yet and the first round is over: an empty room.
+    expect(draftStalled(1, 2, null)).toBe(true)
   })
 
-  it('is inert with no players, rather than halting instantly', () => {
-    expect(skipLimitReached(0, 0)).toBe(false)
+  it('stalls if the rotation finds nobody with room', () => {
+    // Cannot happen after a skip — the skipper has room — but a null next
+    // turn must not be handed to the clock.
+    expect(draftStalled(2, null, 2)).toBe(true)
+  })
+
+  it('treats a round the rotation jumps over as closing this one', () => {
+    // The only player short sits at slot 1; the snake reaches them next two
+    // rounds on. The round they just skipped in had no pick, so: stalled.
+    expect(draftStalled(3, 5, 2)).toBe(true)
   })
 })
 

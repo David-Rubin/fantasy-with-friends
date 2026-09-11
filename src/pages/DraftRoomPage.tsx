@@ -22,7 +22,7 @@ import type {
   MemberRole,
   Contestant,
 } from '../lib/types'
-import { draftRoomShouldRedirect } from '../lib/draft'
+import { draftRoomShouldRedirect, teamCapacity } from '../lib/draft'
 import { takenTeamColors, teamColorFor, teamHoldingColor } from '../lib/teamColor'
 import { accentLeftBorder } from '../components/accentStyles'
 import {
@@ -127,7 +127,7 @@ export function DraftRoomPage() {
     try {
       await setTimerPaused({ seasonId, paused: !timerPaused })
     } catch (error) {
-      setPickError((error as { message?: string }).message ?? 'Could not change the timer.')
+      setPickError((error as { message?: string }).message ?? t('draft.error.toggleTimer'))
       console.error('Timer toggle rejected', error)
     } finally {
       setTogglingTimer(false)
@@ -192,14 +192,19 @@ export function DraftRoomPage() {
   const available = contestants.filter((c) => !c.draftedByUid && c.eliminatedEpisode === null)
   const drafted = contestants.filter((c) => c.draftedByUid)
 
-  // Bench settlement: the picking rounds are over, but somebody finished short
-  // and contestants are going spare. An admin tops up and confirms the close.
+  // Bench settlement: a whole round went by with nobody picking, so the draft
+  // halted with contestants going spare. An admin tops up and confirms
+  // the close. Open slots are measured against the same capacity the server
+  // enforces in assignFromBench.
   const isAwaitingClose = draft?.status === 'awaiting-close'
   const haltedForSkips = draft?.haltedReason === 'skips'
-  const rosterSizes = members.map((m) => contestants.filter((c) => c.draftedByUid === m.uid).length)
-  const largestRoster = rosterSizes.length ? Math.max(...rosterSizes) : 0
+  const draftable = contestants.filter((c) => c.eliminatedEpisode === null).length
+  const capacity = teamCapacity(draftable, members.length)
   const teamsWithSlots = members
-    .map((m, i) => ({ member: m, openSlots: largestRoster - rosterSizes[i] }))
+    .map((m) => ({
+      member: m,
+      openSlots: Math.max(0, capacity - contestants.filter((c) => c.draftedByUid === m.uid).length),
+    }))
     .filter((t) => t.openSlots > 0)
 
   async function handleAssignFromBench(contestantId: string, toUid: string) {
@@ -209,7 +214,7 @@ export function DraftRoomPage() {
     try {
       await assignFromBench({ seasonId, contestantId, toUid })
     } catch (error) {
-      setPickError((error as { message?: string }).message ?? 'Could not assign that contestant.')
+      setPickError((error as { message?: string }).message ?? t('draft.settle.assignFailed'))
       console.error('Bench assignment rejected', error)
     } finally {
       setAssigning(false)
@@ -240,7 +245,7 @@ export function DraftRoomPage() {
       await closeDraft({ seasonId })
       setConfirmClose(false)
     } catch (error) {
-      setPickError((error as { message?: string }).message ?? 'Could not close the draft.')
+      setPickError((error as { message?: string }).message ?? t('draft.settle.closeFailed'))
       console.error('Close draft rejected', error)
     } finally {
       setAssigning(false)
@@ -265,7 +270,7 @@ export function DraftRoomPage() {
       const { data } = await startDraft({ seasonId })
       trackEvent('draft_started', { season_id: seasonId, player_count: data.pickOrder.length })
     } catch (error) {
-      setPickError((error as { message?: string }).message ?? 'Could not start the draft.')
+      setPickError((error as { message?: string }).message ?? t('draft.error.start'))
       console.error('Start draft rejected', error)
     } finally {
       setStartingDraft(false)
@@ -295,8 +300,7 @@ export function DraftRoomPage() {
       }
       // The draft listener applies the new state — nothing to set here.
     } catch (error) {
-      const message =
-        (error as { message?: string }).message ?? 'Could not submit that pick. Try again.'
+      const message = (error as { message?: string }).message ?? t('draft.error.pick')
       setPickError(message)
       console.error('Pick rejected', error)
     } finally {
@@ -305,7 +309,8 @@ export function DraftRoomPage() {
   }
 
   const currentPickerName = draft?.currentPickerUid
-    ? (members.find((m) => m.uid === draft.currentPickerUid)?.displayName ?? 'Unknown')
+    ? (members.find((m) => m.uid === draft.currentPickerUid)?.displayName ??
+      t('draft.unknownPicker'))
     : ''
 
   const myMember = members.find((m) => m.uid === user?.uid)
@@ -446,21 +451,22 @@ export function DraftRoomPage() {
       {isAwaitingClose && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
           <h2 className="text-lg font-semibold text-blue-900">
-            {haltedForSkips ? 'Draft paused — nobody is picking' : 'Draft picking is finished'}
+            {haltedForSkips ? t('draft.settle.titleStalled') : t('draft.settle.titleFinished')}
           </h2>
           <p className="mt-1 text-sm text-blue-800">
-            {haltedForSkips ? (
-              <>
-                Every player&rsquo;s turn passed without a pick, so the draft stopped rather than
-                cycling.{' '}
-              </>
-            ) : null}
-            {available.length} {available.length === 1 ? 'contestant is' : 'contestants are'} still
-            on the bench, and{' '}
-            {teamsWithSlots.length === 1
-              ? '1 team has an open slot'
-              : `${teamsWithSlots.length} teams have open slots`}
-            . {isAdmin ? 'Fill them from the bench, or close as is.' : 'An admin is settling up.'}
+            {t('draft.settle.summary', {
+              bench:
+                available.length === 1
+                  ? t('draft.settle.benchCountOne')
+                  : t('draft.settle.benchCount', { n: available.length }),
+              teams:
+                teamsWithSlots.length === 1
+                  ? t('draft.settle.openTeamsOne')
+                  : t('draft.settle.openTeams', { n: teamsWithSlots.length }),
+            })}{' '}
+            {isAdmin
+              ? teamsWithSlots.length > 0 && t('draft.settle.adminPrompt')
+              : t('draft.settle.memberPrompt')}
           </p>
 
           {pickError && (
@@ -478,11 +484,11 @@ export function DraftRoomPage() {
                 >
                   <span className="font-medium text-gray-900 flex-1 min-w-0">{c.name}</span>
                   {teamsWithSlots.length === 0 ? (
-                    <span className="text-sm text-gray-500">No open slots</span>
+                    <span className="text-sm text-gray-500">{t('draft.settle.noOpenSlots')}</span>
                   ) : (
                     <>
                       <label className="sr-only" htmlFor={`assign-${c.id}`}>
-                        Assign {c.name} to a team
+                        {t('draft.settle.assignLabel', { name: c.name })}
                       </label>
                       <select
                         id={`assign-${c.id}`}
@@ -493,10 +499,13 @@ export function DraftRoomPage() {
                         }}
                         className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
-                        <option value="">Assign to…</option>
+                        <option value="">{t('draft.settle.assignPlaceholder')}</option>
                         {teamsWithSlots.map(({ member, openSlots }) => (
                           <option key={member.uid} value={member.uid}>
-                            {member.displayName} ({openSlots} open)
+                            {t('draft.settle.assignOption', {
+                              name: member.displayName,
+                              n: openSlots,
+                            })}
                           </option>
                         ))}
                       </select>
@@ -505,25 +514,33 @@ export function DraftRoomPage() {
                 </div>
               ))}
 
+              {/* Closing is confirmed only while there is a choice to make —
+                  contestants still on the bench and a team that could take one.
+                  With every team full, closing is the only thing left to do. */}
               <div className="mt-2">
-                {confirmClose ? (
+                {confirmClose && teamsWithSlots.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-3">
                     <p className="text-sm text-blue-900">
-                      Close the draft
                       {available.length > 0
-                        ? ` with ${available.length} still on the bench?`
-                        : '?'}{' '}
-                      This cannot be undone.
+                        ? t('draft.settle.confirmWithBench', { n: available.length })
+                        : t('draft.settle.confirm')}
                     </p>
                     <Button onClick={handleCloseDraft} loading={assigning}>
-                      Yes, close it
+                      {t('draft.settle.confirmYes')}
                     </Button>
                     <Button variant="secondary" onClick={() => setConfirmClose(false)}>
-                      Cancel
+                      {t('common.cancel')}
                     </Button>
                   </div>
                 ) : (
-                  <Button onClick={() => setConfirmClose(true)}>Close draft</Button>
+                  <Button
+                    onClick={() =>
+                      teamsWithSlots.length > 0 ? setConfirmClose(true) : handleCloseDraft()
+                    }
+                    loading={assigning}
+                  >
+                    {t('draft.settle.close')}
+                  </Button>
                 )}
               </div>
             </div>
@@ -545,11 +562,9 @@ export function DraftRoomPage() {
               />
               <div>
                 <p className="font-semibold text-amber-900">
-                  {currentPickerName} ran out of time — an admin is picking for them
+                  {t('draft.adminPicking.title', { name: currentPickerName })}
                 </p>
-                <p className="text-sm text-amber-700">
-                  The draft is paused. No one else can pick until this is done.
-                </p>
+                <p className="text-sm text-amber-700">{t('draft.adminPicking.body')}</p>
               </div>
             </div>
           ) : timerPaused ? (
@@ -559,11 +574,12 @@ export function DraftRoomPage() {
             >
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-gray-900">
-                  Clock paused — {currentPickerName}&rsquo;s pick
+                  {t('draft.clockPaused.title', { name: currentPickerName })}
                 </p>
                 <p className="text-sm text-gray-500">
-                  {Math.ceil((draft.timerPausedRemainingMs ?? 0) / 1000)}s will be left when it
-                  restarts. They can still pick while it is paused.
+                  {t('draft.clockPaused.body', {
+                    n: Math.ceil((draft.timerPausedRemainingMs ?? 0) / 1000),
+                  })}
                 </p>
               </div>
               {isAdmin && (

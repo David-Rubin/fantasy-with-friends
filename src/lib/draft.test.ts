@@ -4,10 +4,21 @@ import {
   movePickOrder,
   reconcilePickOrder,
   resolvePickOrder,
+  teamCapacity,
 } from './draft'
 
 // Turn order and completion are covered in functions/src/draft.test.ts, where
 // the logic that actually decides them lives.
+
+describe('teamCapacity (client)', () => {
+  it('agrees with the server about what a full team holds', () => {
+    // The bench panel offers slots up to this; assignFromBench refuses past
+    // it. The two must not drift apart.
+    expect(teamCapacity(7, 3)).toBe(2)
+    expect(teamCapacity(3, 4)).toBe(1)
+    expect(teamCapacity(5, 0)).toBe(0)
+  })
+})
 
 describe('resolvePickOrder', () => {
   it('admin-set returns provided order', () => {

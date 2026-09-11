@@ -8,12 +8,28 @@ import type { PickOrderMethod, SeasonState } from './types'
  * a client that computes its own next turn can award itself extra ones. This
  * module previously carried an `advancePick` that ended the draft once the turn
  * position implied every slot was used; that rule is wrong under skips and is
- * now gone rather than left here to be copied by mistake.
+ * now gone rather than left here to be copied by mistake. The one piece of
+ * that arithmetic kept here, teamCapacity, is for display.
  *
  * Pick order resolution stays client-side: it runs once, before the draft opens,
  * and the resulting order is written to the draft document for the server to
  * work from.
  */
+
+// ── Team capacity ─────────────────────────────────────────────────────────────
+
+/**
+ * How many contestants each team gets: the pool shared out evenly, with the
+ * remainder left on the bench. Mirrored from functions/src/draft.ts, where it
+ * decides when a team is full and the draft is over; here it only decides
+ * what the bench panel shows as open. Never below one — see the server copy.
+ *
+ * @param draftable contestants in the season that are not eliminated
+ */
+export function teamCapacity(draftable: number, teams: number): number {
+  if (teams <= 0) return 0
+  return Math.max(1, Math.floor(draftable / teams))
+}
 
 // ── Pick order resolution ─────────────────────────────────────────────────────
 

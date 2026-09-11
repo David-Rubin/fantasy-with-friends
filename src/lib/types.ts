@@ -31,10 +31,11 @@ export type TimerExpiry = 'auto-pick' | 'admin-picks' | 'skip'
  * stays with the member who missed it, the clock stops, and an admin picks on
  * their behalf. Nobody else may pick until that resolves.
  *
- * `awaiting-close` means the picking rounds are over but the draft is not
- * settled: contestants are still on the bench and somebody's roster is short —
- * which happens when a turn was skipped. An admin may top up the short teams
- * from the bench, and must confirm before the draft closes.
+ * `awaiting-close` means the draft stalled: a whole round went by under the
+ * `skip` policy with nobody picking, so it halted rather than cycling.
+ * Contestants are still on the bench and somebody's roster is short. An admin
+ * may fill the short teams from the bench, and must confirm before the draft
+ * closes.
  */
 export type DraftStatus = 'lobby' | 'active' | 'paused' | 'awaiting-close' | 'complete'
 /**
@@ -381,12 +382,12 @@ export interface DraftDoc {
   pickOrder: string[] // uid[]
   timerExpiresAt: number | null
   /**
-   * Turns skipped in a row without anyone picking. Reset by any pick, manual or
-   * automatic. Once it reaches the number of players a full round has gone by
-   * with nobody drafting, which means the draft has stalled rather than
-   * progressed, so it halts for an admin instead of cycling forever.
+   * The round the most recent pick fell in, manual or automatic; null before
+   * the first. A skip that closes a round nobody picked in means the draft has
+   * stalled rather than progressed, so it halts for an admin instead of
+   * cycling forever.
    */
-  consecutiveSkips: number
+  lastPickRound: number | null
   /** Why the draft halted, when it did so for a reason other than finishing. */
   haltedReason: 'skips' | null
   /**
