@@ -3,6 +3,7 @@ import {
   clampTimerSeconds,
   episodeCountProblem,
   highestScoredEpisode,
+  openDraftProblem,
   TIMER_SECONDS_MAX,
   TIMER_SECONDS_MIN,
 } from './seasonDetails'
@@ -58,6 +59,29 @@ describe('episodeCountProblem', () => {
   it('allows shrinking freely when nothing has been scored', () => {
     // The season state is irrelevant here — only real scores constrain it.
     expect(episodeCountProblem(2, [])).toBeNull()
+  })
+})
+
+describe('openDraftProblem', () => {
+  it('opens with enough contestants, a rule, and room for every player', () => {
+    expect(openDraftProblem(8, 1, 4)).toBeNull()
+  })
+
+  it('opens with exactly one contestant per player', () => {
+    expect(openDraftProblem(4, 1, 4)).toBeNull()
+  })
+
+  it('refuses more players than contestants', () => {
+    // Somebody's team would be empty before the first pick.
+    expect(openDraftProblem(3, 1, 4)).toBe('more-players-than-contestants')
+  })
+
+  it('refuses fewer than two contestants, before anything else', () => {
+    expect(openDraftProblem(1, 0, 3)).toBe('too-few-contestants')
+  })
+
+  it('refuses a season with no scoring rules', () => {
+    expect(openDraftProblem(5, 0, 2)).toBe('no-rules')
   })
 })
 
