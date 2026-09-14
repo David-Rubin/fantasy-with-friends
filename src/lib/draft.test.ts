@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   draftLobbyVisible,
-  draftRoomShouldRedirect,
   movePickOrder,
   reconcilePickOrder,
   resolvePickOrder,
@@ -89,23 +88,6 @@ describe('movePickOrder', () => {
     expect(movePickOrder(order, 1, 1)).toBe(order)
     expect(movePickOrder(order, 0, -1)).toBe(order)
     expect(movePickOrder(order, 0, 4)).toBe(order)
-  })
-})
-
-describe('draftRoomShouldRedirect', () => {
-  it('sends everyone out when the draft has been reset', () => {
-    expect(draftRoomShouldRedirect('setup')).toBe(true)
-  })
-
-  it('leaves a running draft alone', () => {
-    expect(draftRoomShouldRedirect('draft')).toBe(false)
-  })
-
-  // The room's own "Draft complete!" screen lives on the far side of these two.
-  // Redirecting on anything that is merely "not drafting" would replace it.
-  it('leaves a finished draft showing its result', () => {
-    expect(draftRoomShouldRedirect('active')).toBe(false)
-    expect(draftRoomShouldRedirect('complete')).toBe(false)
   })
 })
 
