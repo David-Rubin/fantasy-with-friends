@@ -1,4 +1,4 @@
-import type { PickOrderMethod, SeasonState } from './types'
+import type { DraftStatus, PickOrderMethod, SeasonState } from './types'
 
 /**
  * Client-side draft helpers.
@@ -107,4 +107,26 @@ export function movePickOrder(order: string[], from: number, to: number): string
  */
 export function draftRoomShouldRedirect(seasonState: SeasonState): boolean {
   return seasonState === 'setup'
+}
+
+/**
+ * Whether the room should show the lobby — the screen before the draft starts.
+ *
+ * `draftLoaded` is the whole point of this being a function. The draft document
+ * is read as a collection, and an empty result is meaningful: a reset deletes
+ * the document, which is what puts a room back into the lobby. So the room
+ * cannot tell "no draft" from "no snapshot yet" by looking at the document
+ * alone, and before this it could not tell them apart at all — every entry to a
+ * running draft rendered the lobby for a frame first. With nothing in it but a
+ * sentence that was easy to miss; with the cast in it, it is a flash of the
+ * wrong screen.
+ *
+ * `'lobby'` is a declared DraftStatus that nothing currently writes — startDraft
+ * creates the document already `'active'` — so in practice this returns true on
+ * the null. The arm is kept because the status exists and a future writer of it
+ * would mean exactly this screen.
+ */
+export function draftLobbyVisible(draftLoaded: boolean, status: DraftStatus | null): boolean {
+  if (!draftLoaded) return false
+  return status === null || status === 'lobby'
 }

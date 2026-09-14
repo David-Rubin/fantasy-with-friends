@@ -10,19 +10,12 @@ import { seasonChildTrail } from '../lib/breadcrumbs'
 import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
-import { UserAvatar } from '../components/UserAvatar'
-import { ContestantCard } from '../components/ContestantCard'
+import { ContestantGrid } from '../components/ContestantGrid'
+import { DraftLobby } from '../components/DraftLobby'
 import { TeamIdentityCard } from '../components/TeamIdentityCard'
 import { TimerBanner } from '../components/TimerBanner'
-import type {
-  SeasonDoc,
-  DraftDoc,
-  ContestantDoc,
-  SeasonMemberDoc,
-  MemberRole,
-  Contestant,
-} from '../lib/types'
-import { draftRoomShouldRedirect, teamCapacity } from '../lib/draft'
+import type { SeasonDoc, DraftDoc, SeasonMemberDoc, MemberRole } from '../lib/types'
+import { draftLobbyVisible, draftRoomShouldRedirect, teamCapacity } from '../lib/draft'
 import { takenTeamColors, teamColorFor, teamHoldingColor } from '../lib/teamColor'
 import { accentLeftBorder } from '../components/accentStyles'
 import {
@@ -34,6 +27,7 @@ import {
   setTimerPaused,
   startDraft,
 } from '../lib/draftApi'
+import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 
@@ -49,7 +43,7 @@ export function DraftRoomPage() {
 
   const [season, setSeason] = useState<SeasonDoc | null>(null)
   const [draft, setDraft] = useState<DraftDoc | null>(null)
-  const [contestants, setContestants] = useState<Contestant[]>([])
+  const [draftLoaded, setDraftLoaded] = useState(false)
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const [startingDraft, setStartingDraft] = useState(false)
@@ -62,6 +56,8 @@ export function DraftRoomPage() {
   const [reopenError, setReopenError] = useState('')
   const [togglingTimer, setTogglingTimer] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const contestants = useSeasonContestants(seasonId, canView)
+  const rules = useSeasonScoringRules(seasonId, canView)
   const { leagueName, seasonName } = useTrailNames(leagueId, seasonId)
 
   useEffect(() => {
@@ -93,22 +89,12 @@ export function DraftRoomPage() {
 
   useEffect(() => {
     if (!seasonId || !canView) return
-    return listenQuery(
-      collection(db, 'seasons', seasonId, 'contestants'),
-      'draft contestants',
-      (snap) => {
-        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-      }
-    )
-  }, [seasonId, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
     return listenQuery(collection(db, 'seasons', seasonId, 'draft'), 'draft state', (snap) => {
       // An empty snapshot means the draft document is gone — a reset deletes
       // it. Ignoring that left the room rendering a draft that no longer
       // existed, complete with picks that had been deleted with it.
       setDraft(snap.empty ? null : (snap.docs[0].data() as DraftDoc))
+      setDraftLoaded(true)
     })
   }, [seasonId, canView])
 
@@ -416,35 +402,21 @@ export function DraftRoomPage() {
         />
       )}
 
-      {/* Lobby */}
-      {(!draft || draft.status === 'lobby') && (
-        <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-6">
-          <p className="text-gray-500 mb-4">{t('draft.lobby.waitingForAdmin')}</p>
-          <div className="flex flex-col gap-2 mb-4">
-            {members.map((m) => (
-              <div key={m.uid} className="flex items-center justify-between gap-2 text-sm">
-                <span className="flex min-w-0 items-center gap-2">
-                  <UserAvatar
-                    displayName={m.displayName}
-                    photoUrl={m.photoUrl}
-                    photoCrop={m.photoCrop}
-                  />
-                  <span className="truncate font-medium text-gray-800">{m.displayName}</span>
-                </span>
-                {m.pickPosition && (
-                  <span className="text-gray-400">
-                    {t('draft.lobby.yourPosition', { n: m.pickPosition })}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-          {isAdmin && (
-            <Button onClick={handleStartDraft} loading={startingDraft}>
-              {t('draft.lobby.startDraft')}
-            </Button>
-          )}
-        </div>
+      {/* Lobby — the wait before the draft opens, and what there is to read
+          during it. Gated on the draft listener having answered as well as on
+          what it said: see draftLobbyVisible. */}
+      {draftLobbyVisible(draftLoaded, draft?.status ?? null) && seasonId && leagueId && (
+        <DraftLobby
+          members={members}
+          contestants={contestants}
+          rules={rules}
+          seasonId={seasonId}
+          leagueId={leagueId}
+          episodeCount={season.episodeCount}
+          isAdmin={isAdmin}
+          onStartDraft={handleStartDraft}
+          startingDraft={startingDraft}
+        />
       )}
 
       {/* Bench settlement — picking is over, or the room went quiet */}
@@ -623,40 +595,29 @@ export function DraftRoomPage() {
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
             {/* Contestant list */}
             <div className="lg:col-span-2">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Available ({available.length})
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
-                {available.map((c) => (
-                  <ContestantCard
-                    key={c.id}
-                    contestant={c}
-                    canPick={isMyTurn}
-                    canPickFor={
-                      isAdmin && !isMyTurn && draft.currentPickerUid
-                        ? members.find((m) => m.uid === draft.currentPickerUid)?.displayName
-                        : undefined
-                    }
-                    onPick={() => handlePick(c.id)}
-                    onPickFor={() => handlePick(c.id, draft.currentPickerUid ?? undefined)}
-                  />
-                ))}
-              </div>
+              <ContestantGrid
+                heading={t('draft.active.available', { n: available.length })}
+                className="mb-6"
+                contestants={available}
+                cardProps={(c) => ({
+                  canPick: isMyTurn,
+                  canPickFor:
+                    isAdmin && !isMyTurn && draft.currentPickerUid
+                      ? members.find((m) => m.uid === draft.currentPickerUid)?.displayName
+                      : undefined,
+                  onPick: () => handlePick(c.id),
+                  onPickFor: () => handlePick(c.id, draft.currentPickerUid ?? undefined),
+                })}
+              />
 
               {drafted.length > 0 && (
-                <>
-                  <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                    Drafted ({drafted.length})
-                  </h2>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    {drafted.map((c) => {
-                      const owner = members.find((m) => m.uid === c.draftedByUid)
-                      return (
-                        <ContestantCard key={c.id} contestant={c} ownerName={owner?.displayName} />
-                      )
-                    })}
-                  </div>
-                </>
+                <ContestantGrid
+                  heading={t('draft.active.drafted', { n: drafted.length })}
+                  contestants={drafted}
+                  cardProps={(c) => ({
+                    ownerName: members.find((m) => m.uid === c.draftedByUid)?.displayName,
+                  })}
+                />
               )}
             </div>
 
