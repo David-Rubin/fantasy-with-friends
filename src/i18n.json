@@ -217,6 +217,7 @@
   "draft.lobby.waitingForAdmin": "Waiting for Admin to start the draft…",
   "draft.lobby.startDraft": "Start draft",
   "draft.lobby.yourPosition": "Pick #{n}",
+  "season.contestantsHeading": "Contestants ({n})",
   "draft.active.nowPicking": "{name}'s pick",
   "draft.active.youArePicking": "Your pick!",
   "draft.active.pickButton": "Pick",

@@ -16,11 +16,9 @@ import type {
   SeasonDoc,
   ContestantDoc,
   SeasonMemberDoc,
-  ScoringRuleDoc,
   EpisodeScoreDoc,
   MemberRole,
   Contestant,
-  ScoringRule,
   AccentColor,
   ContestantScoreDoc,
 } from '../lib/types'
@@ -48,7 +46,8 @@ import { SeasonChampion } from '../components/SeasonChampion'
 import { PickOrderList } from '../components/PickOrderList'
 import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
-import { ContestantCard } from '../components/ContestantCard'
+import { ContestantGrid } from '../components/ContestantGrid'
+import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
 import { ContestantAvatar } from '../components/ContestantAvatar'
 import {
   DEFAULT_ROSTER_SORT,
@@ -141,14 +140,14 @@ export function SeasonDetailPage() {
     setSearchParams(next === 'leaderboard' ? {} : { tab: next }, { replace: true })
   const [season, setSeason] = useState<(SeasonDoc & { id: string }) | null>(null)
   const [members, setMembers] = useState<MemberDoc[]>([])
-  const [contestants, setContestants] = useState<Contestant[]>([])
   const [rosterSort, setRosterSort] = useState<RosterSort>(DEFAULT_ROSTER_SORT)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingSeason, setDeletingSeason] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const contestants = useSeasonContestants(seasonId, canView)
+  const rules = useSeasonScoringRules(seasonId, canView)
   const { leagueName, showName } = useTrailNames(leagueId)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({})
   /** Episodes somebody has suggested scores for, awaiting an admin's decision. */
@@ -297,30 +296,6 @@ export function SeasonDetailPage() {
     )
     return unsub
   }, [seasonId, user, leagueId, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
-    const unsub = listenQuery(
-      collection(db, 'seasons', seasonId, 'contestants'),
-      'season contestants',
-      (snap) => {
-        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-      }
-    )
-    return unsub
-  }, [seasonId, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
-    const unsub = listenQuery(
-      collection(db, 'seasons', seasonId, 'scoringRules'),
-      'season rules',
-      (snap) => {
-        setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
-      }
-    )
-    return unsub
-  }, [seasonId, canView])
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -738,22 +713,19 @@ export function SeasonDetailPage() {
 
           {/* Contestants */}
           <section className="mb-6">
-            <h3 className="font-medium text-gray-700 mb-3">Contestants ({contestants.length})</h3>
-            {contestants.length > 0 && (
-              // The same card the draft board uses, scaled down: the cast is
-              // checked over as a whole here, so the photo and the opening of
-              // the bio are what matter, not one line of text per name.
-              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                {contestants.map((c) => (
-                  <ContestantCard
-                    key={c.id}
-                    contestant={c}
-                    compact
-                    onEdit={() => openEditContestant(c)}
-                  />
-                ))}
-              </div>
-            )}
+            {/* The same card the draft board uses, scaled down: the cast is
+                checked over as a whole here, so the photo and the opening of
+                the bio are what matter, not one line of text per name. The
+                heading matches the panel's other sections rather than the
+                board's small capitals — see ContestantGrid. */}
+            <ContestantGrid
+              heading={t('season.contestantsHeading', { n: contestants.length })}
+              headingClassName="mb-3 font-medium text-gray-700"
+              className={contestants.length > 0 ? 'mb-4' : ''}
+              contestants={contestants}
+              compact
+              cardProps={(c) => ({ onEdit: () => openEditContestant(c) })}
+            />
             <form onSubmit={handleAddContestant} className="flex flex-col gap-2">
               <ContestantFields values={contestantForm} onChange={setContestantForm} />
               <div className="flex items-center justify-end gap-2">

@@ -14,14 +14,10 @@ import type {
   MemberRole,
   ScoreProposalDoc,
   SeasonDoc,
-  ContestantDoc,
-  ScoringRuleDoc,
   EpisodeScoreDoc,
   ContestantScoreDoc,
   ContestantScoreEntry,
-  ScoringRule,
   ScoringRuleType,
-  Contestant,
 } from '../lib/types'
 import { evaluateRule, isPenalty, scoredCount } from '../lib/scoring'
 import { scorecardState } from '../lib/scorecard'
@@ -32,6 +28,7 @@ import {
   ruleCoversEpisode,
   rulesFingerprint,
 } from '../lib/scoringRules'
+import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
@@ -179,8 +176,6 @@ export function EpisodeScoringPage() {
   const epNum = parseInt(episodeNumber ?? '1', 10)
 
   const [season, setSeason] = useState<SeasonDoc | null>(null)
-  const [contestants, setContestants] = useState<Contestant[]>([])
-  const [rules, setRules] = useState<ScoringRule[]>([])
   const [existingScore, setExistingScore] = useState<EpisodeScoreDoc | null>(null)
 
   // Form state: contestantId -> ruleId -> value
@@ -207,6 +202,8 @@ export function EpisodeScoringPage() {
   const [approveConfirm, setApproveConfirm] = useState(false)
   const [resetConfirm, setResetConfirm] = useState(false)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const contestants = useSeasonContestants(seasonId, canView)
+  const rules = useSeasonScoringRules(seasonId, canView)
   // Entering scores is admin-only; every season member may read them. Without
   // this the page offered a member the full form and let the rules reject the
   // save at the end of it.
@@ -225,28 +222,6 @@ export function EpisodeScoringPage() {
     return listenDoc(doc(db, 'seasons', seasonId), 'scoring season', (snap) => {
       if (snap.exists()) setSeason(snap.data() as SeasonDoc)
     })
-  }, [seasonId, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
-    return listenQuery(
-      collection(db, 'seasons', seasonId, 'contestants'),
-      'scoring contestants',
-      (snap) => {
-        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-      }
-    )
-  }, [seasonId, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
-    return listenQuery(
-      collection(db, 'seasons', seasonId, 'scoringRules'),
-      'scoring rules',
-      (snap) => {
-        setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
-      }
-    )
   }, [seasonId, canView])
 
   useEffect(() => {
