@@ -459,23 +459,23 @@ export function LeagueDetailPage() {
                   isSuperadmin,
                   resolved: seasonMembershipResolved,
                 })
-                // Not a link while the draft button is beside it: the button
-                // is the useful destination, and the page it would otherwise
-                // open says only that the draft is under way. That notice is
-                // for whoever arrives another way.
-                const card =
-                  openable && !draftOpen ? (
-                    <Link
-                      to={`/leagues/${leagueId}/seasons/${season.id}`}
-                      className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
-                    >
-                      {summary}
-                    </Link>
-                  ) : (
-                    <div className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4">
-                      {summary}
-                    </div>
-                  )
+                // A link whenever the season is openable, the draft included:
+                // the season page is the draft now, so the card and the button
+                // beside it lead to the same place. While they did not — while
+                // that page only said the draft was under way — the card was
+                // deliberately dead, to keep the button the useful one.
+                const card = openable ? (
+                  <Link
+                    to={`/leagues/${leagueId}/seasons/${season.id}`}
+                    className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-colors"
+                  >
+                    {summary}
+                  </Link>
+                ) : (
+                  <div className="flex flex-1 items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4">
+                    {summary}
+                  </div>
+                )
                 // The button sits beside the card rather than inside it: the
                 // card is a link when the season is openable, and a button
                 // nested in a link is reachable by neither keyboard nor screen
@@ -494,10 +494,7 @@ export function LeagueDetailPage() {
                     {/* Beside the card rather than within it, for the reason
                         above: the card is itself a link. */}
                     {draftOpen && (
-                      <Link
-                        to={`/leagues/${leagueId}/seasons/${season.id}/draft`}
-                        className="shrink-0"
-                      >
+                      <Link to={`/leagues/${leagueId}/seasons/${season.id}`} className="shrink-0">
                         <Button>{t('dashboard.joinDraft')}</Button>
                       </Link>
                     )}

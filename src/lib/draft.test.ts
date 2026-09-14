@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  draftRoomShouldRedirect,
+  draftLobbyVisible,
   movePickOrder,
   reconcilePickOrder,
   resolvePickOrder,
@@ -91,19 +91,27 @@ describe('movePickOrder', () => {
   })
 })
 
-describe('draftRoomShouldRedirect', () => {
-  it('sends everyone out when the draft has been reset', () => {
-    expect(draftRoomShouldRedirect('setup')).toBe(true)
+describe('draftLobbyVisible', () => {
+  it('shows nothing until the draft listener has answered', () => {
+    // The flash this exists to stop: every entry to a running draft rendered
+    // the lobby for a frame, because "no draft document" and "no snapshot yet"
+    // looked identical from here.
+    expect(draftLobbyVisible(false, null)).toBe(false)
+    expect(draftLobbyVisible(false, 'active')).toBe(false)
   })
 
-  it('leaves a running draft alone', () => {
-    expect(draftRoomShouldRedirect('draft')).toBe(false)
+  it('shows the lobby when there is no draft document', () => {
+    // The ordinary pre-start case, and also the one a reset leaves behind.
+    expect(draftLobbyVisible(true, null)).toBe(true)
   })
 
-  // The room's own "Draft complete!" screen lives on the far side of these two.
-  // Redirecting on anything that is merely "not drafting" would replace it.
-  it('leaves a finished draft showing its result', () => {
-    expect(draftRoomShouldRedirect('active')).toBe(false)
-    expect(draftRoomShouldRedirect('complete')).toBe(false)
+  it('shows the lobby for the status that means it, though nothing writes it yet', () => {
+    expect(draftLobbyVisible(true, 'lobby')).toBe(true)
+  })
+
+  it('stands aside once the draft exists in any other state', () => {
+    for (const status of ['active', 'paused', 'awaiting-close', 'complete'] as const) {
+      expect(draftLobbyVisible(true, status)).toBe(false)
+    }
   })
 })

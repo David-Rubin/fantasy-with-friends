@@ -16,11 +16,9 @@ import type {
   SeasonDoc,
   ContestantDoc,
   SeasonMemberDoc,
-  ScoringRuleDoc,
   EpisodeScoreDoc,
   MemberRole,
   Contestant,
-  ScoringRule,
   AccentColor,
   ContestantScoreDoc,
 } from '../lib/types'
@@ -48,7 +46,10 @@ import { SeasonChampion } from '../components/SeasonChampion'
 import { PickOrderList } from '../components/PickOrderList'
 import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
-import { ContestantCard } from '../components/ContestantCard'
+import { ContestantGrid } from '../components/ContestantGrid'
+import { DraftRoom } from '../components/DraftRoom'
+import { reopenSeasonSetup } from '../lib/draftApi'
+import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
 import { ContestantAvatar } from '../components/ContestantAvatar'
 import {
   DEFAULT_ROSTER_SORT,
@@ -141,14 +142,17 @@ export function SeasonDetailPage() {
     setSearchParams(next === 'leaderboard' ? {} : { tab: next }, { replace: true })
   const [season, setSeason] = useState<(SeasonDoc & { id: string }) | null>(null)
   const [members, setMembers] = useState<MemberDoc[]>([])
-  const [contestants, setContestants] = useState<Contestant[]>([])
   const [rosterSort, setRosterSort] = useState<RosterSort>(DEFAULT_ROSTER_SORT)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingSeason, setDeletingSeason] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const [rules, setRules] = useState<ScoringRule[]>([])
   const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  const contestants = useSeasonContestants(seasonId, canView)
+  const rules = useSeasonScoringRules(seasonId, canView)
+  const [resetDraftOpen, setResetDraftOpen] = useState(false)
+  const [resettingDraft, setResettingDraft] = useState(false)
+  const [resetDraftError, setResetDraftError] = useState('')
   const { leagueName, showName } = useTrailNames(leagueId)
   const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({})
   /** Episodes somebody has suggested scores for, awaiting an admin's decision. */
@@ -297,30 +301,6 @@ export function SeasonDetailPage() {
     )
     return unsub
   }, [seasonId, user, leagueId, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
-    const unsub = listenQuery(
-      collection(db, 'seasons', seasonId, 'contestants'),
-      'season contestants',
-      (snap) => {
-        setContestants(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ContestantDoc) })))
-      }
-    )
-    return unsub
-  }, [seasonId, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
-    const unsub = listenQuery(
-      collection(db, 'seasons', seasonId, 'scoringRules'),
-      'season rules',
-      (snap) => {
-        setRules(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })))
-      }
-    )
-    return unsub
-  }, [seasonId, canView])
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -493,6 +473,34 @@ export function SeasonDetailPage() {
     }
   }
 
+  /**
+   * Put a drafting season back into setup.
+   *
+   * A forgotten contestant is usually noticed once the draft is under way, and
+   * changing one means undoing the draft — so this only opens the confirmation,
+   * and the confirmation says what it costs. Nothing is navigated: the setup
+   * panel is on this same page, and the season listener brings it in as soon as
+   * the state changes.
+   */
+  async function handleResetDraft() {
+    if (!seasonId) return
+    setResettingDraft(true)
+    setResetDraftError('')
+    try {
+      await reopenSeasonSetup({ seasonId })
+      // Closed on success, which the version of this in the draft room did not
+      // have to do: it navigated away, and the dialog went with the page. Here
+      // the page stays, so leaving it open put a backdrop over the setup panel
+      // the admin had just asked for.
+      setResetDraftOpen(false)
+    } catch (error) {
+      console.error('Failed to reopen the season for setup', error)
+      setResetDraftError(error instanceof Error ? error.message : t('common.error'))
+    } finally {
+      setResettingDraft(false)
+    }
+  }
+
   async function handleOpenDraft() {
     if (!seasonId) return
     setOpeningDraft(true)
@@ -503,7 +511,8 @@ export function SeasonDetailPage() {
       // started the clock on whatever was last persisted, which reads as the
       // edit not taking effect.
       await updateDoc(doc(db, 'seasons', seasonId), { ...draftSettingsToSave, state: 'draft' })
-      navigate(`/leagues/${leagueId}/seasons/${seasonId}/draft`)
+      // Nowhere to navigate: the season listener brings the lobby in here, in
+      // place of the setup panel that was just used.
     } finally {
       setOpeningDraft(false)
     }
@@ -701,6 +710,15 @@ export function SeasonDetailPage() {
           )}
           {/* Offered only once every episode is scored and locked, and replaced
               by its own undo once it has been used. */}
+          {/* Beside Edit season rather than down in the draft, because it is
+              the same kind of thing: a season-level action only an admin has.
+              Named for what it costs — Edit season changes a label, this throws
+              the draft away — since the two sit side by side. */}
+          {isAdmin && season.state === 'draft' && (
+            <Button variant="secondary" onClick={() => setResetDraftOpen(true)}>
+              {t('draft.editSettings')}
+            </Button>
+          )}
           {isAdmin && canClose && (
             <Button onClick={() => setCompleteConfirm(true)}>{t('season.markCompleted')}</Button>
           )}
@@ -738,22 +756,19 @@ export function SeasonDetailPage() {
 
           {/* Contestants */}
           <section className="mb-6">
-            <h3 className="font-medium text-gray-700 mb-3">Contestants ({contestants.length})</h3>
-            {contestants.length > 0 && (
-              // The same card the draft board uses, scaled down: the cast is
-              // checked over as a whole here, so the photo and the opening of
-              // the bio are what matter, not one line of text per name.
-              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                {contestants.map((c) => (
-                  <ContestantCard
-                    key={c.id}
-                    contestant={c}
-                    compact
-                    onEdit={() => openEditContestant(c)}
-                  />
-                ))}
-              </div>
-            )}
+            {/* The same card the draft board uses, scaled down: the cast is
+                checked over as a whole here, so the photo and the opening of
+                the bio are what matter, not one line of text per name. The
+                heading matches the panel's other sections rather than the
+                board's small capitals — see ContestantGrid. */}
+            <ContestantGrid
+              heading={t('season.contestantsHeading', { n: contestants.length })}
+              headingClassName="mb-3 font-medium text-gray-700"
+              className={contestants.length > 0 ? 'mb-4' : ''}
+              contestants={contestants}
+              compact
+              cardProps={(c) => ({ onEdit: () => openEditContestant(c) })}
+            />
             <form onSubmit={handleAddContestant} className="flex flex-col gap-2">
               <ContestantFields values={contestantForm} onChange={setContestantForm} />
               <div className="flex items-center justify-end gap-2">
@@ -956,26 +971,47 @@ export function SeasonDetailPage() {
         </div>
       )}
 
-      {/* The same panel for a season that is drafting, since this page has
-          nothing else to show while it is — the tabs belong to a season with
-          scores. The league page sends people straight to the draft room and
-          leaves the card unclickable while it does, so this is reached by a
-          direct link, by the breadcrumb out of the room, or by somebody sitting
-          here after a reset waiting for the draft to open again.
+      <Modal
+        open={resetDraftOpen}
+        onClose={() => setResetDraftOpen(false)}
+        title={t('draft.reopenTitle')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setResetDraftOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" loading={resettingDraft} onClick={handleResetDraft}>
+              {resettingDraft ? t('draft.reopening') : t('draft.reopenConfirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">{t('draft.reopenBody')}</p>
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {t('draft.reopenWarning')}
+        </p>
+        {resetDraftError && <p className="mt-3 text-sm text-red-600">{resetDraftError}</p>}
+      </Modal>
+
+      {/* The draft, in place of the signpost that used to point at it.
+          A season that is drafting shows the room itself — the lobby before it
+          starts, the board once it does, the settling up afterwards — because
+          once the lobby carried the cast and the rules there was nothing left
+          here that the room did not already have, and the step between them
+          only stood between a reader and what they came for.
 
           No membership test beyond the state: this page is already closed to
-          anyone who is not in the season, which is the same test the league
-          page's button makes. See canJoinDraft. */}
-      {season.state === 'draft' && (
-        <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
-          <p className="font-medium text-gray-700">{t('season.draftNoticeTitle')}</p>
-          <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
-            {t('season.draftNoticeBody')}
-          </p>
-          <Link to={`/leagues/${leagueId}/seasons/${seasonId}/draft`} className="mt-4 inline-block">
-            <Button>{t('dashboard.joinDraft')}</Button>
-          </Link>
-        </div>
+          anyone who is not in the season. See canJoinDraft. */}
+      {season.state === 'draft' && seasonId && leagueId && (
+        <DraftRoom
+          seasonId={seasonId}
+          leagueId={leagueId}
+          season={season}
+          members={members}
+          contestants={contestants}
+          rules={rules}
+          isAdmin={isAdmin}
+        />
       )}
 
       {/* Tabs (active/complete seasons) */}

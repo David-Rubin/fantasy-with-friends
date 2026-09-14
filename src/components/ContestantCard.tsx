@@ -83,7 +83,7 @@ function ContestantBio({ contestant }: { contestant: Contestant }) {
   )
 }
 
-interface ContestantCardProps {
+export interface ContestantCardProps {
   contestant: Contestant
   ownerName?: string
   canPick?: boolean
