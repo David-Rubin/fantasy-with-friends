@@ -69,10 +69,9 @@ export function useSeasonScoringRules(
  * "no answer yet" are the same value, which is what made the room flash its
  * lobby on the way into a running draft.
  *
- * On the season page rather than inside DraftRoom because the season page needs
- * it after the draft is over: completion moves the season to `active` in the
- * same transaction that completes the draft, so by the time there is a result
- * to announce, DraftRoom is no longer mounted.
+ * Called by DraftRoom, which is mounted only while a season is drafting — so a
+ * season in setup, or one being read months after it finished, does not open a
+ * watch on a document it will never show.
  */
 export function useSeasonDraft(
   seasonId: string | undefined,

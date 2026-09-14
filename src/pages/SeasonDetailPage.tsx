@@ -49,11 +49,7 @@ import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
 import { ContestantGrid } from '../components/ContestantGrid'
 import { DraftRoom } from '../components/DraftRoom'
 import { reopenSeasonSetup } from '../lib/draftApi'
-import {
-  useSeasonContestants,
-  useSeasonDraft,
-  useSeasonScoringRules,
-} from '../lib/useSeasonCollections'
+import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
 import { ContestantAvatar } from '../components/ContestantAvatar'
 import {
   DEFAULT_ROSTER_SORT,
@@ -154,8 +150,6 @@ export function SeasonDetailPage() {
   const { canView, blocked } = useSeasonMembership(seasonId)
   const contestants = useSeasonContestants(seasonId, canView)
   const rules = useSeasonScoringRules(seasonId, canView)
-  const { draft, draftLoaded } = useSeasonDraft(seasonId, canView)
-  const [draftResultSeen, setDraftResultSeen] = useState(false)
   const [resetDraftOpen, setResetDraftOpen] = useState(false)
   const [resettingDraft, setResettingDraft] = useState(false)
   const [resetDraftError, setResetDraftError] = useState('')
@@ -1017,27 +1011,7 @@ export function SeasonDetailPage() {
           contestants={contestants}
           rules={rules}
           isAdmin={isAdmin}
-          draft={draft}
-          draftLoaded={draftLoaded}
         />
-      )}
-
-      {/* The draft just finished. Completion moves the season to `active` in
-          the same transaction that completes the draft, so without this the
-          last pick would land and the page would become a leaderboard in the
-          same frame — the result arriving with no announcement that it was a
-          result. Dismissible rather than timed: whoever was watching the board
-          should get to read it, and whoever comes back tomorrow should not be
-          told the news as though it were still happening. */}
-      {season.state === 'active' && draft?.status === 'complete' && !draftResultSeen && (
-        <div className="mb-6 rounded-2xl border border-green-200 bg-green-50 p-6 text-center">
-          <p className="text-lg font-semibold text-green-800">
-            {t('draft.complete.banner', { teamName: myMember?.teamName ?? '' })}
-          </p>
-          <Button className="mt-4" onClick={() => setDraftResultSeen(true)}>
-            {t('draft.complete.viewSeason')}
-          </Button>
-        </div>
       )}
 
       {/* Tabs (active/complete seasons) */}

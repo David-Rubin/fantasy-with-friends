@@ -15,7 +15,8 @@ import {
   setTimerPaused,
   startDraft,
 } from '../lib/draftApi'
-import type { Contestant, DraftDoc, ScoringRule, SeasonDoc, SeasonMember } from '../lib/types'
+import { useSeasonDraft } from '../lib/useSeasonCollections'
+import type { Contestant, ScoringRule, SeasonDoc, SeasonMember } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 
@@ -47,8 +48,6 @@ export function DraftRoom({
   contestants,
   rules,
   isAdmin,
-  draft,
-  draftLoaded,
 }: {
   seasonId: string
   leagueId: string
@@ -57,12 +56,11 @@ export function DraftRoom({
   contestants: Contestant[]
   rules: ScoringRule[]
   isAdmin: boolean
-  /** Null means there is no draft document — the season has not started one. */
-  draft: DraftDoc | null
-  /** Whether the draft listener has answered yet. See draftLobbyVisible. */
-  draftLoaded: boolean
 }) {
   const { user } = useAuth()
+  // `true` because this is rendered inside the season page's membership gate:
+  // anyone who can see a draft at all can read its document.
+  const { draft, draftLoaded } = useSeasonDraft(seasonId, true)
   const [startingDraft, setStartingDraft] = useState(false)
   const [picking, setPicking] = useState(false)
   const [pickError, setPickError] = useState('')
