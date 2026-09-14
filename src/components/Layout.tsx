@@ -32,8 +32,13 @@ export function Layout({ children, breadcrumbs }: LayoutProps) {
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
           <Link
             to="/dashboard"
-            className="text-lg font-bold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
+            className="flex items-center gap-2 text-lg font-bold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
           >
+            {/* Decorative: the name it belongs to is right beside it, so
+                announcing the logo as well would read the app's name twice.
+                The same file the browser uses for the tab — one drawing of the
+                mark, so the two can never drift apart. */}
+            <img src="/logo.svg" alt="" aria-hidden="true" className="h-8 w-8 shrink-0" />
             {t('nav.appName')}
           </Link>
           {userDoc && (
