@@ -74,7 +74,17 @@ function ContestantBio({ contestant }: { contestant: Contestant }) {
         <div
           id={id}
           role="tooltip"
-          className="absolute bottom-full left-0 z-30 mb-2 max-h-48 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-900 px-3 py-2 text-left text-xs leading-snug text-white shadow-lg"
+          // max-h-72 holds a bio at the full BIO_MAX_LENGTH without
+          // scrolling — 500 characters come to about 280px at this width. The
+          // cap was tuned to a 300-character limit and did not move when the
+          // limit did, which made a long bio look truncated at roughly 350:
+          // the rest was there, but reaching it meant scrolling inside a
+          // tooltip that a mouse leaving the trigger dismisses.
+          //
+          // overflow-y-auto stays as the backstop. A bio is capped by length,
+          // not by height, so one written as a column of short lines can still
+          // be taller than this.
+          className="absolute bottom-full left-0 z-30 mb-2 max-h-72 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-900 px-3 py-2 text-left text-xs leading-snug text-white shadow-lg"
         >
           {contestant.bio}
         </div>
