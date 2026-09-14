@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="4" y="4" width="56" height="56" rx="13" fill="#fff"/>
+
+  <g stroke="#0B0B0B" stroke-width="3.2" stroke-linecap="round">
+    <path d="M23.4 13.6 29 21.6"/>
+    <path d="M40.6 13.4 35.2 21.6"/>
+  </g>
+  <circle cx="22.9" cy="12.9" r="3.1" fill="#0B0B0B"/>
+  <circle cx="41.2" cy="12.6" r="3.1" fill="#0B0B0B"/>
+
+  <rect x="9.3" y="20.4" width="45.4" height="28.4" rx="5" fill="#0B0B0B"/>
+  <rect x="13.1" y="23.4" width="33.2" height="22.4" rx="3.4" fill="#fff"/>
+  <circle cx="50.4" cy="29.8" r="2.3" fill="#fff"/>
+  <circle cx="50.4" cy="35.8" r="2.3" fill="#fff"/>
+
+  <g stroke="#5521EB" stroke-width="1.6" stroke-linecap="round">
+    <path d="M29.2 24v3.9"/>
+    <path d="m25.1 25.1 1.9 2.8"/>
+    <path d="m33.3 25.1-1.9 2.8"/>
+  </g>
+
+  <rect x="13.9" y="29.5" width="9.2" height="11.7" rx="1.6" fill="#E4E4E7"/>
+  <rect x="35.4" y="29.5" width="9.3" height="11.7" rx="1.6" fill="#FBCFE3"/>
+  <rect x="24.4" y="29.2" width="9.6" height="12.3" rx="2" fill="#DDD5FE" stroke="#5521EB" stroke-width="1.2"/>
+
+  <g transform="translate(18.5 35.4) scale(.92)" fill="#0B0B0B">
+    <circle cy="-2.8" r="2.1"/>
+    <path d="M-2.8 3.8V2.4a2.8 2.8 0 0 1 5.6 0v1.4a.6.6 0 0 1-.6.6h-4.4a.6.6 0 0 1-.6-.6z"/>
+  </g>
+  <g transform="translate(40.05 35.4) scale(.92)" fill="#0B0B0B">
+    <circle cy="-2.8" r="2.1"/>
+    <path d="M-2.8 3.8V2.4a2.8 2.8 0 0 1 5.6 0v1.4a.6.6 0 0 1-.6.6h-4.4a.6.6 0 0 1-.6-.6z"/>
+  </g>
+  <g transform="translate(29.2 35.5) scale(.95)" fill="#5521EB">
+    <circle cy="-2.8" r="2.1"/>
+    <path d="M-2.8 3.8V2.4a2.8 2.8 0 0 1 5.6 0v1.4a.6.6 0 0 1-.6.6h-4.4a.6.6 0 0 1-.6-.6z"/>
+  </g>
+</svg>

@@ -29,11 +29,25 @@ export function Layout({ children, breadcrumbs }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+        {/* py-1 rather than py-3: the logo is 56px and brings its own
+            padding with it — the white plate that keeps it legible in a dark
+            tab bar — so the row is spaced by the artwork rather than by the box
+            around it. The two together come to the same 65px header this had
+            when the mark was 40px in a py-3 row. */}
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-1">
           <Link
             to="/dashboard"
-            className="text-lg font-bold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
+            className="flex items-center gap-2 text-lg font-bold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded"
           >
+            {/* Decorative: the name it belongs to is right beside it, so
+                announcing the logo as well would read the app's name twice.
+                The same file the browser uses for the tab — one drawing of the
+                mark, so the two can never drift apart.
+
+                Sized against the wordmark rather than against the row: the
+                artwork carries its own padding, so the box has to be bigger
+                than the mark looks. See the row's own padding above. */}
+            <img src="/logo.svg" alt="" aria-hidden="true" className="h-14 w-14 shrink-0" />
             {t('nav.appName')}
           </Link>
           {userDoc && (

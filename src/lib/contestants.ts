@@ -6,7 +6,7 @@
  */
 
 /** Characters, counted after normalising — what gets stored is what is capped. */
-export const BIO_MAX_LENGTH = 300
+export const BIO_MAX_LENGTH = 500
 
 /**
  * A bio as it should be stored.
