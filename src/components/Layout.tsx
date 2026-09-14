@@ -37,8 +37,13 @@ export function Layout({ children, breadcrumbs }: LayoutProps) {
             {/* Decorative: the name it belongs to is right beside it, so
                 announcing the logo as well would read the app's name twice.
                 The same file the browser uses for the tab — one drawing of the
-                mark, so the two can never drift apart. */}
-            <img src="/logo.svg" alt="" aria-hidden="true" className="h-8 w-8 shrink-0" />
+                mark, so the two can never drift apart.
+
+                h-10 rather than the h-8 that would have left the header's
+                height alone: the artwork carries its own padding, so a smaller
+                box draws a mark too light to sit beside the wordmark. The
+                header is 8px taller for it. */}
+            <img src="/logo.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />
             {t('nav.appName')}
           </Link>
           {userDoc && (
