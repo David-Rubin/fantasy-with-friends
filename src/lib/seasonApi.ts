@@ -1,12 +1,23 @@
-import { addDoc, collection, doc, getDocs, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import {
+  addDoc,
+  collection,
+  deleteField,
+  doc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from './firebase'
 import { logAuditEvent } from './audit'
 import type { SeasonDetails } from './seasonDetails'
 import type { CarriedDraftSettings } from './seasonCarryOver'
 import { storedPhotoFields, type StoredPhoto } from './photoCrop'
-import type { AccentColor, SeasonState } from './types'
+import type { AccentColor, SeasonState, SeasonTeam, SeasonTeamDoc } from './types'
 import { normalizeTeamName } from './teamName'
+import { teamIdFor } from './teamAssignment'
+import { t } from './i18n'
 import type { ScoringRule, ScoringRuleDoc, SeasonDoc, SeasonMember, SeasonMemberDoc } from './types'
 
 /**
@@ -60,6 +71,8 @@ export interface NewSeason {
   draftSettings: CarriedDraftSettings
   members: SeasonMemberDoc[]
   scoringRules: ScoringRuleDoc[]
+  /** The teams of a team-mode season, keyed by their `team-N` id. Absent means none. */
+  teams?: { id: string; doc: SeasonTeamDoc }[]
   /** The season these were copied from, for the audit trail. */
   copiedFromSeasonId?: string
 }
@@ -96,6 +109,9 @@ export async function createSeason(input: NewSeason): Promise<string> {
   }
   const rulesRef = collection(db, 'seasons', seasonRef.id, 'scoringRules')
   for (const rule of input.scoringRules) batch.set(doc(rulesRef), rule)
+  for (const team of input.teams ?? []) {
+    batch.set(doc(db, 'seasons', seasonRef.id, 'teams', team.id), team.doc)
+  }
   await batch.commit()
 
   await logAuditEvent({
@@ -118,6 +134,8 @@ export async function createSeason(input: NewSeason): Promise<string> {
 export interface CarryOverSourceData {
   members: SeasonMember[]
   scoringRules: ScoringRule[]
+  /** Empty for a season that did not play in teams. */
+  teams: SeasonTeam[]
 }
 
 /**
@@ -128,13 +146,15 @@ export interface CarryOverSourceData {
  * open behind a closed dialog is a subscription nobody cancels.
  */
 export async function readCarryOverSource(seasonId: string): Promise<CarryOverSourceData> {
-  const [memberDocs, ruleDocs] = await Promise.all([
+  const [memberDocs, ruleDocs, teamDocs] = await Promise.all([
     getDocs(collection(db, 'seasons', seasonId, 'members')),
     getDocs(collection(db, 'seasons', seasonId, 'scoringRules')),
+    getDocs(collection(db, 'seasons', seasonId, 'teams')),
   ])
   return {
     members: memberDocs.docs.map((d) => ({ ...(d.data() as SeasonMemberDoc), uid: d.id })),
     scoringRules: ruleDocs.docs.map((d) => ({ id: d.id, ...(d.data() as ScoringRuleDoc) })),
+    teams: teamDocs.docs.map((d) => ({ id: d.id, ...(d.data() as SeasonTeamDoc) })),
   }
 }
 
@@ -177,13 +197,108 @@ export async function joinSeason(
   })
 }
 
+/** The draft settings the setup panel writes — see draftSettingsToSave there. */
+export type SeasonSetupSettings = Pick<
+  SeasonDoc,
+  'pickOrderMethod' | 'timerSeconds' | 'timerExpiry' | 'adminPickOrder' | 'teamMode' | 'teamCount'
+>
+
 /**
- * A member naming their own team.
+ * Save the setup panel: the draft settings, the team layout, and — when
+ * opening the draft — the state change, in one batch.
+ *
+ * One batch rather than a write per thing because they describe one layout.
+ * A team count of three with members on a fourth team is not a state the
+ * setup panel can draw, and a save interrupted between the two writes would
+ * have left exactly that.
+ *
+ * Team documents are `team-1` … `team-N`, written with merge so a name a
+ * member already chose and a colour the onSeasonTeamWritten trigger already
+ * handed out survive a re-save; teams past the new count are deleted, and the
+ * members on them are in `assignments` as null because the panel already
+ * treats them as unassigned (see effectiveAssignments). Team mode switched
+ * off leaves the team documents and the members' teamIds where they are —
+ * nothing draws them while `teamMode` is false, and switching back on finds
+ * the layout as it was, the same courtesy the pick order gets when the method
+ * is toggled.
+ *
+ * Admin-only by the rules on every document touched.
+ */
+export async function writeSeasonSetup(
+  seasonId: string,
+  leagueId: string,
+  input: {
+    settings: SeasonSetupSettings
+    /** Set to open the draft in the same write. */
+    state?: Extract<SeasonState, 'draft'>
+    /** The team documents as they stand, so names and colours are kept. */
+    teams: SeasonTeam[]
+    /** Only the members whose team changed — see assignmentWrites. */
+    assignments: { uid: string; teamId: string | null }[]
+  }
+): Promise<void> {
+  const { settings, state, teams, assignments } = input
+  const batch = writeBatch(db)
+  const now = Date.now()
+
+  batch.update(doc(db, 'seasons', seasonId), { ...settings, ...(state ? { state } : {}) })
+
+  if (settings.teamMode) {
+    const count = settings.teamCount ?? 0
+    for (let n = 1; n <= count; n += 1) {
+      const id = teamIdFor(n)
+      const existing = teams.find((team) => team.id === id)
+      batch.set(
+        doc(db, 'seasons', seasonId, 'teams', id),
+        {
+          number: n,
+          teamName: existing?.teamName ?? t('team.defaultName', { n }),
+          pickPosition: null,
+          createdAt: existing?.createdAt ?? now,
+        } satisfies Omit<SeasonTeamDoc, 'teamColor'>,
+        { merge: true }
+      )
+    }
+    for (const team of teams) {
+      if (team.number > count) batch.delete(doc(db, 'seasons', seasonId, 'teams', team.id))
+    }
+    for (const { uid, teamId } of assignments) {
+      batch.update(doc(db, 'seasons', seasonId, 'members', uid), {
+        teamId: teamId ?? deleteField(),
+      })
+    }
+  }
+
+  await batch.commit()
+
+  if (settings.teamMode) {
+    await logAuditEvent({
+      action: 'season_teams_updated',
+      seasonId,
+      leagueId,
+      newValue: {
+        teamCount: settings.teamCount ?? 0,
+        assigned: assignments.filter((a) => a.teamId).length,
+        unassigned: assignments.filter((a) => !a.teamId).length,
+      },
+    })
+  }
+}
+
+/**
+ * Where a team's name lives: on the member's own document in a solo season,
+ * on the team document in team mode. See src/lib/entries.ts.
+ */
+export type TeamTarget = { kind: 'member'; uid: string } | { kind: 'team'; teamId: string }
+
+/**
+ * A member naming their team.
  *
  * What a name may be is decided in ./teamName. That it is *their* team is a
  * constraint rather than advice: the `update` rule on the season roster pins
- * the write to the caller's own document and to the `teamName` field alone, in
- * whatever state the season is in.
+ * the write to the caller's own document and to the `teamName` field alone,
+ * and the rule on `teams` pins it to a team the caller's own membership names
+ * — in whatever state the season is in.
  *
  * The name is normalized here so the value that was validated is the value that
  * gets stored; the rule checks the stored length, so a name padded past the
@@ -193,19 +308,23 @@ export async function joinSeason(
 export async function renameTeam(
   seasonId: string,
   leagueId: string,
-  uid: string,
+  target: TeamTarget,
   previous: string,
   next: string
 ): Promise<void> {
   const teamName = normalizeTeamName(next)
+  const ref =
+    target.kind === 'team'
+      ? doc(db, 'seasons', seasonId, 'teams', target.teamId)
+      : doc(db, 'seasons', seasonId, 'members', target.uid)
 
-  await updateDoc(doc(db, 'seasons', seasonId, 'members', uid), { teamName })
+  await updateDoc(ref, { teamName })
 
   await logAuditEvent({
     action: 'team_renamed',
     seasonId,
     leagueId,
-    targetUid: uid,
+    targetUid: target.kind === 'team' ? target.teamId : target.uid,
     oldValue: previous,
     newValue: teamName,
   })

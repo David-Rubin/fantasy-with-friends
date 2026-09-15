@@ -58,9 +58,9 @@ describe('accent', () => {
 
 describe('takenTeamColors', () => {
   const roster = [
-    { uid: 'ada', teamColor: 'sage' as const },
-    { uid: 'bob', teamColor: 'rose' as const },
-    { uid: 'mia' },
+    { key: 'ada', teamColor: 'sage' as const },
+    { key: 'bob', teamColor: 'rose' as const },
+    { key: 'mia' },
   ]
 
   it('lists the colours other teams hold', () => {
@@ -94,19 +94,19 @@ describe('fallbackTeamColor', () => {
 
 describe('teamColorFor', () => {
   it('uses the stored colour when there is one', () => {
-    expect(teamColorFor({ uid: 'ada', teamColor: 'brown' })).toBe('brown')
+    expect(teamColorFor({ key: 'ada', teamColor: 'brown' })).toBe('brown')
   })
 
   it('falls back for a member document written before the field existed', () => {
-    expect(teamColorFor({ uid: 'ada' })).toBe(fallbackTeamColor('ada'))
+    expect(teamColorFor({ key: 'ada' })).toBe(fallbackTeamColor('ada'))
   })
 })
 
 describe('teamHoldingColor', () => {
   const roster = [
-    { uid: 'ada', teamName: 'Round Table Rejects', teamColor: 'sage' as const },
-    { uid: 'bob', teamName: 'Castle Crashers', teamColor: 'rose' as const },
-    { uid: 'mia', teamName: "Mia's Team" },
+    { key: 'ada', teamName: 'Round Table Rejects', teamColor: 'sage' as const },
+    { key: 'bob', teamName: 'Castle Crashers', teamColor: 'rose' as const },
+    { key: 'mia', teamName: "Mia's Team" },
   ]
 
   it('names the team holding a colour', () => {

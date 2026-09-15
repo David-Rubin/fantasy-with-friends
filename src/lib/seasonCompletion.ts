@@ -34,8 +34,8 @@ export function canCompleteSeason(
 }
 
 export interface SeasonWinner {
-  /** Every team on the top score — more than one when they tie. */
-  uids: string[]
+  /** Entry keys of every team on the top score — more than one when they tie. */
+  keys: string[]
   points: number
   tied: boolean
 }
@@ -48,18 +48,20 @@ export interface SeasonWinner {
  * one here would decide a league's season on a technicality nobody agreed to;
  * naming both is honest, and the people involved can settle it between them.
  *
- * A member with no entry in `teamTotals` counts as zero — that is what the
- * leaderboard already shows them as — so a season where nobody scored has
+ * An entry with nothing in `teamTotals` counts as zero — that is what the
+ * leaderboard already shows it as — so a season where nobody scored has
  * everyone tied on nothing rather than no winner at all.
+ *
+ * `entryKeys` are uids, or team ids in team mode — see ./entries.
  */
 export function seasonWinner(
-  memberUids: string[],
+  entryKeys: string[],
   teamTotals: Record<string, number>
 ): SeasonWinner | null {
-  if (memberUids.length === 0) return null
+  if (entryKeys.length === 0) return null
 
-  const points = Math.max(...memberUids.map((uid) => teamTotals[uid] ?? 0))
-  const uids = memberUids.filter((uid) => (teamTotals[uid] ?? 0) === points)
+  const points = Math.max(...entryKeys.map((key) => teamTotals[key] ?? 0))
+  const keys = entryKeys.filter((key) => (teamTotals[key] ?? 0) === points)
 
-  return { uids, points, tied: uids.length > 1 }
+  return { keys, points, tied: keys.length > 1 }
 }

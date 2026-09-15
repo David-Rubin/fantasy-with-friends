@@ -22,6 +22,7 @@ import {
 } from './draft'
 import { planRemoval, canRemove, blockingReason, type MemberSeason } from './membership'
 import { isTeamColor, pickTeamColor, takenBy, type TeamColor } from './teamColor'
+import { entryKeyFor, entryKeys, isTeamMode, teamAssignmentProblem } from './entries'
 import { userDeletionProblem, userDeletionMessage } from './deletion'
 import type { ContestantScoreDoc } from './scoring'
 
@@ -311,7 +312,18 @@ export const submitPick = functions
           'Only an admin can pick on behalf of another member'
         )
       }
-      const pickerUid = onBehalfOf ?? actingUid
+      // `onBehalfOf` and `pickerUid` are entry keys — a member's uid, or in
+      // team mode the id of the team they play for, which is what the turn
+      // belongs to and what the contestant is recorded against. Any member of
+      // the team on the clock may take its pick.
+      const entries = await loadEntries(seasonId, seasonSnap.data() ?? {})
+      const pickerUid = onBehalfOf ?? entries.keyFor(actingUid)
+      if (!pickerUid) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          entries.teamMode ? 'not-on-a-team' : 'You are not a member of this season'
+        )
+      }
 
       // The draft doc has a generated id, so find it rather than assume one.
       const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
@@ -570,6 +582,57 @@ export const resolveExpiredTurn = functions.runWith(INTERACTIVE).https.onCall(
 )
 
 /**
+ * The season's entries — what the draft is between and what the totals are
+ * kept for. Members in a solo season; teams, with members playing for them,
+ * in team mode. See ./entries for what a key is.
+ *
+ * Read outside any transaction on purpose. The roster and the team layout
+ * change only while a season is in `setup`, and every caller here has already
+ * established that it is not — so the answer cannot go stale between this
+ * read and the write that follows it.
+ */
+interface SeasonEntries {
+  teamMode: boolean
+  /** Entry keys in roster order (solo) or team-number order (team mode). */
+  keys: string[]
+  /** Whose entry a member plays for; null for a non-member or an unassigned one. */
+  keyFor: (uid: string) => string | null
+  teamIds: string[]
+  members: { uid: string; teamId?: string }[]
+}
+
+async function loadEntries(
+  seasonId: string,
+  season: FirebaseFirestore.DocumentData
+): Promise<SeasonEntries> {
+  const teamMode = isTeamMode(season)
+  const [membersSnap, teamsSnap] = await Promise.all([
+    db.collection(`seasons/${seasonId}/members`).get(),
+    teamMode ? db.collection(`seasons/${seasonId}/teams`).get() : null,
+  ])
+  const members = membersSnap.docs.map((d) => ({
+    uid: d.id,
+    ...(typeof d.data().teamId === 'string' ? { teamId: d.data().teamId as string } : {}),
+  }))
+  const teams = (teamsSnap?.docs ?? []).map((d) => ({
+    id: d.id,
+    number: (d.data().number as number) ?? 0,
+  }))
+  return {
+    teamMode,
+    keys: entryKeys(season, members, teams),
+    keyFor: (uid) =>
+      entryKeyFor(
+        season,
+        members.find((m) => m.uid === uid),
+        teams
+      ),
+    teamIds: teams.map((t) => t.id),
+    members,
+  }
+}
+
+/**
  * The board as the turn logic sees it: who holds how many, how many are still
  * to be had, and how many make a team full.
  *
@@ -664,24 +727,34 @@ export const startDraft = functions
       if (membersSnap.empty) {
         throw new functions.https.HttpsError('failed-precondition', 'Season has no members')
       }
-      // Every team gets an equal share of the pool (see teamCapacity), so with
-      // more players than contestants somebody starts with nothing to pick.
+      // In team mode the draft is between teams, and it needs every team to
+      // have somebody to pick for it and every member to have a team to pick
+      // for. The setup panel disables the button on the same grounds, but a
+      // member can join between there and here, and this is the write — so
+      // this is the check that holds. The error codes are the client's own
+      // names for the reasons, so it can say which.
+      const entries = await loadEntries(seasonId, season)
+      if (entries.teamMode) {
+        const problem = teamAssignmentProblem(entries.teamIds, entries.members)
+        if (problem) throw new functions.https.HttpsError('failed-precondition', problem)
+      }
+      // Every entry gets an equal share of the pool (see teamCapacity), so with
+      // more entries than contestants somebody starts with nothing to pick.
       // The season page disables opening the draft for the same reason, but
       // the roster can change between there and here, and this is the write.
       const draftable = contestantsSnap.docs.filter(
         (d) => d.data().eliminatedEpisode === null
       ).length
-      if (membersSnap.size > draftable) {
+      if (entries.keys.length > draftable) {
         throw new functions.https.HttpsError(
           'failed-precondition',
           'There are more players than contestants'
         )
       }
 
-      const memberUids = membersSnap.docs.map((d) => d.id)
       const pickOrder = resolvePickOrder(
         (season.pickOrderMethod as 'randomized' | 'admin-set') ?? 'randomized',
-        memberUids,
+        entries.keys,
         season.adminPickOrder as string[] | undefined
       )
       const timerSeconds = (season.timerSeconds as number) ?? 60
@@ -699,8 +772,13 @@ export const startDraft = functions
         haltedReason: null,
         timerPausedRemainingMs: null,
       })
-      pickOrder.forEach((uid, i) => {
-        batch.update(db.doc(`seasons/${seasonId}/members/${uid}`), { pickPosition: i + 1 })
+      // Positions go on whatever the entries are: team documents in team
+      // mode, member documents otherwise.
+      const entryCollection = entries.teamMode ? 'teams' : 'members'
+      pickOrder.forEach((key, i) => {
+        batch.update(db.doc(`seasons/${seasonId}/${entryCollection}/${key}`), {
+          pickPosition: i + 1,
+        })
       })
       batch.update(seasonRef, { state: 'draft' })
       await batch.commit()
@@ -866,8 +944,10 @@ export const assignFromBench = functions.https.onCall(
       throw new functions.https.HttpsError('permission-denied', 'Admins only')
     }
 
-    const memberSnap = await db.doc(`seasons/${seasonId}/members/${toUid}`).get()
-    if (!memberSnap.exists) {
+    // `toUid` is an entry key — a member's uid, or a team id in team mode.
+    // The wire name is kept from when every entry was a member.
+    const entries = await loadEntries(seasonId, seasonSnap.data() ?? {})
+    if (!entries.keys.includes(toUid)) {
       throw new functions.https.HttpsError('not-found', 'That member is not in this season')
     }
 
@@ -1023,10 +1103,11 @@ export const reopenSeasonSetup = functions.https.onCall(
       )
     }
 
-    const [draftDocs, contestants, members] = await Promise.all([
+    const [draftDocs, contestants, members, teams] = await Promise.all([
       db.collection(`seasons/${seasonId}/draft`).get(),
       db.collection(`seasons/${seasonId}/contestants`).get(),
       db.collection(`seasons/${seasonId}/members`).get(),
+      db.collection(`seasons/${seasonId}/teams`).get(),
     ])
 
     // The draft document is deleted rather than rewound: opening a draft creates
@@ -1046,6 +1127,12 @@ export const reopenSeasonSetup = functions.https.onCall(
     }
     for (const member of members.docs) {
       writes.push((batch) => batch.update(member.ref, { pickPosition: null }))
+    }
+    // Positions live on the teams in team mode. The teams themselves, and who
+    // is on them, are left alone: the layout is setup work, and reopening
+    // setup is not a reason to make the admin do it again.
+    for (const team of teams.docs) {
+      writes.push((batch) => batch.update(team.ref, { pickPosition: null }))
     }
     writes.push((batch) => batch.update(seasonRef, { state: 'setup' }))
 
@@ -1494,13 +1581,40 @@ export const deleteUser = functions.https.onCall(
 /**
  * Every colour held in a season, read inside a transaction so a concurrent
  * claim cannot slip in between the read and the write that follows it.
+ *
+ * Uniqueness is per collection: the members hold one set of colours and the
+ * teams another, and only one of the two is ever drawn — teams in team mode,
+ * members otherwise — so they never need to be unique across each other.
  */
+type ColorCollection = 'members' | 'teams'
+
 async function rosterColors(
   tx: FirebaseFirestore.Transaction,
-  seasonId: string
-): Promise<{ uid: string; teamColor?: string }[]> {
-  const snap = await tx.get(db.collection(`seasons/${seasonId}/members`))
-  return snap.docs.map((d) => ({ uid: d.id, teamColor: d.data().teamColor as string | undefined }))
+  seasonId: string,
+  collection: ColorCollection
+): Promise<{ key: string; teamColor?: string }[]> {
+  const snap = await tx.get(db.collection(`seasons/${seasonId}/${collection}`))
+  return snap.docs.map((d) => ({ key: d.id, teamColor: d.data().teamColor as string | undefined }))
+}
+
+/**
+ * Hand a colour to the entry at `seasons/{seasonId}/{collection}/{key}` if it
+ * has none: one nobody else in that collection holds. The body of both colour
+ * triggers below.
+ */
+async function assignFreeColor(seasonId: string, collection: ColorCollection, key: string) {
+  await db.runTransaction(async (tx) => {
+    const ref = db.doc(`seasons/${seasonId}/${collection}/${key}`)
+    const roster = await rosterColors(tx, seasonId, collection)
+    const mine = roster.find((e) => e.key === key)
+    // Gone, or given a colour by something else while this was queued.
+    if (!mine || isTeamColor(mine.teamColor)) return
+
+    const taken = roster
+      .map((e) => e.teamColor)
+      .filter((color): color is TeamColor => isTeamColor(color))
+    tx.update(ref, { teamColor: pickTeamColor(taken) })
+  })
 }
 
 /**
@@ -1529,19 +1643,29 @@ export const onSeasonMemberWritten = onDocumentWritten(
     if (!after || isTeamColor(after.teamColor)) return
 
     const { seasonId, uid } = event.params
+    await assignFreeColor(seasonId, 'members', uid)
+  }
+)
 
-    await db.runTransaction(async (tx) => {
-      const memberRef = db.doc(`seasons/${seasonId}/members/${uid}`)
-      const roster = await rosterColors(tx, seasonId)
-      const mine = roster.find((m) => m.uid === uid)
-      // Gone, or given a colour by something else while this was queued.
-      if (!mine || isTeamColor(mine.teamColor)) return
+/**
+ * Give a new team a colour — the same trigger as above, over the `teams`
+ * collection a season in team mode draws its entries from. The setup panel
+ * creates team documents without a colour, for the same reason a joining
+ * member does not pick their own: it cannot know what is free.
+ *
+ * A member still gets a colour of their own in team mode. It is not drawn
+ * while the season plays in teams, but it is what the member is drawn in if
+ * the admin switches back to solo, and this trigger only fires on a write —
+ * so it is cheaper to always have one than to notice it is missing later.
+ */
+export const onSeasonTeamWritten = onDocumentWritten(
+  'seasons/{seasonId}/teams/{teamId}',
+  async (event) => {
+    const after = event.data?.after.data()
+    if (!after || isTeamColor(after.teamColor)) return
 
-      const taken = roster
-        .map((m) => m.teamColor)
-        .filter((color): color is TeamColor => isTeamColor(color))
-      tx.update(memberRef, { teamColor: pickTeamColor(taken) })
-    })
+    const { seasonId, teamId } = event.params
+    await assignFreeColor(seasonId, 'teams', teamId)
   }
 )
 
@@ -1575,7 +1699,7 @@ export const setTeamColor = functions.https.onCall(
     const uid = context.auth.uid
     const memberRef = db.doc(`seasons/${seasonId}/members/${uid}`)
 
-    const { previous, leagueId } = await db.runTransaction(async (tx) => {
+    const { previous, leagueId, targetKey } = await db.runTransaction(async (tx) => {
       const [mine, season] = await Promise.all([
         tx.get(memberRef),
         tx.get(db.doc(`seasons/${seasonId}`)),
@@ -1587,22 +1711,39 @@ export const setTeamColor = functions.https.onCall(
         )
       }
 
-      const roster = await rosterColors(tx, seasonId)
-      if (takenBy(roster, teamColor, uid)) {
+      // In team mode the colour belongs to the team the caller plays for, and
+      // it is checked against the other teams. Any member of the team may
+      // change it, as any may rename it.
+      const teamMode = isTeamMode(season.data())
+      const teamId = mine.data()?.teamId as string | undefined
+      if (teamMode && !teamId) {
+        throw new functions.https.HttpsError('failed-precondition', 'not-on-a-team')
+      }
+      const collection: ColorCollection = teamMode ? 'teams' : 'members'
+      const targetKey = teamMode ? (teamId as string) : uid
+      const targetRef = db.doc(`seasons/${seasonId}/${collection}/${targetKey}`)
+      const target = teamMode ? await tx.get(targetRef) : mine
+      if (!target.exists) {
+        throw new functions.https.HttpsError('failed-precondition', 'not-on-a-team')
+      }
+
+      const roster = await rosterColors(tx, seasonId, collection)
+      if (takenBy(roster, teamColor, targetKey)) {
         throw new functions.https.HttpsError('failed-precondition', 'color-taken')
       }
 
-      tx.update(memberRef, { teamColor })
+      tx.update(targetRef, { teamColor })
       return {
-        previous: (mine.data()?.teamColor as string | undefined) ?? null,
+        previous: (target.data()?.teamColor as string | undefined) ?? null,
         leagueId: season.data()?.leagueId as string | undefined,
+        targetKey,
       }
     })
 
     await db.collection('auditLogs').add({
       action: 'team_color_changed',
       actorUid: uid,
-      targetUid: uid,
+      targetUid: targetKey,
       seasonId,
       ...(leagueId ? { leagueId } : {}),
       oldValue: previous,
@@ -1637,10 +1778,13 @@ export const onEpisodeScoreWritten = onDocumentWritten(
 
 async function recalcTeamTotals(seasonId: string) {
   // Fetch all data needed for recalculation
-  const [membersSnap, episodeScoresSnap] = await Promise.all([
-    db.collection(`seasons/${seasonId}/members`).get(),
+  const [seasonSnap, episodeScoresSnap] = await Promise.all([
+    db.doc(`seasons/${seasonId}`).get(),
     db.collection(`seasons/${seasonId}/episodeScores`).get(),
   ])
+  // Totals are kept per entry — per member, or per team in team mode — under
+  // the same keys the contestants were drafted against.
+  const entries = await loadEntries(seasonId, seasonSnap.data() ?? {})
 
   // Fetch contestant scores for each episode
   const episodeDocs = await Promise.all(
@@ -1671,15 +1815,14 @@ async function recalcTeamTotals(seasonId: string) {
     teamContestants[ownerUid].push(contestantId)
   }
 
-  // Calc totals for each member
+  // Calc totals for each entry
   const teamTotals: Record<string, number> = {}
   const teamEpisodeTotals: Record<string, Record<string, number>> = {}
 
-  for (const memberDoc of membersSnap.docs) {
-    const uid = memberDoc.id
-    const contestantIds = teamContestants[uid] ?? []
-    teamTotals[uid] = calcTeamTotal(contestantIds, episodeDocs)
-    teamEpisodeTotals[uid] = calcTeamEpisodeTotals(contestantIds, episodeDocs)
+  for (const key of entries.keys) {
+    const contestantIds = teamContestants[key] ?? []
+    teamTotals[key] = calcTeamTotal(contestantIds, episodeDocs)
+    teamEpisodeTotals[key] = calcTeamEpisodeTotals(contestantIds, episodeDocs)
   }
 
   await db.doc(`seasons/${seasonId}`).update({ teamTotals, teamEpisodeTotals })

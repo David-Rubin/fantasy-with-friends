@@ -1,16 +1,14 @@
 import { t } from '../lib/i18n'
-import { UserAvatar } from './UserAvatar'
+import { PlayerAvatars, playerNames, type EntryPlayer } from './PlayerAvatars'
 import { accentLeftBorder } from './accentStyles'
 import type { SeasonWinner } from '../lib/seasonCompletion'
-import type { AccentColor, PhotoCrop } from '../lib/types'
+import type { AccentColor } from '../lib/types'
 
 interface ChampionTeam {
-  uid: string
+  /** An entry key — see src/lib/entries.ts. */
+  key: string
   teamName: string
-  displayName: string
-  photoUrl?: string
-  /** Travels with the URL — see UserAvatar. */
-  photoCrop?: PhotoCrop
+  players: EntryPlayer[]
   /** The team's colour, so a shared win still says which team is which. */
   teamColor: AccentColor
 }
@@ -76,17 +74,13 @@ export function SeasonChampion({ winner, teams }: SeasonChampionProps) {
             // The colour edge matters most on a tie, where this banner names
             // two or three teams side by side and nothing else separates them.
             <div
-              key={team.uid}
+              key={team.key}
               className={`flex items-center gap-2 border-l-4 bg-white/60 py-1 pl-3 ${accentLeftBorder[team.teamColor]}`}
             >
-              <UserAvatar
-                displayName={team.displayName}
-                photoUrl={team.photoUrl}
-                photoCrop={team.photoCrop}
-              />
+              <PlayerAvatars players={team.players} />
               <div className="text-left">
                 <p className="font-semibold text-gray-900">{team.teamName}</p>
-                <p className="text-xs text-gray-500">{team.displayName}</p>
+                <p className="text-xs text-gray-500">{playerNames(team.players)}</p>
               </div>
             </div>
           ))}

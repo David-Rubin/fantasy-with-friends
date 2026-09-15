@@ -83,6 +83,19 @@ describe('openDraftProblem', () => {
   it('refuses a season with no scoring rules', () => {
     expect(openDraftProblem(5, 0, 2)).toBe('no-rules')
   })
+
+  it('passes a team layout problem through, ahead of the head count', () => {
+    // Three teams into two contestants would also fail, but an empty team is
+    // the earlier thing to fix.
+    expect(openDraftProblem(2, 1, 3, 'team-empty')).toBe('team-empty')
+    expect(openDraftProblem(8, 1, 2, 'member-unassigned')).toBe('member-unassigned')
+    expect(openDraftProblem(8, 1, 0, 'no-teams')).toBe('no-teams')
+  })
+
+  it('counts teams, not players, against the contestants in team mode', () => {
+    // Six players on two teams share eight contestants two ways, not six.
+    expect(openDraftProblem(8, 1, 2, null)).toBeNull()
+  })
 })
 
 describe('clampTimerSeconds', () => {

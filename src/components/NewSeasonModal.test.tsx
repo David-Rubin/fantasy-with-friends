@@ -231,6 +231,104 @@ describe('NewSeasonModal with a season to copy', () => {
     expect(input.copiedFromSeasonId).toBe('season-2')
   })
 
+  it('carries team mode, the teams, and who is on them, when settings and participants both copy', async () => {
+    const user = userEvent.setup()
+    readCarryOverSource.mockResolvedValue({
+      ...lastSeasonData,
+      members: lastSeasonData.members.map((m, i) => ({ ...m, teamId: `team-${i + 1}` })),
+      teams: [
+        {
+          id: 'team-1',
+          number: 1,
+          teamName: 'Team 1',
+          teamColor: 'sage',
+          pickPosition: 1,
+          createdAt: 1,
+        },
+        { id: 'team-2', number: 2, teamName: 'The Crashers', pickPosition: 2, createdAt: 1 },
+      ],
+    })
+    renderModal([{ ...lastSeason, teamMode: true, teamCount: 2 }])
+    await fillInTheSeason(user)
+    await answer(user, participantsQuestion, 'Yes')
+    await answer(user, rulesQuestion, 'No')
+    await answer(user, settingsQuestion, 'Yes')
+    await user.click(screen.getByRole('button', { name: /create season/i }))
+
+    await waitFor(() => expect(createSeason).toHaveBeenCalled())
+    const input = createSeason.mock.calls[0][0]
+    expect(input.draftSettings).toMatchObject({ teamMode: true, teamCount: 2 })
+    expect(input.teams).toEqual([
+      {
+        id: 'team-1',
+        doc: { number: 1, teamName: 'Team 1', pickPosition: null, createdAt: expect.any(Number) },
+      },
+      {
+        id: 'team-2',
+        doc: {
+          number: 2,
+          teamName: 'The Crashers',
+          pickPosition: null,
+          createdAt: expect.any(Number),
+        },
+      },
+    ])
+    expect(input.members.map((m: { uid: string; teamId?: string }) => [m.uid, m.teamId])).toEqual([
+      ['u2', 'team-1'],
+      ['u1', 'team-2'],
+    ])
+  })
+
+  it('carries the teams but nobody on them when the participants are not copied', async () => {
+    const user = userEvent.setup()
+    readCarryOverSource.mockResolvedValue({
+      ...lastSeasonData,
+      members: lastSeasonData.members.map((m) => ({ ...m, teamId: 'team-1' })),
+      teams: [
+        { id: 'team-1', number: 1, teamName: 'Castle Crashers', pickPosition: 1, createdAt: 1 },
+      ],
+    })
+    renderModal([{ ...lastSeason, teamMode: true, teamCount: 1 }])
+    await fillInTheSeason(user)
+    await answer(user, participantsQuestion, 'No')
+    await answer(user, rulesQuestion, 'No')
+    await answer(user, settingsQuestion, 'Yes')
+    await user.click(screen.getByRole('button', { name: /create season/i }))
+
+    await waitFor(() => expect(createSeason).toHaveBeenCalled())
+    const input = createSeason.mock.calls[0][0]
+    // The team is there for whoever gets dragged in, under its default name —
+    // "Castle Crashers" belonged to the people who are not coming.
+    expect(input.teams).toEqual([
+      {
+        id: 'team-1',
+        doc: { number: 1, teamName: 'Team 1', pickPosition: null, createdAt: expect.any(Number) },
+      },
+    ])
+    expect(input.members).toEqual([])
+  })
+
+  it('leaves the team ids behind when the settings are not copied', async () => {
+    const user = userEvent.setup()
+    readCarryOverSource.mockResolvedValue({
+      ...lastSeasonData,
+      members: lastSeasonData.members.map((m) => ({ ...m, teamId: 'team-1' })),
+      teams: [{ id: 'team-1', number: 1, teamName: 'Team 1', pickPosition: 1, createdAt: 1 }],
+    })
+    renderModal([{ ...lastSeason, teamMode: true, teamCount: 1 }])
+    await fillInTheSeason(user)
+    await answer(user, participantsQuestion, 'Yes')
+    await answer(user, rulesQuestion, 'No')
+    await answer(user, settingsQuestion, 'No')
+    await user.click(screen.getByRole('button', { name: /create season/i }))
+
+    await waitFor(() => expect(createSeason).toHaveBeenCalled())
+    const input = createSeason.mock.calls[0][0]
+    expect(input.teams).toBeUndefined()
+    expect(input.draftSettings).not.toHaveProperty('teamMode')
+    for (const m of input.members) expect(m).not.toHaveProperty('teamId')
+  })
+
   it('copies nothing the admin said no to, and starts with an empty roster', async () => {
     const user = userEvent.setup()
     renderModal()

@@ -273,15 +273,48 @@ service cloud.firestore {
         // joiner picking their own would be picking one nobody had checked was
         // free. The onSeasonMemberWritten trigger hands one out the moment this
         // document lands.
+        //
+        // teamId is refused because which team a member plays for is the
+        // admin's decision, made in the setup panel; a joiner arrives
+        // unassigned. The `update` rule above already keeps it out of a
+        // member's own hands through hasOnly(['teamName']).
         allow create: if isSignedIn()
           && request.auth.uid == uid
           && request.resource.data.uid == uid
           && request.resource.data.pickPosition == null
           && !('teamColor' in request.resource.data)
+          && !('teamId' in request.resource.data)
           && seasonState(seasonId) == 'setup'
           && isLeagueMember(seasonLeagueId(seasonId));
 
-        // Adding anyone else, and assigning pick positions, stays with admins.
+        // Adding anyone else, assigning pick positions and putting people on
+        // teams stays with admins.
+        allow write: if isSeasonAdmin(seasonId);
+      }
+
+      // The teams a season in team mode is played between — see
+      // SeasonTeamDoc in src/lib/types.ts. Who plays for each is on the
+      // member documents above (`teamId`), not here.
+      match /teams/{teamId} {
+        allow read: if isSeasonMember(seasonId) || isSeasonAdmin(seasonId);
+        // Renaming — by anyone who plays for the team, which is one get() on
+        // their own membership. The same shape and the same 40-character
+        // bound as a member's own teamName above, for the same reasons; the
+        // length must match TEAM_NAME_MAX_LENGTH in src/lib/teamName.ts and
+        // src/lib/rulesLimits.test.ts checks every copy of the bound.
+        //
+        // teamColor is not in the list for the reason it is not on members:
+        // "no other team holds it" needs the whole collection, so it is
+        // written only by the setTeamColor callable and the
+        // onSeasonTeamWritten trigger.
+        allow update: if isSignedIn()
+          && get(/databases/$(database)/documents/seasons/$(seasonId)/members/$(request.auth.uid)).data.teamId == teamId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamName'])
+          && request.resource.data.teamName is string
+          && request.resource.data.teamName.size() > 0
+          && request.resource.data.teamName.size() <= 40;
+        // Creating and deleting teams, and assigning pick positions, is the
+        // admin's, from the setup panel and the startDraft function.
         allow write: if isSeasonAdmin(seasonId);
       }
 

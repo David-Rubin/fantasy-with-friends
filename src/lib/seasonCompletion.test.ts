@@ -38,7 +38,7 @@ describe('canCompleteSeason', () => {
 describe('seasonWinner', () => {
   it('names the highest score', () => {
     expect(seasonWinner(['a', 'b', 'c'], { a: 10, b: 40, c: 25 })).toEqual({
-      uids: ['b'],
+      keys: ['b'],
       points: 40,
       tied: false,
     })
@@ -48,19 +48,19 @@ describe('seasonWinner', () => {
   // season on a technicality nobody agreed to.
   it('shares a tie rather than breaking it', () => {
     expect(seasonWinner(['a', 'b', 'c'], { a: 40, b: 40, c: 25 })).toEqual({
-      uids: ['a', 'b'],
+      keys: ['a', 'b'],
       points: 40,
       tied: true,
     })
   })
 
   it('counts a member with no total as zero, as the leaderboard does', () => {
-    expect(seasonWinner(['a', 'b'], { a: -5 })).toEqual({ uids: ['b'], points: 0, tied: false })
+    expect(seasonWinner(['a', 'b'], { a: -5 })).toEqual({ keys: ['b'], points: 0, tied: false })
   })
 
   it('lets a negative score win when everyone is negative', () => {
     expect(seasonWinner(['a', 'b'], { a: -5, b: -12 })).toEqual({
-      uids: ['a'],
+      keys: ['a'],
       points: -5,
       tied: false,
     })

@@ -4,7 +4,7 @@ import { Button } from './Button'
 import { Input } from './Input'
 import { AccentColorPicker } from './AccentColorPicker'
 import { TeamColorDot } from './TeamColorDot'
-import { isColorTakenError, renameTeam, setTeamColor } from '../lib/seasonApi'
+import { isColorTakenError, renameTeam, setTeamColor, type TeamTarget } from '../lib/seasonApi'
 import { normalizeTeamName, teamNameProblem, TEAM_NAME_MAX_LENGTH } from '../lib/teamName'
 import type { AccentColor, SeasonState } from '../lib/types'
 import { t } from '../lib/i18n'
@@ -12,9 +12,15 @@ import { t } from '../lib/i18n'
 interface TeamIdentityCardProps {
   seasonId: string
   leagueId: string
-  uid: string
+  /** Which document the name lives on — see renameTeam. */
+  target: TeamTarget
   /** The stored name, straight from the roster listener. */
   teamName: string
+  /**
+   * The other people on this team, in team mode. Shown so a member editing
+   * "their" team can see it is shared — and that its name and colour are.
+   */
+  teammates?: string[]
   /** The stored colour, or the fallback one this team is being drawn in. */
   teamColor: AccentColor
   /** Colours other teams in this season hold. */
@@ -44,8 +50,9 @@ interface TeamIdentityCardProps {
 export function TeamIdentityCard({
   seasonId,
   leagueId,
-  uid,
+  target,
   teamName,
+  teammates = [],
   teamColor,
   takenColors,
   takenLabel,
@@ -86,7 +93,7 @@ export function TeamIdentityCard({
     setSaving(true)
     setError('')
     try {
-      await renameTeam(seasonId, leagueId, uid, teamName, value)
+      await renameTeam(seasonId, leagueId, target, teamName, value)
       setJustSaved(true)
     } catch (cause) {
       console.error('Team rename rejected', cause)
@@ -121,6 +128,11 @@ export function TeamIdentityCard({
         {/* The name alone. The dot beside it is the colour, and the heading
             this collapses from already said whose team it is. */}
         <span className="min-w-0 truncate text-gray-700">{teamName}</span>
+        {teammates.length > 0 && (
+          <span className="min-w-0 truncate text-sm text-gray-400">
+            {t('team.with', { names: teammates.join(t('team.playersJoiner')) })}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setEditing(true)}
@@ -165,6 +177,12 @@ export function TeamIdentityCard({
           </button>
         )}
       </div>
+
+      {teammates.length > 0 && (
+        <p className="mb-3 text-sm text-gray-500">
+          {t('team.with', { names: teammates.join(t('team.playersJoiner')) })}
+        </p>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div className="flex flex-wrap items-end gap-3">

@@ -5,6 +5,7 @@ import {
   carriedDraftSettings,
   carriedMember,
   carriedRule,
+  carriedTeam,
   carryOverAnswered,
   carryOverSource,
   copies,
@@ -94,6 +95,33 @@ describe('carriedDraftSettings', () => {
     })
   })
 
+  it('carries team mode and the number of teams, when the mode was on', () => {
+    const settings = carriedDraftSettings({
+      draftFormat: 'snake',
+      pickOrderMethod: 'admin-set',
+      timerSeconds: 60,
+      timerExpiry: 'auto-pick',
+      teamMode: true,
+      teamCount: 3,
+    })
+    expect(settings).toMatchObject({ teamMode: true, teamCount: 3 })
+  })
+
+  it('carries neither team field when the mode was off — as a season from before teams', () => {
+    // A season that was set to teams and then back keeps a dormant teamCount;
+    // it is not a setting the new season should wake up with.
+    const settings = carriedDraftSettings({
+      draftFormat: 'snake',
+      pickOrderMethod: 'admin-set',
+      timerSeconds: 60,
+      timerExpiry: 'auto-pick',
+      teamMode: false,
+      teamCount: 3,
+    })
+    expect(settings).not.toHaveProperty('teamMode')
+    expect(settings).not.toHaveProperty('teamCount')
+  })
+
   it('differs from the defaults a season is created with otherwise', () => {
     expect(DEFAULT_DRAFT_SETTINGS).toEqual({
       draftFormat: 'snake',
@@ -124,6 +152,36 @@ describe('carriedMember', () => {
 
   it('leaves photoUrl out entirely when there is none — undefined is not a value Firestore takes', () => {
     expect(carriedMember(member(), 500)).not.toHaveProperty('photoUrl')
+  })
+
+  it('leaves the team behind unless asked, and brings it when asked', () => {
+    expect(carriedMember(member({ teamId: 'team-2' }), 500)).not.toHaveProperty('teamId')
+    expect(carriedMember(member({ teamId: 'team-2' }), 500, true).teamId).toBe('team-2')
+    // Asked, but there was none to bring: no undefined field for Firestore.
+    expect(carriedMember(member(), 500, true)).not.toHaveProperty('teamId')
+  })
+})
+
+describe('carriedTeam', () => {
+  const team = {
+    number: 2,
+    teamName: 'Castle Crashers',
+    teamColor: 'rose' as const,
+    pickPosition: 1,
+    createdAt: 1,
+  }
+
+  it('keeps the number and the name with its players, and drops what the new season assigns', () => {
+    expect(carriedTeam(team, 500, true)).toEqual({
+      number: 2,
+      teamName: 'Castle Crashers',
+      pickPosition: null,
+      createdAt: 500,
+    })
+  })
+
+  it('goes back to the default name without its players — the name was theirs', () => {
+    expect(carriedTeam(team, 500).teamName).toBe('Team 2')
   })
 })
 

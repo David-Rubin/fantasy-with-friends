@@ -5,8 +5,10 @@ import { DraftLobby } from './DraftLobby'
 import { TimerBanner } from './TimerBanner'
 import { useAuth } from '../contexts/AuthContext'
 import { draftLobbyVisible, teamCapacity } from '../lib/draft'
+import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
 import { teamColorFor } from '../lib/teamColor'
 import { accentLeftBorder } from './accentStyles'
+import { PlayerAvatars, playerNames } from './PlayerAvatars'
 import {
   submitPick,
   resolveExpiredTurn,
@@ -16,7 +18,7 @@ import {
   startDraft,
 } from '../lib/draftApi'
 import { useSeasonDraft } from '../lib/useSeasonCollections'
-import type { Contestant, ScoringRule, SeasonDoc, SeasonMember } from '../lib/types'
+import type { Contestant, ScoringRule, SeasonDoc, SeasonMember, SeasonTeam } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 
@@ -45,6 +47,7 @@ export function DraftRoom({
   leagueId,
   season,
   members,
+  teams,
   contestants,
   rules,
   isAdmin,
@@ -53,6 +56,7 @@ export function DraftRoom({
   leagueId: string
   season: SeasonDoc
   members: SeasonMember[]
+  teams: SeasonTeam[]
   contestants: Contestant[]
   rules: ScoringRule[]
   isAdmin: boolean
@@ -88,9 +92,20 @@ export function DraftRoom({
     }
   }
 
+  // What the draft is between: members, or teams in team mode. Every key the
+  // draft document carries is one of these — see src/lib/entries.ts.
+  const teamMode = isTeamMode(season)
+  const entries = seasonEntries(season, members, teams)
+  const myKey = entryKeyFor(
+    season,
+    members.find((m) => m.uid === user?.uid)
+  )
+
   // While paused the turn still belongs to whoever missed it — they may still
-  // pick if they reappear, and an admin may pick for them.
-  const isMyTurn = (draft?.status === 'active' || isPaused) && draft?.currentPickerUid === user?.uid
+  // pick if they reappear, and an admin may pick for them. In team mode the
+  // turn is the team's, and any of its members may take it.
+  const isMyTurn =
+    (draft?.status === 'active' || isPaused) && !!myKey && draft?.currentPickerUid === myKey
 
   /**
    * Wake the draft's server functions on the way into the room.
@@ -157,11 +172,14 @@ export function DraftRoom({
   const isAwaitingClose = draft?.status === 'awaiting-close'
   const haltedForSkips = draft?.haltedReason === 'skips'
   const draftable = contestants.filter((c) => c.eliminatedEpisode === null).length
-  const capacity = teamCapacity(draftable, members.length)
-  const teamsWithSlots = members
-    .map((m) => ({
-      member: m,
-      openSlots: Math.max(0, capacity - contestants.filter((c) => c.draftedByUid === m.uid).length),
+  const capacity = teamCapacity(draftable, entries.length)
+  const teamsWithSlots = entries
+    .map((entry) => ({
+      entry,
+      openSlots: Math.max(
+        0,
+        capacity - contestants.filter((c) => c.draftedByUid === entry.key).length
+      ),
     }))
     .filter((t) => t.openSlots > 0)
 
@@ -251,8 +269,7 @@ export function DraftRoom({
   }
 
   const currentPickerName = draft?.currentPickerUid
-    ? (members.find((m) => m.uid === draft.currentPickerUid)?.displayName ??
-      t('draft.unknownPicker'))
+    ? (entryByKey(entries, draft.currentPickerUid)?.label ?? t('draft.unknownPicker'))
     : ''
 
   return (
@@ -262,7 +279,8 @@ export function DraftRoom({
           what it said: see draftLobbyVisible. */}
       {draftLobbyVisible(draftLoaded, draft?.status ?? null) && (
         <DraftLobby
-          members={members}
+          entries={entries}
+          teamMode={teamMode}
           contestants={contestants}
           rules={rules}
           seasonId={seasonId}
@@ -327,10 +345,10 @@ export function DraftRoom({
                         className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">{t('draft.settle.assignPlaceholder')}</option>
-                        {teamsWithSlots.map(({ member, openSlots }) => (
-                          <option key={member.uid} value={member.uid}>
+                        {teamsWithSlots.map(({ entry, openSlots }) => (
+                          <option key={entry.key} value={entry.key}>
                             {t('draft.settle.assignOption', {
-                              name: member.displayName,
+                              name: entry.label,
                               n: openSlots,
                             })}
                           </option>
@@ -458,7 +476,7 @@ export function DraftRoom({
                   canPick: isMyTurn,
                   canPickFor:
                     isAdmin && !isMyTurn && draft.currentPickerUid
-                      ? members.find((m) => m.uid === draft.currentPickerUid)?.displayName
+                      ? entryByKey(entries, draft.currentPickerUid)?.label
                       : undefined,
                   onPick: () => handlePick(c.id),
                   onPickFor: () => handlePick(c.id, draft.currentPickerUid ?? undefined),
@@ -470,7 +488,7 @@ export function DraftRoom({
                   heading={t('draft.active.drafted', { n: drafted.length })}
                   contestants={drafted}
                   cardProps={(c) => ({
-                    ownerName: members.find((m) => m.uid === c.draftedByUid)?.displayName,
+                    ownerName: entryByKey(entries, c.draftedByUid)?.label,
                   })}
                 />
               )}
@@ -479,29 +497,29 @@ export function DraftRoom({
             {/* Team rosters */}
             <div>
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Teams
+                {t('draft.teamsHeading')}
               </h2>
               <div className="flex flex-col gap-4">
                 {/* Copied before sorting: Array.sort works in place, and sorting
-                    the state array itself both mutates it behind React's back
-                    and leaves the copy React compares against already
-                    reordered. */}
-                {[...members]
+                    the derived array is harmless, but the habit is kept from
+                    when this sorted the members state directly. */}
+                {[...entries]
                   .sort((a, b) => (a.pickPosition ?? 99) - (b.pickPosition ?? 99))
-                  .map((member) => {
-                    const teamContestants = contestants.filter((c) => c.draftedByUid === member.uid)
-                    const isCurrentPicker = draft.currentPickerUid === member.uid
+                  .map((entry) => {
+                    const teamContestants = contestants.filter((c) => c.draftedByUid === entry.key)
+                    const isCurrentPicker = draft.currentPickerUid === entry.key
                     return (
                       <div
-                        key={member.uid}
-                        className={`rounded-xl border border-l-4 p-4 ${accentLeftBorder[teamColorFor(member)]} ${isCurrentPicker ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}
+                        key={entry.key}
+                        className={`rounded-xl border border-l-4 p-4 ${accentLeftBorder[teamColorFor(entry)]} ${isCurrentPicker ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}
                       >
-                        <p className="text-sm font-semibold text-gray-800 mb-2">
-                          {member.teamName}
+                        <p className="text-sm font-semibold text-gray-800 mb-2">{entry.teamName}</p>
+                        <p className="mb-2 flex items-center gap-2 text-xs text-gray-400">
+                          <PlayerAvatars players={entry.players} />
+                          <span className="min-w-0 truncate">{playerNames(entry.players)}</span>
                         </p>
-                        <p className="text-xs text-gray-400 mb-2">{member.displayName}</p>
                         {teamContestants.length === 0 ? (
-                          <p className="text-xs text-gray-300 italic">No picks yet</p>
+                          <p className="text-xs text-gray-300 italic">{t('draft.noPicksYet')}</p>
                         ) : (
                           <ul className="flex flex-col gap-1">
                             {teamContestants.map((c) => (

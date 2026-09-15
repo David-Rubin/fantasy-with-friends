@@ -68,6 +68,7 @@ clients (`allow ...: if false`) and go through a callable instead. Precedents:
 | `removeLeagueMember` | "Is this member in a season that is drafting or active?" is a query across `seasons` plus a read in each             |
 | `listAllUsers`       | Keeps the `users` read rule own-document-only, so there is one audited path to anything wider                        |
 | `setTeamColor`       | "No other team in this season holds this colour" is a question about the whole roster, which a rule cannot query     |
+| `startDraft`         | "Every team has a player and every player has a team" is a check across the whole roster and the whole `teams` list  |
 
 A check left in the client when it belongs here is **advice, not a constraint** —
 anyone with devtools ignores it.
@@ -100,6 +101,24 @@ import nothing reaching it:
 
 The pattern is a pure module beside a thin writer: `seasonDetails.ts` decides,
 `seasonApi.ts` writes. Keep it that way when adding logic worth asserting on.
+
+### Entry keys: a uid, or a team id
+
+A season is played between _entries_. In a solo season every member is one and
+the member document is where its name, colour and pick position live; in team
+mode (`SeasonDoc.teamMode`) the entries are the `teams` subcollection and a
+member's `teamId` says which one they play for. Everything the draft and the
+leaderboard key "by uid" — `pickOrder`, `currentPickerUid`, `pickerUid`,
+`draftedByUid`, `teamTotals`, `adminPickOrder` — is really keyed by _entry
+key_: a uid in one mode, a `team-N` id in the other. The field names were kept
+because the values are opaque and compared for equality, and renaming would
+have meant rewriting every stored season.
+
+`src/lib/entries.ts` (mirrored in `functions/src/entries.ts`) is the one place
+that decides which. Get a key from `entryKeyFor` / `seasonEntries` and nowhere
+else; a component that reaches for `member.uid` as a key is wrong in team mode.
+Solo mode yields one entry per member with `key === uid`, which is why seasons
+from before teams existed need no migration.
 
 ### Every listener goes through `src/lib/listen.ts`
 

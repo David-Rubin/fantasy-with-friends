@@ -26,30 +26,37 @@ const mirrored = [
     what: 'the avatar size limit',
     file: 'storage.rules',
     // `request.resource.size <= 3 * 1024 * 1024`
-    pattern: /request\.resource\.size <= (\d+) \* 1024 \* 1024/,
+    pattern: /request\.resource\.size <= (\d+) \* 1024 \* 1024/g,
     constant: () => MAX_AVATAR_MB,
     source: 'MAX_AVATAR_MB in src/lib/avatarFile.ts',
+    occurrences: 1,
   },
   {
     what: 'the team name length limit',
     file: 'firestore.rules',
-    // `request.resource.data.teamName.size() <= 40`
-    pattern: /request\.resource\.data\.teamName\.size\(\) <= (\d+)/,
+    // `request.resource.data.teamName.size() <= 40` — once for a member's own
+    // team in a solo season, once for a team document in team mode. Both are
+    // the same name shown in the same places, so both carry the same bound.
+    pattern: /request\.resource\.data\.teamName\.size\(\) <= (\d+)/g,
     constant: () => TEAM_NAME_MAX_LENGTH,
     source: 'TEAM_NAME_MAX_LENGTH in src/lib/teamName.ts',
+    occurrences: 2,
   },
 ]
 
 describe('limits the rules enforce', () => {
-  it.each(mirrored)('$what agrees with $source', ({ file, pattern, constant }) => {
-    // From the project root: under jsdom `import.meta.url` is an http URL, and
-    // vitest runs from the root either way.
+  // Every occurrence is checked, not the first: a second rule carrying the
+  // same limit — as the team-name bound now does — would otherwise be free
+  // to drift unnoticed.
+  it.each(mirrored)('$what agrees with $source', ({ file, pattern, constant, occurrences }) => {
+    // From the project root: under jsdom `import.meta.url` is an http URL,
+    // and vitest runs from the root either way.
     const rules = readFileSync(resolve(process.cwd(), file), 'utf8')
-    const match = rules.match(pattern)
+    const matches = [...rules.matchAll(pattern)]
     expect(
-      match,
-      `${pattern} found nothing in ${file} — has the rule been rewritten?`
-    ).not.toBeNull()
-    expect(Number(match![1])).toBe(constant())
+      matches.length,
+      `${pattern} expected ${occurrences} in ${file} — has a rule been rewritten?`
+    ).toBe(occurrences)
+    for (const match of matches) expect(Number(match[1])).toBe(constant())
   })
 })

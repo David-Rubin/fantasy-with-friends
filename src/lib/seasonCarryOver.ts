@@ -1,6 +1,13 @@
 import { allEpisodeNumbers } from './scoringRules'
 import { storedPhotoFields } from './photoCrop'
-import type { ScoringRuleDoc, SeasonDoc, SeasonMemberDoc, SeasonState } from './types'
+import { t } from './i18n'
+import type {
+  ScoringRuleDoc,
+  SeasonDoc,
+  SeasonMemberDoc,
+  SeasonState,
+  SeasonTeamDoc,
+} from './types'
 
 /**
  * What a new season inherits from the one before it, decided without Firebase
@@ -92,10 +99,14 @@ export function carryOverSource<T extends CarryOverCandidate>(seasons: readonly 
   return source
 }
 
-/** The draft configuration a season carries, and nothing else from its document. */
+/**
+ * The draft configuration a season carries, and nothing else from its
+ * document. `teamMode` and `teamCount` are part of it: whether a league plays
+ * in teams, and how many, is as much a standing decision as the timer.
+ */
 export type CarriedDraftSettings = Pick<
   SeasonDoc,
-  'draftFormat' | 'pickOrderMethod' | 'timerSeconds' | 'timerExpiry'
+  'draftFormat' | 'pickOrderMethod' | 'timerSeconds' | 'timerExpiry' | 'teamMode' | 'teamCount'
 >
 
 /**
@@ -117,6 +128,11 @@ export const DEFAULT_DRAFT_SETTINGS: CarriedDraftSettings = {
  * not among them: it is a list of uids in a hand-arranged order, and carrying
  * it into a season whose roster is still being decided would promise an order
  * the draft may not keep. The admin arranges it in the setup panel, as before.
+ *
+ * Team mode and the number of teams do come across, and only when the mode
+ * was on — a season that never played in teams carries neither field, exactly
+ * as one created before teams existed. Which people are on which team is the
+ * roster's business, not the settings': see carriedMember and carriedTeam.
  */
 export function carriedDraftSettings(season: CarriedDraftSettings): CarriedDraftSettings {
   return {
@@ -124,6 +140,7 @@ export function carriedDraftSettings(season: CarriedDraftSettings): CarriedDraft
     pickOrderMethod: season.pickOrderMethod,
     timerSeconds: season.timerSeconds,
     timerExpiry: season.timerExpiry,
+    ...(season.teamMode === true ? { teamMode: true, teamCount: season.teamCount } : {}),
   }
 }
 
@@ -137,9 +154,18 @@ export function carriedDraftSettings(season: CarriedDraftSettings): CarriedDraft
  * `teamColor`, which has to be unique within a season and is handed out by the
  * onSeasonMemberWritten trigger the moment this document lands.
  *
+ * `teamId` comes across only when asked — `withTeam` — which the dialog sets
+ * when the draft settings are copied too, so the teams the id names exist in
+ * the new season. Copied on its own it would point at nothing, and the member
+ * would sit in a team-mode season assigned to a team that is not there.
+ *
  * The picture goes through storedPhotoFields so its crop comes with it.
  */
-export function carriedMember(member: SeasonMemberDoc, joinedAt: number): SeasonMemberDoc {
+export function carriedMember(
+  member: SeasonMemberDoc,
+  joinedAt: number,
+  withTeam = false
+): SeasonMemberDoc {
   return {
     uid: member.uid,
     displayName: member.displayName,
@@ -147,6 +173,31 @@ export function carriedMember(member: SeasonMemberDoc, joinedAt: number): Season
     teamName: member.teamName,
     pickPosition: null,
     joinedAt,
+    ...(withTeam && member.teamId ? { teamId: member.teamId } : {}),
+  }
+}
+
+/**
+ * One of last season's teams, as a team of the new one.
+ *
+ * The number comes across; the name only `withPlayers` — when the people who
+ * chose it are coming too. A team's name belongs to its players the way a
+ * member's does, and a team carried into a season without them is an empty
+ * box for whoever the admin drags in next, so it goes back to "Team N". Not
+ * the colour, handed out afresh by the onSeasonTeamWritten trigger, nor the
+ * pick position, which belongs to a draft that has not happened. The id is
+ * the caller's to keep: `team-N` is `team-N` in every season.
+ */
+export function carriedTeam(
+  team: SeasonTeamDoc,
+  createdAt: number,
+  withPlayers = false
+): SeasonTeamDoc {
+  return {
+    number: team.number,
+    teamName: withPlayers ? team.teamName : t('team.defaultName', { n: team.number }),
+    pickPosition: null,
+    createdAt,
   }
 }
 

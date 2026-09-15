@@ -9,6 +9,7 @@ import {
   carriedDraftSettings,
   carriedMember,
   carriedRule,
+  carriedTeam,
   carryOverAnswered,
   carryOverSource,
   copies,
@@ -138,13 +139,20 @@ export function NewSeasonModal({
       const copyParticipants = offered && copies(answers, 'participants')
       const copyRules = offered && copies(answers, 'scoringRules')
       const copySettings = offered && copies(answers, 'draftSettings')
+      // The teams go with the settings — team mode and the count are settings,
+      // and a team-mode season needs its `team-N` documents to be one. Who is
+      // on which team, and what each team is called, goes with the
+      // participants, and only if the teams they are on are coming too: see
+      // carriedMember and carriedTeam.
+      const copyTeams = copySettings && source?.teamMode === true
+      const copyTeamPlayers = copyTeams && copyParticipants
 
       // Without a season to copy from, a new season starts with the league as
       // it stands — which is what creating one has always done. With one, the
       // admin has just been asked, and "No" means nobody: league members let
       // themselves in from the league page while the season is in setup.
       const members: SeasonMemberDoc[] = copyParticipants
-        ? (sourceData?.members ?? []).map((member) => carriedMember(member, now))
+        ? (sourceData?.members ?? []).map((member) => carriedMember(member, now, copyTeamPlayers))
         : offered
           ? []
           : leagueMembers.map((member) => ({
@@ -166,6 +174,14 @@ export function NewSeasonModal({
         scoringRules: copyRules
           ? (sourceData?.scoringRules ?? []).map((rule) => carriedRule(rule, episodeCount))
           : [],
+        ...(copyTeams
+          ? {
+              teams: (sourceData?.teams ?? []).map((team) => ({
+                id: team.id,
+                doc: carriedTeam(team, now, copyTeamPlayers),
+              })),
+            }
+          : {}),
         ...(copyParticipants || copyRules || copySettings
           ? { copiedFromSeasonId: source!.id }
           : {}),
@@ -296,6 +312,12 @@ export function NewSeasonModal({
               hideLabel={t('season.carryOver.hideDraftSettings')}
             >
               <DraftSettingsSummary settings={carriedDraftSettings(source)} />
+              {/* Only where there is a layout to bring: the assignments ride
+                  with the participants question above, and an admin answering
+                  yes here and no there should know what they are keeping. */}
+              {source.teamMode === true && (
+                <p className="mt-2 text-xs text-gray-400">{t('season.carryOver.teamsNote')}</p>
+              )}
             </CarryOverQuestion>
           </div>
         )}
@@ -424,6 +446,10 @@ function DraftSettingsSummary({ settings }: { settings: CarriedDraftSettings }) 
     // a value that says seconds itself.
     [t('draft.timerPerPick'), t('draft.timerSecondsValue', { n: settings.timerSeconds })],
     [t('draft.timerExpiry'), t(timerExpiryLabels[settings.timerExpiry])],
+    [t('team.mode.question'), settings.teamMode ? t('common.yes') : t('common.no')],
+    ...(settings.teamMode
+      ? [[t('team.count.label'), String(settings.teamCount ?? 0)] as [string, string]]
+      : []),
   ]
   return (
     <dl className="flex flex-col gap-1">
