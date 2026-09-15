@@ -194,9 +194,12 @@ briefly sees empty rosters and "not a member" (see `useMySeasonIds`, which
 ignores cache-only snapshots for exactly this reason).
 
 Production is HTTP/2 and multiplexes everything, so none of this reaches it.
-Locally, keep it to two or three signed-in tabs at once — or open the extra
-accounts at `http://127.0.0.1:5173`, which is a different host to Chrome and
-gets a pool of its own (`src/lib/firebase.ts` follows the page's hostname).
+Locally, keep it to two or three signed-in tabs at once — or split them across
+two hostnames: `localhost` and `127.0.0.1` are different hosts to Chrome and
+get a pool of six each, and `src/lib/firebase.ts` points each tab's emulator
+clients at the hostname its page was opened on. Vite binds only IPv6 loopback
+by default on macOS, so `127.0.0.1:5173` answers only when the dev server is
+started with `npm run dev -- --host`.
 
 ### Signing in locally
 
