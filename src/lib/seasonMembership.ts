@@ -42,6 +42,38 @@ export function canJoinSeason({
 }
 
 /**
+ * Who may take themselves back out of a season: whoever is on its roster,
+ * for as long as it is still `setup` — the mirror of canJoinSeason, on the
+ * same reasoning. A season past setup has drawn its order from this roster,
+ * and leaving it is an admin's decision (reopenSeasonSetup, then this).
+ *
+ * The `delete` rule on the season roster is the constraint; this is what
+ * decides whether the button is drawn.
+ */
+interface LeavableInput {
+  state: SeasonState
+  isSeasonMember: boolean
+  /** False while season membership is still loading; see JoinableInput.resolved. */
+  resolved: boolean
+}
+
+export function canLeaveSeason({ state, isSeasonMember, resolved }: LeavableInput): boolean {
+  if (!resolved) return false
+  return state === 'setup' && isSeasonMember
+}
+
+/**
+ * Whether an admin may take somebody off a season's roster. Setup only, for
+ * the reason above: the panel that offers it is only drawn then, and the
+ * removed member can let themselves back in from the league page while it
+ * still is. An admin's `write` on the roster is not limited by state in the
+ * rules — this is the courtesy that keeps the control off a drafted season.
+ */
+export function canRemoveFromSeason(state: SeasonState): boolean {
+  return state === 'setup'
+}
+
+/**
  * Who is offered the way into a running draft.
  *
  * Deliberately the same people the season page would have offered it to, since

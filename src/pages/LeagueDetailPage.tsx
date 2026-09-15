@@ -18,8 +18,8 @@ import { useMySeasonIds } from '../components/SeasonMemberGate'
 import { leagueTrail } from '../lib/breadcrumbs'
 import { updateLeagueDetails, removeLeagueMember } from '../lib/leagueApi'
 import { approveJoinRequest, rejectJoinRequest, useMyJoinRequests } from '../lib/joinRequests'
-import { canJoinDraft, canJoinSeason } from '../lib/seasonMembership'
-import { joinSeason } from '../lib/seasonApi'
+import { canJoinDraft, canJoinSeason, canLeaveSeason } from '../lib/seasonMembership'
+import { joinSeason, leaveSeason } from '../lib/seasonApi'
 import type {
   LeagueDoc,
   LeagueJoinRequestDoc,
@@ -56,6 +56,7 @@ export function LeagueDetailPage() {
   const joinRequestStatus = useMyJoinRequests(user?.uid)
   const { seasonIds: mySeasonIds, resolved: seasonMembershipResolved } = useMySeasonIds()
   const [joiningSeason, setJoiningSeason] = useState<string | null>(null)
+  const [leavingSeason, setLeavingSeason] = useState<string | null>(null)
   const [newSeasonOpen, setNewSeasonOpen] = useState(false)
   // Bumped every time the dialog is opened, and used as its key: the dialog
   // then mounts fresh each time, so yesterday's half-typed label and answers
@@ -320,6 +321,19 @@ export function LeagueDetailPage() {
     }
   }
 
+  // No confirmation: leaving a season in setup is undone by the Join button
+  // that takes this one's place, and nothing about the member is lost with
+  // the roster row beyond the team name they can type again.
+  async function handleLeaveSeason(seasonId: string) {
+    if (!leagueId || !user) return
+    setLeavingSeason(seasonId)
+    try {
+      await leaveSeason(seasonId, leagueId, user.uid)
+    } finally {
+      setLeavingSeason(null)
+    }
+  }
+
   if (!league) {
     return (
       <Layout breadcrumbs={leagueTrail(undefined)}>
@@ -459,6 +473,14 @@ export function LeagueDetailPage() {
                   isSuperadmin,
                   resolved: seasonMembershipResolved,
                 })
+                // The way back out, for as long as the way in is open — see
+                // canLeaveSeason. Where Join would be, so the card reads the
+                // same whichever side of the roster you are on.
+                const leavable = canLeaveSeason({
+                  state: season.state,
+                  isSeasonMember: mySeasonIds.has(season.id),
+                  resolved: seasonMembershipResolved,
+                })
                 // A link whenever the season is openable, the draft included:
                 // the season page is the draft now, so the card and the button
                 // beside it lead to the same place. While they did not — while
@@ -491,6 +513,16 @@ export function LeagueDetailPage() {
                         {joiningSeason === season.id ? t('season.joining') : t('season.join')}
                       </Button>
                     )}
+                    {leavable && (
+                      <Button
+                        variant="secondary"
+                        className="!text-red-700 hover:!bg-red-50"
+                        onClick={() => handleLeaveSeason(season.id)}
+                        loading={leavingSeason === season.id}
+                      >
+                        {leavingSeason === season.id ? t('season.leaving') : t('season.leave')}
+                      </Button>
+                    )}
                     {/* Beside the card rather than within it, for the reason
                         above: the card is itself a link. */}
                     {draftOpen && (
@@ -504,12 +536,12 @@ export function LeagueDetailPage() {
                         itself, which stays with the owner. */}
                     {canDeleteSeasons && (
                       <Button
-                        variant="secondary"
+                        variant="danger"
                         onClick={() => {
                           setSeasonDeleteError('')
                           setSeasonDeleteTarget(season)
                         }}
-                        className="!min-h-0 !px-3 !py-2 text-xs !text-red-700 hover:!bg-red-50"
+                        className="!min-h-0 !px-3 !py-2 text-xs !bg-red-700 hover:!bg-red-800"
                       >
                         {t('common.delete')}
                       </Button>

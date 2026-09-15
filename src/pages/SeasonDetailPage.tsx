@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { doc, getDoc, collection, deleteField, updateDoc, addDoc } from 'firebase/firestore'
+import { doc, collection, deleteField, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { listenDoc, listenQuery, guarded } from '../lib/listen'
+import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
@@ -39,7 +39,14 @@ import {
   TIMER_SECONDS_MIN,
   openDraftProblem,
 } from '../lib/seasonDetails'
-import { setSeasonCompleted, updateSeasonDetails, writeSeasonSetup } from '../lib/seasonApi'
+import {
+  removeSeasonMember,
+  setSeasonCompleted,
+  updateSeasonDetails,
+  writeSeasonSetup,
+} from '../lib/seasonApi'
+import { canRemoveFromSeason } from '../lib/seasonMembership'
+import { UserAvatar } from '../components/UserAvatar'
 import {
   TEAM_COUNT_MAX,
   TEAM_COUNT_MIN,
@@ -199,6 +206,12 @@ export function SeasonDetailPage() {
   const [savingSetup, setSavingSetup] = useState(false)
   const [openingDraft, setOpeningDraft] = useState(false)
   const [assignFreeAgentOpen, setAssignFreeAgentOpen] = useState<string | null>(null)
+  // The participant an admin is about to take off the roster, while the
+  // confirmation is up. Confirmed rather than immediate because there is no
+  // admin control to put them back: the member has to rejoin themselves.
+  const [removeMemberTarget, setRemoveMemberTarget] = useState<MemberDoc | null>(null)
+  const [removingMember, setRemovingMember] = useState(false)
+  const [removeMemberError, setRemoveMemberError] = useState('')
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState({ label: '', episodeCount: '' })
   const [savingEdit, setSavingEdit] = useState(false)
@@ -360,23 +373,35 @@ export function SeasonDetailPage() {
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'members'),
       'season members',
-      guarded('season members', async (snap) => {
+      (snap) => {
         const list: MemberDoc[] = snap.docs.map((d) => {
           const data = d.data() as SeasonMemberDoc
           // See LeagueMemberDoc.displayName — cross-user reads are denied.
           return { ...data, uid: d.id, displayName: data.displayName || d.id }
         })
         setMembers(list)
-
-        // Determine my role in the league
-        if (leagueId && user) {
-          const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
-          if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
-        }
-      })
+      }
     )
     return unsub
-  }, [seasonId, user, leagueId, canView])
+  }, [seasonId, user, canView])
+
+  // My role in the league, as a listener of its own. It used to be a one-shot
+  // read inside the roster listener above, which failed whenever that listener
+  // first fired from the cache with the client offline — the read threw
+  // "client is offline", the role stayed null, and an admin on a slow
+  // connection got the member's view with no setup panel. A listener waits
+  // for the connection instead, and follows a role change while the page is
+  // open, which the read never did.
+  useEffect(() => {
+    if (!leagueId || !user || !canView) return
+    return listenDoc(
+      doc(db, 'leagues', leagueId, 'members', user.uid),
+      'my league role',
+      (snap) => {
+        setMyRole(snap.exists() ? (snap.data() as { role: MemberRole }).role : null)
+      }
+    )
+  }, [leagueId, user, canView])
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -605,6 +630,21 @@ export function SeasonDetailPage() {
     }
   }
 
+  async function handleRemoveMember() {
+    if (!seasonId || !leagueId || !removeMemberTarget) return
+    setRemovingMember(true)
+    setRemoveMemberError('')
+    try {
+      await removeSeasonMember(seasonId, leagueId, removeMemberTarget.uid)
+      setRemoveMemberTarget(null)
+    } catch (error) {
+      console.error('Could not remove the participant', error)
+      setRemoveMemberError(t('season.participants.removeFailed'))
+    } finally {
+      setRemovingMember(false)
+    }
+  }
+
   /** `entryKey` is a member's uid, or a team id in team mode — see src/lib/entries.ts. */
   async function handleAssignFreeAgent(contestantId: string, entryKey: string) {
     if (!seasonId || !user) return
@@ -649,6 +689,8 @@ export function SeasonDetailPage() {
   const seasonClosed = season?.state === 'complete'
   /** Admin controls that write something, which a closed season does not offer. */
   const canManageSeason = isAdmin && !seasonClosed
+  /** An admin looking at a season they are still setting up — the setup panel's audience. */
+  const adminInSetup = isAdmin && season?.state === 'setup'
   const canClose = season
     ? canCompleteSeason(season.state, season.episodeCount, episodeStatuses)
     : false
@@ -836,8 +878,12 @@ export function SeasonDetailPage() {
           joined a season already under way — or who came back to a finished
           one — had nowhere to name their team at all. Nothing in a season
           depends on the name or the colour, so there is nothing to protect by
-          taking them away; the only test is whether this is your season. */}
-      {myMember && myEntry && myKey && seasonId && leagueId && (
+          taking them away; the only test is whether this is your season.
+
+          Except for an admin during setup, who has the whole setup panel below
+          to get through and can name their team as soon as the draft opens —
+          the card is one more thing between them and the work. */}
+      {myMember && myEntry && myKey && seasonId && leagueId && !adminInSetup && (
         <TeamIdentityCard
           seasonId={seasonId}
           leagueId={leagueId}
@@ -854,14 +900,64 @@ export function SeasonDetailPage() {
       )}
       {/* A member of a team-mode season nobody has placed yet has no team to
           name. Said plainly, rather than the card silently not appearing. */}
-      {myMember && !myEntry && teamMode && (
+      {myMember && !myEntry && teamMode && !adminInSetup && (
         <p className="mb-6 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
           {t('team.unassignedNotice')}
         </p>
       )}
 
+      {/* Participants — who is in the season, and the way to take somebody
+          out of it. Its own panel above the setup rather than a section of
+          it: the roster is people, the setup is configuration, and the
+          remove control is the one thing here that acts on somebody else. */}
+      {adminInSetup && canRemoveFromSeason(season.state) && (
+        <section className="mb-8 rounded-2xl border border-gray-200 bg-white p-6">
+          <h2 className="mb-1 text-lg font-semibold text-gray-900">
+            {t('season.participants.heading', { n: members.length })}
+          </h2>
+          <p className="mb-4 text-sm text-gray-500">{t('season.participants.help')}</p>
+          {members.length === 0 ? (
+            <p className="text-sm text-gray-400">{t('season.participants.empty')}</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {[...members]
+                .sort((a, b) =>
+                  a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' })
+                )
+                .map((m) => (
+                  <li
+                    key={m.uid}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 px-4 py-3"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <UserAvatar
+                        displayName={m.displayName}
+                        photoUrl={m.photoUrl}
+                        photoCrop={m.photoCrop}
+                      />
+                      <span className="truncate text-sm font-medium text-gray-800">
+                        {m.displayName}
+                      </span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      className="!min-h-0 shrink-0 !px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50"
+                      onClick={() => {
+                        setRemoveMemberError('')
+                        setRemoveMemberTarget(m)
+                      }}
+                    >
+                      {t('season.participants.remove')}
+                    </Button>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       {/* Setup panel */}
-      {season.state === 'setup' && isAdmin && (
+      {adminInSetup && (
         <div className="mb-8 rounded-2xl border border-blue-100 bg-blue-50 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Season Setup</h2>
 
@@ -1590,6 +1686,28 @@ export function SeasonDetailPage() {
             {t('season.delete')}
           </Button>
         </div>
+      </Modal>
+
+      {/* Remove a participant */}
+      <Modal
+        open={removeMemberTarget !== null}
+        onClose={() => setRemoveMemberTarget(null)}
+        title={t('season.participants.removeTitle', {
+          name: removeMemberTarget?.displayName ?? '',
+        })}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRemoveMemberTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" loading={removingMember} onClick={handleRemoveMember}>
+              {removingMember ? t('season.participants.removing') : t('season.participants.remove')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">{t('season.participants.removeExplain')}</p>
+        {removeMemberError && <p className="mt-3 text-sm text-red-600">{removeMemberError}</p>}
       </Modal>
 
       <Modal
