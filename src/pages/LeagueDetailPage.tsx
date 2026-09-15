@@ -515,7 +515,8 @@ export function LeagueDetailPage() {
                     )}
                     {leavable && (
                       <Button
-                        variant="muted"
+                        variant="secondary"
+                        className="!text-red-700 hover:!bg-red-50"
                         onClick={() => handleLeaveSeason(season.id)}
                         loading={leavingSeason === season.id}
                       >
@@ -535,12 +536,12 @@ export function LeagueDetailPage() {
                         itself, which stays with the owner. */}
                     {canDeleteSeasons && (
                       <Button
-                        variant="secondary"
+                        variant="danger"
                         onClick={() => {
                           setSeasonDeleteError('')
                           setSeasonDeleteTarget(season)
                         }}
-                        className="!min-h-0 !px-3 !py-2 text-xs !text-red-700 hover:!bg-red-50"
+                        className="!min-h-0 !px-3 !py-2 text-xs !bg-red-700 hover:!bg-red-800"
                       >
                         {t('common.delete')}
                       </Button>

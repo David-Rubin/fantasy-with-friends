@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
-type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'muted'
+type Variant = 'primary' | 'secondary' | 'danger' | 'ghost'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant
@@ -15,11 +15,6 @@ const variantClasses: Record<Variant, string> = {
     'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus-visible:ring-gray-400 disabled:opacity-50',
   danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:bg-red-300',
   ghost: 'text-gray-600 hover:bg-gray-100 focus-visible:ring-gray-400 disabled:opacity-50',
-  // A filled button in the primary's shape for an action that undoes one —
-  // leaving a season beside joining it. Grey rather than red: it is not
-  // destructive, and a member can join again as long as the season allows.
-  muted:
-    'bg-gray-600 text-white hover:bg-gray-700 focus-visible:ring-gray-500 disabled:bg-gray-300',
 }
 
 export function Button({
