@@ -287,8 +287,20 @@ service cloud.firestore {
           && seasonState(seasonId) == 'setup'
           && isLeagueMember(seasonLeagueId(seasonId));
 
-        // Adding anyone else, assigning pick positions and putting people on
-        // teams stays with admins.
+        // Leaving, while the season is still being set up — the mirror of
+        // joining above, on the same reasoning: no pick order exists yet, so
+        // a departure now disturbs nothing. Once the draft opens the roster is
+        // what the order was drawn from, and only an admin reopening setup
+        // makes it a roster again. Nothing else needs cleaning up: which team
+        // a member played for lives only on this document (see
+        // SeasonMemberDoc.teamId), the colour frees itself with it, and a
+        // hand-arranged pick order drops a departed member when it is read
+        // (see reconcilePickOrder).
+        allow delete: if request.auth.uid == uid
+          && seasonState(seasonId) == 'setup';
+
+        // Adding anyone else, removing them, assigning pick positions and
+        // putting people on teams stays with admins.
         allow write: if isSeasonAdmin(seasonId);
       }
 

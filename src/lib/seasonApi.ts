@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -191,6 +192,46 @@ export async function joinSeason(
 
   await logAuditEvent({
     action: 'season_joined',
+    seasonId,
+    leagueId,
+    targetUid: uid,
+  })
+}
+
+/**
+ * A member taking themselves off a season's roster.
+ *
+ * Whether they may is decided in ./seasonMembership and, as a constraint,
+ * by the `delete` rule on the season roster: own document, season still in
+ * setup. Nothing else is written — see the rule for why nothing needs to be.
+ */
+export async function leaveSeason(seasonId: string, leagueId: string, uid: string): Promise<void> {
+  await deleteDoc(doc(db, 'seasons', seasonId, 'members', uid))
+
+  await logAuditEvent({
+    action: 'season_left',
+    seasonId,
+    leagueId,
+    targetUid: uid,
+  })
+}
+
+/**
+ * An admin taking somebody off a season's roster, from the setup panel.
+ *
+ * The same write as leaveSeason under the admin's `write` on the roster,
+ * recorded under its own action because who did it is the whole difference:
+ * a member who left chose to, a member who was removed did not.
+ */
+export async function removeSeasonMember(
+  seasonId: string,
+  leagueId: string,
+  uid: string
+): Promise<void> {
+  await deleteDoc(doc(db, 'seasons', seasonId, 'members', uid))
+
+  await logAuditEvent({
+    action: 'season_member_removed',
     seasonId,
     leagueId,
     targetUid: uid,

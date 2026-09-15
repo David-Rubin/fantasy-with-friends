@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { canJoinDraft, canJoinSeason } from './seasonMembership'
+import {
+  canJoinDraft,
+  canJoinSeason,
+  canLeaveSeason,
+  canRemoveFromSeason,
+} from './seasonMembership'
 import type { SeasonState } from './types'
 
 const base = {
@@ -67,5 +72,34 @@ describe('canJoinDraft', () => {
   // membership is still being read back.
   it('waits until membership is known', () => {
     expect(canJoinDraft({ ...base, resolved: false })).toBe(false)
+  })
+})
+
+describe('canLeaveSeason', () => {
+  it('lets a member out of a season still being set up', () => {
+    expect(canLeaveSeason({ state: 'setup', isSeasonMember: true, resolved: true })).toBe(true)
+  })
+
+  it('is closed to somebody not on the roster', () => {
+    expect(canLeaveSeason({ state: 'setup', isSeasonMember: false, resolved: true })).toBe(false)
+  })
+
+  it('is closed once the season has left setup — the order was drawn from this roster', () => {
+    for (const state of ['draft', 'active', 'complete'] as const) {
+      expect(canLeaveSeason({ state, isSeasonMember: true, resolved: true })).toBe(false)
+    }
+  })
+
+  it('offers nothing while membership is still loading', () => {
+    expect(canLeaveSeason({ state: 'setup', isSeasonMember: true, resolved: false })).toBe(false)
+  })
+})
+
+describe('canRemoveFromSeason', () => {
+  it('is setup only', () => {
+    expect(canRemoveFromSeason('setup')).toBe(true)
+    for (const state of ['draft', 'active', 'complete'] as const) {
+      expect(canRemoveFromSeason(state)).toBe(false)
+    }
   })
 })
