@@ -68,14 +68,15 @@ export function pickTeamColor(taken: TeamColor[], random: () => number = Math.ra
 }
 
 /**
- * Which member is holding `color`, ignoring the one asking for it. Null when it
- * is free.
+ * Which entry is holding `color`, ignoring the one asking for it. Null when it
+ * is free. Keys are entry keys — member uids in a solo season, team ids in
+ * team mode — and a roster of either kind is checked the same way.
  */
 export function takenBy(
-  members: { uid: string; teamColor?: string }[],
+  entries: { key: string; teamColor?: string }[],
   color: TeamColor,
-  askingUid: string
+  askingKey: string
 ): string | null {
-  const holder = members.find((m) => m.uid !== askingUid && m.teamColor === color)
-  return holder ? holder.uid : null
+  const holder = entries.find((e) => e.key !== askingKey && e.teamColor === color)
+  return holder ? holder.key : null
 }

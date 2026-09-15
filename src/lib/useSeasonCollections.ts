@@ -2,7 +2,15 @@ import { useEffect, useState } from 'react'
 import { collection } from 'firebase/firestore'
 import { db } from './firebase'
 import { listenQuery } from './listen'
-import type { Contestant, ContestantDoc, DraftDoc, ScoringRule, ScoringRuleDoc } from './types'
+import type {
+  Contestant,
+  ContestantDoc,
+  DraftDoc,
+  ScoringRule,
+  ScoringRuleDoc,
+  SeasonTeam,
+  SeasonTeamDoc,
+} from './types'
 
 /**
  * The two collections every page below a season reads the same way.
@@ -58,6 +66,27 @@ export function useSeasonScoringRules(
   }, [seasonId, canView])
 
   return rules
+}
+
+/**
+ * The season's teams — empty for a solo season, which has none, and for a
+ * season in team mode before the admin has saved a layout. Listened to in
+ * every state rather than only in team mode, because the flag and the
+ * documents arrive in separate snapshots and a page that waited for the flag
+ * before opening the watch would draw a frame of a team-mode season with no
+ * teams in it.
+ */
+export function useSeasonTeams(seasonId: string | undefined, canView: boolean): SeasonTeam[] {
+  const [teams, setTeams] = useState<SeasonTeam[]>([])
+
+  useEffect(() => {
+    if (!seasonId || !canView) return
+    return listenQuery(collection(db, 'seasons', seasonId, 'teams'), 'season teams', (snap) => {
+      setTeams(snap.docs.map((d) => ({ id: d.id, ...(d.data() as SeasonTeamDoc) })))
+    })
+  }, [seasonId, canView])
+
+  return teams
 }
 
 /**

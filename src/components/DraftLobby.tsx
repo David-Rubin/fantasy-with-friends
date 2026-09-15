@@ -1,16 +1,18 @@
 import { Button } from './Button'
 import { ContestantGrid } from './ContestantGrid'
 import { ScoringRulesCard } from './ScoringRulesCard'
-import { UserAvatar } from './UserAvatar'
-import type { Contestant, PhotoCrop, ScoringRule } from '../lib/types'
+import { PlayerAvatars, playerNames, type EntryPlayer } from './PlayerAvatars'
+import type { Contestant, ScoringRule } from '../lib/types'
 import { t } from '../lib/i18n'
 
-/** Who is in the season, as the lobby lists them. */
-export interface LobbyMember {
-  uid: string
-  displayName: string
-  photoUrl?: string
-  photoCrop?: PhotoCrop
+/**
+ * Who is drafting, as the lobby lists them: a member each in a solo season,
+ * a team each in team mode. See src/lib/entries.ts.
+ */
+export interface LobbyEntry {
+  key: string
+  teamName: string
+  players: EntryPlayer[]
   pickPosition: number | null
 }
 
@@ -31,7 +33,8 @@ export interface LobbyMember {
  * doors to the same room, one of which skips the sign.
  */
 export function DraftLobby({
-  members,
+  entries,
+  teamMode,
   contestants,
   rules,
   seasonId,
@@ -41,7 +44,9 @@ export function DraftLobby({
   onStartDraft,
   startingDraft,
 }: {
-  members: LobbyMember[]
+  entries: LobbyEntry[]
+  /** Whether the rows are teams — in which case the team's name leads. */
+  teamMode: boolean
   contestants: Contestant[]
   rules: ScoringRule[]
   seasonId: string
@@ -56,19 +61,32 @@ export function DraftLobby({
       <div className="rounded-2xl border border-gray-200 bg-white p-6">
         <p className="text-gray-500 mb-4">{t('draft.lobby.waitingForAdmin')}</p>
         <div className="flex flex-col gap-2 mb-4">
-          {members.map((m) => (
-            <div key={m.uid} className="flex items-center justify-between gap-2 text-sm">
+          {entries.map((entry) => (
+            <div key={entry.key} className="flex items-center justify-between gap-2 text-sm">
               <span className="flex min-w-0 items-center gap-2">
-                <UserAvatar
-                  displayName={m.displayName}
-                  photoUrl={m.photoUrl}
-                  photoCrop={m.photoCrop}
-                />
-                <span className="truncate font-medium text-gray-800">{m.displayName}</span>
+                <PlayerAvatars players={entry.players} />
+                {/* In a solo season the team name is a joke the member made
+                    up and the person is who you are waiting on; in team mode
+                    the team is the thing drafting and its players are who it
+                    is made of. */}
+                {teamMode ? (
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-gray-800">
+                      {entry.teamName}
+                    </span>
+                    <span className="block truncate text-xs text-gray-500">
+                      {playerNames(entry.players)}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="truncate font-medium text-gray-800">
+                    {playerNames(entry.players)}
+                  </span>
+                )}
               </span>
-              {m.pickPosition && (
+              {entry.pickPosition && (
                 <span className="text-gray-400">
-                  {t('draft.lobby.yourPosition', { n: m.pickPosition })}
+                  {t('draft.lobby.yourPosition', { n: entry.pickPosition })}
                 </span>
               )}
             </div>

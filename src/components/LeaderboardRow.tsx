@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import type { AccentColor, Contestant, PhotoCrop } from '../lib/types'
+import type { AccentColor, Contestant } from '../lib/types'
 import { Badge } from './Badge'
 import { t } from '../lib/i18n'
-import { UserAvatar } from './UserAvatar'
+import { PlayerAvatars, playerNames, type EntryPlayer } from './PlayerAvatars'
 import { accentLeftBorder } from './accentStyles'
 
 interface ContestantBreakdown {
@@ -16,11 +16,8 @@ interface ContestantBreakdown {
 interface LeaderboardRowProps {
   rank: number
   teamName: string
-  playerName: string
-  /** The player's picture, when they have uploaded one. */
-  playerPhotoUrl?: string
-  /** Travels with the URL — see UserAvatar. */
-  playerPhotoCrop?: PhotoCrop
+  /** Who plays for this entry: one member, or a team's several. */
+  players: EntryPlayer[]
   totalPoints: number
   delta: number | null
   /**
@@ -37,9 +34,7 @@ interface LeaderboardRowProps {
 export function LeaderboardRow({
   rank,
   teamName,
-  playerName,
-  playerPhotoUrl,
-  playerPhotoCrop,
+  players,
   totalPoints,
   delta,
   teamColor,
@@ -59,15 +54,10 @@ export function LeaderboardRow({
         aria-expanded={expanded}
       >
         <span className="w-8 text-lg font-bold text-gray-400">#{rank}</span>
-        <UserAvatar
-          displayName={playerName}
-          photoUrl={playerPhotoUrl}
-          photoCrop={playerPhotoCrop}
-          ringColor={teamColor}
-        />
+        <PlayerAvatars players={players} ringColor={teamColor} />
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-gray-900 truncate">{teamName}</p>
-          <p className="text-xs text-gray-500 truncate">{playerName}</p>
+          <p className="text-xs text-gray-500 truncate">{playerNames(players)}</p>
         </div>
         <div className="text-right flex-shrink-0">
           <p className="font-bold text-gray-900">{totalPoints} pts</p>

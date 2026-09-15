@@ -49,9 +49,9 @@ describe('pickTeamColor', () => {
 
 describe('takenBy', () => {
   const roster = [
-    { uid: 'ada', teamColor: 'sage' },
-    { uid: 'bob', teamColor: 'rose' },
-    { uid: 'mia' },
+    { key: 'ada', teamColor: 'sage' },
+    { key: 'bob', teamColor: 'rose' },
+    { key: 'mia' },
   ]
 
   it('names the member holding a colour', () => {

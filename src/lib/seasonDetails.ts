@@ -1,4 +1,5 @@
 import type { SeasonDoc } from './types'
+import type { TeamAssignmentProblem } from './teamAssignment'
 
 /**
  * The rules governing an edit to a season's details, with no Firebase in sight.
@@ -60,15 +61,27 @@ export function episodeCountProblem(
  * first pick. Checked here so the button says why it is disabled, and again
  * in the startDraft Cloud Function, which is the check that actually holds —
  * the roster can change between this page and the lobby.
+ *
+ * `entryCount` is what drafts: members in a solo season, teams in team mode.
+ * `teamProblem` is the team layout's own verdict (see teamAssignmentProblem
+ * in ./teamAssignment), null in a solo season; it comes before the count
+ * because a team with nobody on it is not something to share the pool with.
  */
 export function openDraftProblem(
   contestantCount: number,
   ruleCount: number,
-  playerCount: number
-): 'too-few-contestants' | 'no-rules' | 'more-players-than-contestants' | null {
+  entryCount: number,
+  teamProblem: TeamAssignmentProblem | null = null
+):
+  | 'too-few-contestants'
+  | 'no-rules'
+  | TeamAssignmentProblem
+  | 'more-players-than-contestants'
+  | null {
   if (contestantCount < 2) return 'too-few-contestants'
   if (ruleCount < 1) return 'no-rules'
-  if (playerCount > contestantCount) return 'more-players-than-contestants'
+  if (teamProblem) return teamProblem
+  if (entryCount > contestantCount) return 'more-players-than-contestants'
   return null
 }
 

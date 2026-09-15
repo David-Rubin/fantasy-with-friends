@@ -186,8 +186,8 @@ export interface SeasonDoc {
   draftFormat: DraftFormat
   pickOrderMethod: PickOrderMethod
   /**
-   * The order an admin arranged by hand, as uids, used when
-   * `pickOrderMethod` is 'admin-set'. Kept on the season rather than as each
+   * The order an admin arranged by hand, as entry keys — uids, or team ids
+   * in team mode — used when `pickOrderMethod` is 'admin-set'. Kept on the season rather than as each
    * member's `pickPosition` because a position is what the draft assigns when
    * it opens — this is the intention beforehand, and it has to survive the
    * season going back to setup and the draft being drawn again.
@@ -200,11 +200,35 @@ export interface SeasonDoc {
   adminPickOrder?: string[]
   timerSeconds: number
   timerExpiry: TimerExpiry
+  /**
+   * Whether this season is played in teams — several members drafting and
+   * scoring as one entry — rather than every member for themselves.
+   *
+   * In team mode the entries are the documents in the `teams` subcollection,
+   * and a member's `teamId` says which one they play for. Every field keyed
+   * "by uid" elsewhere on this season is then keyed by team id instead: the
+   * values are entry keys, and src/lib/entries.ts is what decides which kind.
+   *
+   * Optional: absent on every season created before teams existed, and read
+   * as false. Only `true` switches anything on, so a season that was set to
+   * teams and then back keeps its dormant team documents without them being
+   * drawn.
+   */
+  teamMode?: boolean
+  /**
+   * How many teams the admin declared, when `teamMode` is set. The `teams`
+   * subcollection holds `team-1` … `team-{teamCount}`; this is the number the
+   * setup form shows and the count the containers are drawn from.
+   */
+  teamCount?: number
   createdAt: number
   firstEpisodeScoredAt: number | null
-  /** Written by Cloud Function after each episode score submission */
+  /**
+   * Written by Cloud Function after each episode score submission. Keyed by
+   * entry key — a uid, or a team id in team mode (see src/lib/entries.ts).
+   */
   teamTotals: Record<string, number>
-  /** [uid][episodeNumber] running cumulative total through that episode */
+  /** [entryKey][episodeNumber] running cumulative total through that episode */
   teamEpisodeTotals: Record<string, Record<string, number>>
 }
 
@@ -230,6 +254,21 @@ export interface SeasonMemberDoc {
   pickPosition: number | null
   joinedAt: number
   /**
+   * The team this member plays for, when the season is in team mode: the id
+   * of a document in the season's `teams` subcollection. Absent means
+   * unassigned, which is every member's state until an admin drags them into
+   * a team, and is what blocks the draft from opening.
+   *
+   * This is the only record of who is on which team — the team document
+   * carries no member list. A member document is deleted by several paths
+   * that know nothing about teams (a league removal, an account deletion),
+   * and a list on the team would be left pointing at nobody the first time
+   * one of them ran. Grouping by this field instead is self-healing.
+   *
+   * Admin-written only. Meaningless, and ignored, when `teamMode` is not set.
+   */
+  teamId?: string
+  /**
    * Denormalized from the owner's user doc, for the same reason as
    * `displayName`: a roster cannot read `users/{uid}` for anyone but the
    * signed-in person. Kept current by the onUserProfileWritten trigger.
@@ -239,6 +278,26 @@ export interface SeasonMemberDoc {
   photoUrl?: string
   /** Denormalized beside `photoUrl`, and kept current by the same trigger. */
   photoCrop?: PhotoCrop
+}
+
+/**
+ * One team in a season played in team mode, at `seasons/{seasonId}/teams/{id}`.
+ *
+ * Ids are `team-1` … `team-N`, so "Team 3" is `team-3` and the setup panel's
+ * containers map onto documents without a lookup. In team mode this is the
+ * entry: it holds the name, colour and pick position a member document holds
+ * in a solo season, and its id is what `pickOrder`, `draftedByUid` and
+ * `teamTotals` carry. Who plays for it is recorded on the members — see
+ * SeasonMemberDoc.teamId.
+ */
+export interface SeasonTeamDoc {
+  /** 1-based, denormalised from the id so a roster sorts without parsing it. */
+  number: number
+  teamName: string
+  /** As SeasonMemberDoc.teamColor: handed out by a trigger, changed by a callable. */
+  teamColor?: AccentColor
+  pickPosition: number | null
+  createdAt: number
 }
 
 export interface ContestantDoc {
@@ -251,6 +310,7 @@ export interface ContestantDoc {
    */
   photoCrop?: PhotoCrop
   bio: string
+  /** Entry key of the team holding this contestant — see src/lib/entries.ts. */
   draftedByUid: string | null
   draftedRound: number | null
   eliminatedEpisode: number | null
@@ -376,10 +436,11 @@ export interface ContestantScoreDoc {
 
 export interface DraftDoc {
   status: DraftStatus
+  /** An entry key — a uid, or a team id in team mode. See src/lib/entries.ts. */
   currentPickerUid: string | null
   currentRound: number
   currentPickNumber: number
-  pickOrder: string[] // uid[]
+  pickOrder: string[] // entry keys
   timerExpiresAt: number | null
   /**
    * The round the most recent pick fell in, manual or automatic; null before
@@ -401,6 +462,7 @@ export interface DraftDoc {
 
 export interface DraftPickDoc {
   contestantId: string
+  /** Entry key of the team that picked — see src/lib/entries.ts. */
   pickerUid: string
   actingAdminUid: string | null
   round: number
@@ -437,6 +499,9 @@ export interface Season extends SeasonDoc {
 }
 export interface SeasonMember extends SeasonMemberDoc {
   uid: string
+}
+export interface SeasonTeam extends SeasonTeamDoc {
+  id: string
 }
 export interface Contestant extends ContestantDoc {
   id: string

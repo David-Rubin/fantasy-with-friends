@@ -39,7 +39,20 @@ import {
   TIMER_SECONDS_MIN,
   openDraftProblem,
 } from '../lib/seasonDetails'
-import { setSeasonCompleted, updateSeasonDetails } from '../lib/seasonApi'
+import { setSeasonCompleted, updateSeasonDetails, writeSeasonSetup } from '../lib/seasonApi'
+import {
+  TEAM_COUNT_MAX,
+  TEAM_COUNT_MIN,
+  assignmentWrites,
+  clampTeamCount,
+  effectiveAssignments,
+  teamAssignmentProblem,
+  teamIds,
+  teamNumberOf,
+  type Assignments,
+} from '../lib/teamAssignment'
+import { TeamAssignmentBoard } from '../components/TeamAssignmentBoard'
+import { Switch } from '../components/Switch'
 import { reconcilePickOrder } from '../lib/draft'
 import { canCompleteSeason, seasonWinner } from '../lib/seasonCompletion'
 import { SeasonChampion } from '../components/SeasonChampion'
@@ -49,7 +62,13 @@ import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
 import { ContestantGrid } from '../components/ContestantGrid'
 import { DraftRoom } from '../components/DraftRoom'
 import { reopenSeasonSetup } from '../lib/draftApi'
-import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
+import {
+  useSeasonContestants,
+  useSeasonScoringRules,
+  useSeasonTeams,
+} from '../lib/useSeasonCollections'
+import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
+import { PlayerAvatars, playerNames } from '../components/PlayerAvatars'
 import { ContestantAvatar } from '../components/ContestantAvatar'
 import {
   DEFAULT_ROSTER_SORT,
@@ -150,6 +169,7 @@ export function SeasonDetailPage() {
   const { canView, blocked } = useSeasonMembership(seasonId)
   const contestants = useSeasonContestants(seasonId, canView)
   const rules = useSeasonScoringRules(seasonId, canView)
+  const teams = useSeasonTeams(seasonId, canView)
   const [resetDraftOpen, setResetDraftOpen] = useState(false)
   const [resettingDraft, setResettingDraft] = useState(false)
   const [resetDraftError, setResetDraftError] = useState('')
@@ -191,11 +211,18 @@ export function SeasonDetailPage() {
   // reason a rule's points are: an emptied field is a legitimate step on the
   // way from "5" to "400", and a number cannot hold it. It is read back as a
   // number only when the field is left, and again when the form is written.
+  //
+  // `teamCount` is text for the same reason. `assignmentOverrides` are the
+  // drags made since the last save, laid over what the roster records — see
+  // effectiveAssignments — and cleared once a save lands.
   const [draftSettings, setDraftSettings] = useState({
     pickOrderMethod: 'admin-set' as SeasonDoc['pickOrderMethod'],
     timerSeconds: '60',
     timerExpiry: 'auto-pick' as SeasonDoc['timerExpiry'],
     adminPickOrder: [] as string[],
+    teamMode: false,
+    teamCount: String(TEAM_COUNT_MIN),
+    assignmentOverrides: {} as Assignments,
   })
   // Whether the form has been touched since it last matched what is stored.
   // A flag rather than a comparison against the saved values: it is what gates
@@ -226,17 +253,57 @@ export function SeasonDetailPage() {
     setSettingsSaved(false)
   }
 
+  // What the season is played between — members, or teams in team mode. Every
+  // panel below that used to walk the roster walks this instead, and every key
+  // the season document carries (`teamTotals`, `draftedByUid`) is one of these.
+  // See src/lib/entries.ts.
+  const teamMode = isTeamMode(season)
+  const entries = useMemo(() => seasonEntries(season, members, teams), [season, members, teams])
+
+  // The team layout as the setup form has it, which is ahead of what is
+  // stored: a count typed but not saved, a drag not yet written. The setup
+  // panel's own pieces — the boxes, the pick-order list, the gate on opening
+  // the draft — read this; everything outside it reads the stored entries.
+  const setupTeamCount = clampTeamCount(parseInt(draftSettings.teamCount, 10))
+  const setupTeamIds = draftSettings.teamMode ? teamIds(setupTeamCount) : []
+  const setupAssignments = effectiveAssignments(
+    members,
+    draftSettings.assignmentOverrides,
+    setupTeamCount
+  )
+  const setupEntries = draftSettings.teamMode
+    ? setupTeamIds.map((id) => {
+        const stored = teams.find((team) => team.id === id)
+        const teamName = stored?.teamName ?? t('team.defaultName', { n: teamNumberOf(id) ?? 0 })
+        return {
+          key: id,
+          teamName,
+          teamColor: stored?.teamColor,
+          pickPosition: null,
+          label: teamName,
+          players: members.filter((m) => setupAssignments[m.uid] === id),
+        }
+      })
+    : seasonEntries({}, members, [])
+  const setupTeamProblem = draftSettings.teamMode
+    ? teamAssignmentProblem(
+        setupTeamIds,
+        members.map((m) => ({ uid: m.uid, teamId: setupAssignments[m.uid] ?? undefined }))
+      )
+    : null
+
   // The arrangement as it stands against the roster as it stands. Derived
   // rather than held, because the roster moves underneath it: a league member
   // can join the season while it is still being set up, and the saved order
   // knows nothing about them until this squares the two.
-  const pickOrder = useMemo(
-    () =>
-      reconcilePickOrder(
-        draftSettings.adminPickOrder,
-        members.map((m) => m.uid)
-      ),
-    [draftSettings.adminPickOrder, members]
+  //
+  // Against the entries rather than the members: in team mode the order is an
+  // order of teams, and reconcilePickOrder squares a saved order of uids with
+  // a roster of team ids — or the reverse, after the mode is switched — the
+  // same way it squares any other stale list.
+  const pickOrder = reconcilePickOrder(
+    draftSettings.adminPickOrder,
+    setupEntries.map((e) => e.key)
   )
 
   // What the form actually writes: whatever is in the timer field, brought
@@ -254,6 +321,8 @@ export function SeasonDetailPage() {
     // `pickOrder` with it — and writing that would wipe a saved arrangement
     // for anyone quick enough to press Save in the meantime.
     adminPickOrder: members.length > 0 ? pickOrder : draftSettings.adminPickOrder,
+    teamMode: draftSettings.teamMode,
+    teamCount: setupTeamCount,
   }
 
   useEffect(() => {
@@ -268,6 +337,13 @@ export function SeasonDetailPage() {
           timerExpiry: data.timerExpiry,
           // Absent on seasons saved before the order could be arranged.
           adminPickOrder: data.adminPickOrder ?? [],
+          // Absent on seasons from before teams; read as off.
+          teamMode: data.teamMode === true,
+          teamCount: String(data.teamCount ?? TEAM_COUNT_MIN),
+          // A snapshot means the stored layout has moved, and the roster
+          // listener carries the new teamIds — so drags made against the
+          // old one are stale, not pending.
+          assignmentOverrides: {},
         })
         // The form now holds exactly what the season holds. This covers a
         // change made elsewhere — another admin, or another tab; a save of our
@@ -457,8 +533,14 @@ export function SeasonDetailPage() {
     // an edit the write did not carry.
     const savedAtEdit = settingsEdits.current
     try {
-      await updateDoc(doc(db, 'seasons', seasonId), draftSettingsToSave)
+      await writeSeasonSetup(seasonId, leagueId!, {
+        settings: draftSettingsToSave,
+        teams,
+        assignments: assignmentWrites(members, setupAssignments),
+      })
       setSettingsSaved(true)
+      // The drags are stored now, and the roster listener is about to say so.
+      setDraftSettings((s) => ({ ...s, assignmentOverrides: {} }))
       // Cleared here rather than left to the season listener. Firestore only
       // reports a document whose data actually changed, so saving a form that
       // was edited and put back exactly as it was — or that another tab has
@@ -510,7 +592,12 @@ export function SeasonDetailPage() {
       // committed with Save draft setup was silently dropped — the lobby then
       // started the clock on whatever was last persisted, which reads as the
       // edit not taking effect.
-      await updateDoc(doc(db, 'seasons', seasonId), { ...draftSettingsToSave, state: 'draft' })
+      await writeSeasonSetup(seasonId, leagueId!, {
+        settings: draftSettingsToSave,
+        state: 'draft',
+        teams,
+        assignments: assignmentWrites(members, setupAssignments),
+      })
       // Nowhere to navigate: the season listener brings the lobby in here, in
       // place of the setup panel that was just used.
     } finally {
@@ -518,17 +605,18 @@ export function SeasonDetailPage() {
     }
   }
 
-  async function handleAssignFreeAgent(contestantId: string, memberUid: string) {
+  /** `entryKey` is a member's uid, or a team id in team mode — see src/lib/entries.ts. */
+  async function handleAssignFreeAgent(contestantId: string, entryKey: string) {
     if (!seasonId || !user) return
     await updateDoc(doc(db, 'seasons', seasonId, 'contestants', contestantId), {
-      draftedByUid: memberUid,
+      draftedByUid: entryKey,
       draftedRound: null,
     })
     await logAuditEvent({
       action: 'free_agent_assigned',
       seasonId,
       contestantId,
-      targetUid: memberUid,
+      targetUid: entryKey,
     })
     setAssignFreeAgentOpen(null)
   }
@@ -566,42 +654,58 @@ export function SeasonDetailPage() {
     : false
   const winner = seasonClosed
     ? seasonWinner(
-        members.map((m) => m.uid),
+        entries.map((e) => e.key),
         season?.teamTotals ?? {}
       )
     : null
 
-  const openProblem = openDraftProblem(contestants.length, rules.length, members.length)
+  const openProblem = openDraftProblem(
+    contestants.length,
+    rules.length,
+    setupEntries.length,
+    setupTeamProblem
+  )
   const canOpenDraft = openProblem === null
   const openDraftHint =
     openProblem === 'more-players-than-contestants'
-      ? t('season.openDraftTooManyPlayers')
-      : t('season.openDraftDisabled')
+      ? draftSettings.teamMode
+        ? t('season.openDraftTooManyTeams')
+        : t('season.openDraftTooManyPlayers')
+      : openProblem === 'no-teams'
+        ? t('season.openDraftNoTeams')
+        : openProblem === 'team-empty'
+          ? t('season.openDraftTeamEmpty')
+          : openProblem === 'member-unassigned'
+            ? t('season.openDraftUnassigned')
+            : t('season.openDraftDisabled')
   const freeAgents = contestants.filter((c) => !c.draftedByUid)
-  const memberUidMap = Object.fromEntries(members.map((m) => [m.uid, m]))
   // The signed-in member's own roster row, when they have one. Everyone on this
   // page can see the season; only somebody actually playing it has a team to
   // name and a colour to claim.
   const myMember = members.find((m) => m.uid === user?.uid)
+  // The entry they play for: themselves, or their team — or nothing yet, in a
+  // team-mode season where the admin has not placed them.
+  const myKey = entryKeyFor(season, myMember)
+  const myEntry = entryByKey(entries, myKey)
   // Colours other teams hold, so the picker can grey them out. Derived from the
-  // roster listener that is already open rather than read separately — the
+  // listeners that are already open rather than read separately — the
   // uniqueness rule itself is enforced by setTeamColor, server-side, so this is
   // only what the picker draws.
-  const takenColors = takenTeamColors(members, user?.uid)
-  const colorHolder = (color: AccentColor) => teamHoldingColor(members, color, user?.uid)
+  const takenColors = takenTeamColors(entries, myKey ?? undefined)
+  const colorHolder = (color: AccentColor) => teamHoldingColor(entries, color, myKey ?? undefined)
   // The roster's rows, resolved to the text each cell shows before they are
   // sorted — see sortRosterRows for why the sort works on that text and not on
   // the contestant documents behind it.
   const rosterRows = useMemo(() => {
     const rows = contestants.map((c) => {
-      const owner = c.draftedByUid ? memberUidMap[c.draftedByUid] : undefined
+      const owner = entryByKey(entries, c.draftedByUid)
       return {
         id: c.id,
         photoUrl: c.photoUrl,
         photoCrop: c.photoCrop,
         eliminated: c.eliminatedEpisode !== null,
         contestant: c.name,
-        owner: c.draftedByUid ? (owner?.displayName ?? '\u2014') : t('contestant.freeAgent'),
+        owner: c.draftedByUid ? (owner?.label ?? '\u2014') : t('contestant.freeAgent'),
         // Carried alongside the owner's name rather than looked up in the
         // cell, so the sort still works on exactly the text it renders.
         ownerColor: owner ? teamColorFor(owner) : null,
@@ -610,10 +714,7 @@ export function SeasonDetailPage() {
       }
     })
     return sortRosterRows(rows, rosterSort)
-    // memberUidMap is rebuilt on every render, so `members` is the real
-    // dependency; listing the map itself would defeat the memo.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contestants, members, rosterSort])
+  }, [contestants, entries, rosterSort])
   const episodeNumbers = Array.from({ length: season?.episodeCount ?? 0 }, (_, i) => i + 1)
   // Episode numbers that already have a scores document, whatever the season's
   // state — the one thing that constrains an edit.
@@ -736,17 +837,27 @@ export function SeasonDetailPage() {
           one — had nowhere to name their team at all. Nothing in a season
           depends on the name or the colour, so there is nothing to protect by
           taking them away; the only test is whether this is your season. */}
-      {myMember && seasonId && leagueId && (
+      {myMember && myEntry && myKey && seasonId && leagueId && (
         <TeamIdentityCard
           seasonId={seasonId}
           leagueId={leagueId}
-          uid={myMember.uid}
-          teamName={myMember.teamName}
-          teamColor={teamColorFor(myMember)}
+          target={teamMode ? { kind: 'team', teamId: myKey } : { kind: 'member', uid: myKey }}
+          teamName={myEntry.teamName}
+          teammates={myEntry.players
+            .filter((p) => p.uid !== myMember.uid)
+            .map((p) => p.displayName)}
+          teamColor={teamColorFor(myEntry)}
           takenColors={takenColors}
           takenLabel={colorHolder}
           seasonState={season.state}
         />
+      )}
+      {/* A member of a team-mode season nobody has placed yet has no team to
+          name. Said plainly, rather than the card silently not appearing. */}
+      {myMember && !myEntry && teamMode && (
+        <p className="mb-6 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
+          {t('team.unassignedNotice')}
+        </p>
       )}
 
       {/* Setup panel */}
@@ -870,6 +981,58 @@ export function SeasonDetailPage() {
               </label>
             </div>
 
+            {/* Team mode. A switch is always in one state or the other, so
+                the question is answered — off — before the admin touches it,
+                and the count and the boxes only appear once it is on. */}
+            <div className="mt-4">
+              <Switch
+                id="team-mode"
+                checked={draftSettings.teamMode}
+                onChange={(on) => editDraftSettings((s) => ({ ...s, teamMode: on }))}
+                label={t('team.mode.question')}
+                hint={t('team.mode.help')}
+              />
+            </div>
+
+            {draftSettings.teamMode && (
+              <div className="mt-4 flex flex-col gap-4">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-gray-600">{t('team.count.label')}</span>
+                  <input
+                    type="number"
+                    required
+                    min={TEAM_COUNT_MIN}
+                    max={TEAM_COUNT_MAX}
+                    value={draftSettings.teamCount}
+                    // Takes whatever is typed, as the timer does; settled on
+                    // blur. The boxes below follow the clamped value.
+                    onChange={(e) =>
+                      editDraftSettings((s) => ({ ...s, teamCount: e.target.value }))
+                    }
+                    onBlur={() =>
+                      setDraftSettings((s) => ({
+                        ...s,
+                        teamCount: String(clampTeamCount(parseInt(s.teamCount, 10))),
+                      }))
+                    }
+                    className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </label>
+                <TeamAssignmentBoard
+                  members={members}
+                  teamCount={setupTeamCount}
+                  assignments={setupAssignments}
+                  teamNames={Object.fromEntries(teams.map((team) => [team.id, team.teamName]))}
+                  onAssign={(uid, teamId) =>
+                    editDraftSettings((s) => ({
+                      ...s,
+                      assignmentOverrides: { ...s.assignmentOverrides, [uid]: teamId },
+                    }))
+                  }
+                />
+              </div>
+            )}
+
             {/* Only under Admin-set: with Randomized the order is drawn when
                 the draft opens, so a list here would be a promise the draft
                 does not keep. The arrangement itself is kept either way — see
@@ -884,7 +1047,7 @@ export function SeasonDetailPage() {
                   {t('draft.pickOrder.adminSetHelp')}
                 </p>
                 <PickOrderList
-                  players={members}
+                  rows={setupEntries}
                   order={pickOrder}
                   onChange={(next) => editDraftSettings((s) => ({ ...s, adminPickOrder: next }))}
                 />
@@ -1008,6 +1171,7 @@ export function SeasonDetailPage() {
           leagueId={leagueId}
           season={season}
           members={members}
+          teams={teams}
           contestants={contestants}
           rules={rules}
           isAdmin={isAdmin}
@@ -1048,51 +1212,47 @@ export function SeasonDetailPage() {
               {winner && (
                 <SeasonChampion
                   winner={winner}
-                  teams={winner.uids.map((uid) => {
-                    const member = memberUidMap[uid]
+                  teams={winner.keys.map((key) => {
+                    const entry = entryByKey(entries, key)
                     return {
-                      uid,
-                      teamName: member?.teamName ?? '',
-                      displayName: member?.displayName ?? uid,
-                      photoUrl: member?.photoUrl,
-                      photoCrop: member?.photoCrop,
-                      teamColor: teamColorFor(member ?? { uid }),
+                      key,
+                      teamName: entry?.teamName ?? '',
+                      players: entry?.players ?? [{ uid: key, displayName: key }],
+                      teamColor: teamColorFor(entry ?? { key }),
                     }
                   })}
                 />
               )}
-              {members.length === 0 ? (
+              {entries.length === 0 ? (
                 <p className="text-gray-400">{t('leaderboard.noScoresYet')}</p>
               ) : (
-                [...members]
-                  .sort((a, b) => (season.teamTotals[b.uid] ?? 0) - (season.teamTotals[a.uid] ?? 0))
-                  .map((member, idx) => {
-                    const scoredEpisodes = Object.keys(season.teamEpisodeTotals[member.uid] ?? {})
+                [...entries]
+                  .sort((a, b) => (season.teamTotals[b.key] ?? 0) - (season.teamTotals[a.key] ?? 0))
+                  .map((entry, idx) => {
+                    const scoredEpisodes = Object.keys(season.teamEpisodeTotals[entry.key] ?? {})
                       .map(Number)
                       .sort((a, b) => a - b)
                     const lastEp = scoredEpisodes[scoredEpisodes.length - 1]
                     const prevEp = scoredEpisodes[scoredEpisodes.length - 2]
                     const delta =
                       lastEp !== undefined
-                        ? (season.teamEpisodeTotals[member.uid]?.[lastEp] ?? 0) -
+                        ? (season.teamEpisodeTotals[entry.key]?.[lastEp] ?? 0) -
                           (prevEp !== undefined
-                            ? (season.teamEpisodeTotals[member.uid]?.[prevEp] ?? 0)
+                            ? (season.teamEpisodeTotals[entry.key]?.[prevEp] ?? 0)
                             : 0)
                         : null
 
-                    const teamContestants = contestants.filter((c) => c.draftedByUid === member.uid)
+                    const teamContestants = contestants.filter((c) => c.draftedByUid === entry.key)
 
                     return (
                       <LeaderboardRow
-                        key={member.uid}
+                        key={entry.key}
                         rank={idx + 1}
-                        teamName={member.teamName}
-                        playerName={member.displayName}
-                        playerPhotoUrl={member.photoUrl}
-                        playerPhotoCrop={member.photoCrop}
-                        totalPoints={season.teamTotals[member.uid] ?? 0}
+                        teamName={entry.teamName}
+                        players={entry.players}
+                        totalPoints={season.teamTotals[entry.key] ?? 0}
                         delta={delta}
-                        teamColor={teamColorFor(member)}
+                        teamColor={teamColorFor(entry)}
                         contestants={teamContestants.map((c) => ({
                           contestant: c,
                           seasonTotal: calcContestantTotal(c.id, episodeScoreDocs),
@@ -1438,14 +1598,18 @@ export function SeasonDetailPage() {
         title={t('contestant.assignToTeam')}
       >
         <div className="flex flex-col gap-2">
-          {members.map((m) => (
+          {entries.map((entry) => (
             <button
-              key={m.uid}
+              key={entry.key}
               type="button"
-              onClick={() => handleAssignFreeAgent(assignFreeAgentOpen!, m.uid)}
-              className={`rounded-lg border border-l-4 border-gray-200 px-4 py-3 text-left hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${accentLeftBorder[teamColorFor(m)]}`}
+              onClick={() => handleAssignFreeAgent(assignFreeAgentOpen!, entry.key)}
+              className={`flex items-center gap-3 rounded-lg border border-l-4 border-gray-200 px-4 py-3 text-left hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${accentLeftBorder[teamColorFor(entry)]}`}
             >
-              {m.teamName} <span className="text-gray-400 text-sm">({m.displayName})</span>
+              <PlayerAvatars players={entry.players} />
+              <span>
+                {entry.teamName}{' '}
+                <span className="text-gray-400 text-sm">({playerNames(entry.players)})</span>
+              </span>
             </button>
           ))}
         </div>
