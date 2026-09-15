@@ -66,8 +66,15 @@ export const storage = getStorage(app)
 export const functions = getFunctions(app)
 
 if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATOR === 'true') {
-  connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true })
-  connectFirestoreEmulator(db, 'localhost', 8080)
-  connectStorageEmulator(storage, 'localhost', 9199)
-  connectFunctionsEmulator(functions, 'localhost', 5001)
+  // Whatever host the page was opened on, rather than a fixed `localhost`:
+  // Chrome allows six HTTP/1.1 connections per host, the emulator's
+  // long-polling holds up to two per signed-in tab, and three tabs driving
+  // three accounts fill the pool — after which every write and listen
+  // queues for seconds. Tabs opened at 127.0.0.1:5173 then get a pool of
+  // their own. Production is HTTP/2 and has no such limit.
+  const host = window.location.hostname
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true })
+  connectFirestoreEmulator(db, host, 8080)
+  connectStorageEmulator(storage, host, 9199)
+  connectFunctionsEmulator(functions, host, 5001)
 }

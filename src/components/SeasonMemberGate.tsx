@@ -35,6 +35,19 @@ export function useMySeasonIds(): { seasonIds: Set<string>; resolved: boolean } 
       query(collectionGroup(db, 'members'), where('uid', '==', user.uid)),
       'my season membership',
       (snap) => {
+        // Only the server's answer counts. When the SDK cannot open its
+        // stream within about ten seconds it declares itself offline and
+        // raises every listener from the local cache — which on a freshly
+        // loaded page is empty, and after a navigation is whatever happens
+        // to be left in it. That snapshot says "no memberships", and this
+        // hook took it as the verdict: a member on a slow connection saw
+        // "You're not a member of this season" until the stream caught up.
+        // With no persistence configured, a cache-only snapshot can reach
+        // here in no other way, so it is never an answer — the server's
+        // follows the moment the stream connects. (The emulator's HTTP/1.1
+        // long-polling is how a machine on localhost gets here at all; see
+        // CLAUDE.md on Chrome's per-host connection limit.)
+        if (snap.metadata.fromCache) return
         const mine = snap.docs
           .filter((d) => d.ref.parent.parent?.parent?.id === 'seasons')
           .map((d) => d.ref.parent.parent!.id)

@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { doc, getDoc, collection, deleteField, updateDoc, addDoc } from 'firebase/firestore'
+import { doc, collection, deleteField, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { listenDoc, listenQuery, guarded } from '../lib/listen'
+import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMemberGate'
@@ -373,23 +373,35 @@ export function SeasonDetailPage() {
     const unsub = listenQuery(
       collection(db, 'seasons', seasonId, 'members'),
       'season members',
-      guarded('season members', async (snap) => {
+      (snap) => {
         const list: MemberDoc[] = snap.docs.map((d) => {
           const data = d.data() as SeasonMemberDoc
           // See LeagueMemberDoc.displayName — cross-user reads are denied.
           return { ...data, uid: d.id, displayName: data.displayName || d.id }
         })
         setMembers(list)
-
-        // Determine my role in the league
-        if (leagueId && user) {
-          const roleSnap = await getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
-          if (roleSnap.exists()) setMyRole((roleSnap.data() as { role: MemberRole }).role)
-        }
-      })
+      }
     )
     return unsub
-  }, [seasonId, user, leagueId, canView])
+  }, [seasonId, user, canView])
+
+  // My role in the league, as a listener of its own. It used to be a one-shot
+  // read inside the roster listener above, which failed whenever that listener
+  // first fired from the cache with the client offline — the read threw
+  // "client is offline", the role stayed null, and an admin on a slow
+  // connection got the member's view with no setup panel. A listener waits
+  // for the connection instead, and follows a role change while the page is
+  // open, which the read never did.
+  useEffect(() => {
+    if (!leagueId || !user || !canView) return
+    return listenDoc(
+      doc(db, 'leagues', leagueId, 'members', user.uid),
+      'my league role',
+      (snap) => {
+        setMyRole(snap.exists() ? (snap.data() as { role: MemberRole }).role : null)
+      }
+    )
+  }, [leagueId, user, canView])
 
   useEffect(() => {
     if (!seasonId || !canView) return

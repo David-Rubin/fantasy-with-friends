@@ -180,6 +180,24 @@ it. See `src/lib/authPersistence.ts`.
 Then `npm run emulators` (builds the functions first, so the emulator can never
 serve stale or missing function code) and `npm run dev`.
 
+### Several tabs against the emulator will stall
+
+Chrome allows six HTTP/1.1 connections per host, and the emulator's Firestore
+transport is HTTP/1.1 long-polling: each signed-in tab holds one long-poll for
+its listeners and, for a minute after any write, a second for its write stream
+— plus a transient third for every request it sends. Three tabs that have all
+written recently fill the pool, and from then on every write, callable and new
+listener queues for whole seconds until some tab's long-poll cycles. It looks
+like the app hanging, and after about ten seconds of it the SDK declares itself
+offline and raises every listener from its cache, so a freshly loaded page
+briefly sees empty rosters and "not a member" (see `useMySeasonIds`, which
+ignores cache-only snapshots for exactly this reason).
+
+Production is HTTP/2 and multiplexes everything, so none of this reaches it.
+Locally, keep it to two or three signed-in tabs at once — or open the extra
+accounts at `http://127.0.0.1:5173`, which is a different host to Chrome and
+gets a pool of its own (`src/lib/firebase.ts` follows the page's hostname).
+
 ### Signing in locally
 
 Sign-up takes a password you choose, so a new local account is usable straight
