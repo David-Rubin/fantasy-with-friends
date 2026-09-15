@@ -5,6 +5,7 @@ import {
   type FirestoreError,
   type Query,
   type QuerySnapshot,
+  type SnapshotListenOptions,
   type Unsubscribe,
 } from 'firebase/firestore'
 
@@ -41,14 +42,26 @@ export function listenDoc(
   return onSnapshot(ref, next, logFailure(label, onError))
 }
 
-/** Listen to a collection or query. */
+/**
+ * Listen to a collection or query.
+ *
+ * `options` is for a listener that decides something from
+ * `snap.metadata.fromCache` — see useMySeasonIds. By default Firestore raises
+ * a snapshot only when documents change, so a listener that ignores a
+ * cache-only snapshot and waits for the server's is never told when the
+ * server's arrives with the same documents in it: that is a metadata-only
+ * change, delivered only with `includeMetadataChanges`.
+ */
 export function listenQuery(
   q: Query,
   label: string,
   next: (snap: QuerySnapshot) => void,
-  onError?: (error: FirestoreError) => void
+  onError?: (error: FirestoreError) => void,
+  options?: SnapshotListenOptions
 ): Unsubscribe {
-  return onSnapshot(q, next, logFailure(label, onError))
+  return options
+    ? onSnapshot(q, options, next, logFailure(label, onError))
+    : onSnapshot(q, next, logFailure(label, onError))
 }
 
 /**

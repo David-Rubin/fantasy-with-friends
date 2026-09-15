@@ -35,18 +35,22 @@ export function useMySeasonIds(): { seasonIds: Set<string>; resolved: boolean } 
       query(collectionGroup(db, 'members'), where('uid', '==', user.uid)),
       'my season membership',
       (snap) => {
-        // Only the server's answer counts. When the SDK cannot open its
-        // stream within about ten seconds it declares itself offline and
-        // raises every listener from the local cache — which on a freshly
-        // loaded page is empty, and after a navigation is whatever happens
-        // to be left in it. That snapshot says "no memberships", and this
-        // hook took it as the verdict: a member on a slow connection saw
-        // "You're not a member of this season" until the stream caught up.
-        // With no persistence configured, a cache-only snapshot can reach
-        // here in no other way, so it is never an answer — the server's
-        // follows the moment the stream connects. (The emulator's HTTP/1.1
-        // long-polling is how a machine on localhost gets here at all; see
-        // CLAUDE.md on Chrome's per-host connection limit.)
+        // Only the server's answer counts. A cache-only snapshot reaches
+        // this hook two ways, and neither is a verdict. When the SDK cannot
+        // open its stream it declares itself offline and raises every
+        // listener from the local cache — empty on a fresh page — which read
+        // as "no memberships" and told a member on a slow connection they
+        // were not in the season. And a listener joining a query another
+        // listener already holds (the league page asks this same question)
+        // is handed the documents so far the moment there are any, flagged
+        // from-cache until the server says the set is complete.
+        //
+        // Skipping those is only safe because of `includeMetadataChanges`
+        // below: the server's confirmation of the same documents is a
+        // metadata-only change, which a default listener is never told
+        // about — so without it, a listener that skipped the cached
+        // snapshot waited for a second one that never came, and the Join
+        // and Leave buttons on the league page never appeared.
         if (snap.metadata.fromCache) return
         const mine = snap.docs
           .filter((d) => d.ref.parent.parent?.parent?.id === 'seasons')
@@ -57,7 +61,8 @@ export function useMySeasonIds(): { seasonIds: Set<string>; resolved: boolean } 
       () => {
         setSeasonIds(new Set())
         setResolved(true)
-      }
+      },
+      { includeMetadataChanges: true }
     )
   }, [user])
 
