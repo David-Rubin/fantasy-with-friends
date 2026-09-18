@@ -332,7 +332,18 @@ service cloud.firestore {
 
       match /contestants/{contestantId} {
         allow read: if isSeasonMember(seasonId);
-        allow write: if isSeasonAdmin(seasonId);
+        // The bio's length bound is enforced here, not only in the form: the
+        // card clips a bio to two lines and shows the rest in a panel, and a
+        // bio long enough to overrun that panel is every reader's problem,
+        // not only the writer's. Every contestant has carried a `bio` since
+        // the field existed, so a partial update — assigning a free agent,
+        // say — still sees one on the merged document. It must match
+        // BIO_MAX_LENGTH in src/lib/contestants.ts; src/lib/rulesLimits.test.ts
+        // fails if it does not.
+        allow create, update: if isSeasonAdmin(seasonId)
+          && request.resource.data.bio is string
+          && request.resource.data.bio.size() <= 500;
+        allow delete: if isSeasonAdmin(seasonId);
       }
 
       match /scoringRules/{ruleId} {
