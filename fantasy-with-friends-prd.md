@@ -142,7 +142,7 @@ A single role that spans the whole app, separate from the per-league roles above
 
 - Admins add contestants to a season before the draft opens.
 - Each contestant record includes: name, photo (URL or upload), and a free-text bio.
-- **The bio is a multi-line field, capped at 300 characters**, with a live count of what will be stored. Whitespace inside it is kept exactly as typed — a paragraph break belongs to whoever wrote it — and only the ends are trimmed, where whitespace is invisible and would otherwise survive every later edit. Everything that displays a bio preserves that whitespace; HTML collapses it by default.
+- **The bio is a multi-line field, capped at 500 characters**, with a live count of what will be stored. Whitespace inside it is kept exactly as typed — a paragraph break belongs to whoever wrote it — and only the ends are trimmed, where whitespace is invisible and would otherwise survive every later edit. Everything that displays a bio preserves that whitespace; HTML collapses it by default.
 - **The cast is shown as a grid of cards** in the Season Setup panel — photo, name, and the opening of the bio — rather than a list of names. Setup is where the cast gets checked over as a whole, so a missing photo or an empty bio should be visible at a glance.
 - Contestants can be added/edited while the season is in `setup` state. Editing opens a dialog over the same fields as the add form, and touches only those fields — a contestant record also carries who drafted them and when they were eliminated.
 - Once the draft begins, the contestant list is locked.
@@ -352,7 +352,7 @@ _(Note: User-provided passwords may be supported in a future iteration. The PIN-
 
 1. Admin enters: season label, episode count. (The show comes from the league.)
 2. **Players**: every current league member is enrolled in the season automatically, as is anyone admitted to the league while the season is still in `setup`. There is no per-season invite.
-3. Admin adds contestants (name + optional photo + bio, up to 300 characters). Minimum 2 required to proceed to draft. Those added appear as a grid of cards above the form, each with an Edit control.
+3. Admin adds contestants (name + optional photo + bio, up to 500 characters). Minimum 2 required to proceed to draft. Those added appear as a grid of cards above the form, each with an Edit control.
 4. Admin defines scoring rules (name + point value + the episodes they apply to), in the Season Setup panel. Minimum 1 required.
 5. Admin configures draft settings:
    - Pick order methodology (Randomized default / Admin-set).

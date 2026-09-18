@@ -5,7 +5,13 @@
  * with the rest of the season setup.
  */
 
-/** Characters, counted after normalising — what gets stored is what is capped. */
+/**
+ * Characters, counted after normalising — what gets stored is what is capped.
+ *
+ * Mirrored by the contestants rule in firestore.rules, which is the bound
+ * that actually holds; this one lets the form say no before the save does.
+ * src/lib/rulesLimits.test.ts fails if the two disagree.
+ */
 export const BIO_MAX_LENGTH = 500
 
 /**

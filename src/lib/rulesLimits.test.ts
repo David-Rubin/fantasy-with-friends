@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { MAX_AVATAR_MB } from './avatarFile'
 import { TEAM_NAME_MAX_LENGTH } from './teamName'
+import { BIO_MAX_LENGTH } from './contestants'
 
 /**
  * Every limit that is written down twice.
@@ -41,6 +42,16 @@ const mirrored = [
     constant: () => TEAM_NAME_MAX_LENGTH,
     source: 'TEAM_NAME_MAX_LENGTH in src/lib/teamName.ts',
     occurrences: 2,
+  },
+  {
+    what: 'the contestant bio length limit',
+    file: 'firestore.rules',
+    // `request.resource.data.bio.size() <= 500` — the form counts down to the
+    // same number and refuses to save past it.
+    pattern: /request\.resource\.data\.bio\.size\(\) <= (\d+)/g,
+    constant: () => BIO_MAX_LENGTH,
+    source: 'BIO_MAX_LENGTH in src/lib/contestants.ts',
+    occurrences: 1,
   },
 ]
 

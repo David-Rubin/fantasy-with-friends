@@ -11,7 +11,7 @@ import { CONTESTANT_CROP_SHAPE } from '../lib/photoCrop'
  * A contestant's bio, clipped to two lines, with the whole of it on hover.
  *
  * The card has to stay a fixed, scannable size on a draft board of twenty, but
- * a bio runs to 300 characters and a pick is made on what it says. So: two
+ * a bio runs to 500 characters and a pick is made on what it says. So: two
  * lines on the card, the rest in a panel.
  *
  * The panel opens *upward*. Below the bio sit the Pick buttons, and covering an
@@ -74,7 +74,14 @@ function ContestantBio({ contestant }: { contestant: Contestant }) {
         <div
           id={id}
           role="tooltip"
-          className="absolute bottom-full left-0 z-30 mb-2 max-h-48 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-900 px-3 py-2 text-left text-xs leading-snug text-white shadow-lg"
+          // Sized so a bio at BIO_MAX_LENGTH is read whole, not scrolled: the
+          // panel closes the moment the pointer leaves the trigger, so a
+          // scrollbar in here is reachable only after a click, and a hover
+          // reader would never learn the text went on. At 288px wide a
+          // 500-character bio runs to about 230px, or 330px with a few
+          // paragraph breaks; 384px leaves room for both. overflow-y-auto
+          // stays only for a bio that is all line breaks.
+          className="absolute bottom-full left-0 z-30 mb-2 max-h-96 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-900 px-3 py-2 text-left text-xs leading-snug text-white shadow-lg"
         >
           {contestant.bio}
         </div>
