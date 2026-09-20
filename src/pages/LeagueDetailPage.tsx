@@ -582,7 +582,7 @@ export function LeagueDetailPage() {
                       <select
                         value={m.role}
                         onChange={(e) => handleChangeRole(m.uid, e.target.value as MemberRole)}
-                        className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="text-base sm:text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         aria-label={t('league.roleFor', { name: m.displayName })}
                       >
                         <option value="member">{t('league.roles.member')}</option>

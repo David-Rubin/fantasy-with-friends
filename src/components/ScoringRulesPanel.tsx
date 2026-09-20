@@ -120,7 +120,7 @@ export function RuleFields({
             backgroundPosition: 'right 0.75rem center',
             backgroundSize: '1rem 1rem',
           }}
-          className="min-h-[42px] appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          className="min-h-[42px] appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-9 text-base sm:text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
         >
           {SCORING_RULE_TYPES.map((type) => (
             <option key={type} value={type}>

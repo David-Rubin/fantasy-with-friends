@@ -190,7 +190,7 @@ function CountInput({
         onChange(Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0)
       }}
       onBlur={() => setTyped(null)}
-      className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-center text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+      className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-center text-base sm:text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
       aria-label={label}
     />
   )

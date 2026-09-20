@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom'
+import { useEffect } from 'react'
+import { BrowserRouter, Routes, Route, useLocation, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LandingPage } from './pages/LandingPage'
@@ -27,10 +28,37 @@ function ScoringPageForEpisode() {
   return <EpisodeScoringPage key={episodeNumber} />
 }
 
+/**
+ * Start each page at the top.
+ *
+ * A browser keeps the scroll position across a client-side navigation, so
+ * arriving somewhere new part-way down the page was the norm: signing in from
+ * a scrolled login form opened the dashboard mid-page, and every link out of a
+ * long season page did the same.
+ *
+ * Keyed on the path alone, so the season page's tabs — which are query
+ * parameters — leave the reader where they were rather than throwing them back
+ * to the top for what is really a change on the same page.
+ *
+ * This is the scroll, not the zoom. iOS carries a page's zoom from page to
+ * page and no script can put it back; what stops that is fields big enough not
+ * to trigger it in the first place. See src/components/Input.tsx.
+ */
+function ScrollToTopOnNavigate() {
+  const { pathname } = useLocation()
+
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pathname])
+
+  return null
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <ScrollToTopOnNavigate />
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />

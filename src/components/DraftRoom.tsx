@@ -342,7 +342,7 @@ export function DraftRoom({
                         onChange={(e) => {
                           if (e.target.value) handleAssignFromBench(c.id, e.target.value)
                         }}
-                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">{t('draft.settle.assignPlaceholder')}</option>
                         {teamsWithSlots.map(({ entry, openSlots }) => (
