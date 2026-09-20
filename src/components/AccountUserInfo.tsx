@@ -4,7 +4,7 @@ import { Button } from './Button'
 import { Input } from './Input'
 import { PhotoCropDialog } from './PhotoCropDialog'
 import { uploadAvatar, removeAvatar, setAvatarCrop, updateDisplayName } from '../lib/avatarApi'
-import { avatarFileProblem, AVATAR_ACCEPT, MAX_AVATAR_MB } from '../lib/avatarFile'
+import { photoFileProblem, PHOTO_ACCEPT, MAX_PHOTO_MB } from '../lib/photoFile'
 import type { PhotoCrop } from '../lib/photoCrop'
 import { t } from '../lib/i18n'
 
@@ -68,11 +68,11 @@ export function AccountUserInfo({
     setPhotoError('')
     setPhotoNotice('')
 
-    const problem = avatarFileProblem(file)
+    const problem = photoFileProblem(file)
     if (problem) {
       setPhotoError(
         t(problem === 'type' ? 'settings.userInfo.wrongType' : 'settings.userInfo.tooBig', {
-          max: MAX_AVATAR_MB,
+          max: MAX_PHOTO_MB,
         })
       )
       return
@@ -205,7 +205,7 @@ export function AccountUserInfo({
               )}
             </div>
             <p className="text-xs text-gray-500">
-              {t('settings.userInfo.photoHint', { max: MAX_AVATAR_MB })}
+              {t('settings.userInfo.photoHint', { max: MAX_PHOTO_MB })}
             </p>
           </div>
         </div>
@@ -214,7 +214,7 @@ export function AccountUserInfo({
         <input
           ref={fileInput}
           type="file"
-          accept={AVATAR_ACCEPT}
+          accept={PHOTO_ACCEPT}
           onChange={handleFile}
           className="hidden"
           aria-label={t('settings.userInfo.upload')}

@@ -19,6 +19,7 @@ import {
   type ImageSize,
   type PhotoCrop,
 } from '../lib/photoCrop'
+import { PHOTO_ACCEPT } from '../lib/photoFile'
 import { t } from '../lib/i18n'
 
 /** The stage's width in the layout, used only until it has been measured. */
@@ -38,6 +39,12 @@ const STAGE_PX = 320
  * decides what that means: a new picture to upload, or an adjustment to one
  * that is already stored.
  *
+ * With `onPickFile` it also offers a way in to a different picture, and then
+ * opens with nothing on the stage when there is no photo yet — which is how a
+ * contestant who has never had one is given one. Choosing a file is still the
+ * caller's to act on: this reports the choice, the caller decides whether that
+ * means a blob URL to frame or a message about a file that is too big.
+ *
  * A different picture is a different crop, and this holds no state that would
  * survive one: callers key it on `src`, so choosing another photo mounts a
  * fresh dialog rather than opening the last one's zoom over a new face.
@@ -52,6 +59,9 @@ export function PhotoCropDialog({
   title,
   saving = false,
   error = '',
+  onPickFile,
+  pickLabel,
+  pickHint,
 }: {
   open: boolean
   onClose: () => void
@@ -65,8 +75,18 @@ export function PhotoCropDialog({
   title: string
   saving?: boolean
   error?: string
+  /**
+   * Offer a file picker, and hand back what was chosen. Absent means this
+   * dialog only frames the picture it was given.
+   */
+  onPickFile?: (file: File) => void
+  /** What the picker's button says — "Choose a photo", or "Replace photo". */
+  pickLabel?: string
+  /** The line under it, which is where the size and format limits are said. */
+  pickHint?: string
 }) {
   const [natural, setNatural] = useState<ImageSize | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   const [view, setView] = useState<CropView>(DEFAULT_CROP_VIEW)
   const [failed, setFailed] = useState(false)
   const stage = useRef<HTMLDivElement>(null)
@@ -144,6 +164,13 @@ export function PhotoCropDialog({
     >
       {failed ? (
         <p className="text-sm text-red-600">{t('photoCrop.failed')}</p>
+      ) : !src ? (
+        // No picture yet, so there is nothing to position: the dialog is the
+        // file picker and nothing else until one is chosen. Rendering the
+        // stage with an empty src would ask the browser to load '' and land
+        // in the branch above, reporting a picture that could not be loaded
+        // when there was never one to load.
+        <div className="flex flex-col gap-3" />
       ) : (
         <div className="flex flex-col gap-3">
           <p className="text-sm text-gray-600">{t('photoCrop.help')}</p>
@@ -212,6 +239,38 @@ export function PhotoCropDialog({
           </label>
         </div>
       )}
+      {onPickFile && (
+        <div className="mt-4 flex flex-col items-center gap-1">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={saving}
+            onClick={() => fileInput.current?.click()}
+          >
+            {pickLabel ?? t('photoCrop.choosePhoto')}
+          </Button>
+          {pickHint && <p className="text-xs text-gray-500">{pickHint}</p>}
+          {/* Hidden because a bare file input cannot be styled to match the
+              rest of the app; the button above is its label. The same shape as
+              the profile picture's picker in AccountUserInfo. */}
+          <input
+            ref={fileInput}
+            type="file"
+            accept={PHOTO_ACCEPT}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              // Cleared at once, so choosing the same file twice fires change
+              // again — picking the file you just picked is how somebody
+              // retries after a message about it.
+              e.target.value = ''
+              if (file) onPickFile(file)
+            }}
+            className="hidden"
+            aria-label={pickLabel ?? t('photoCrop.choosePhoto')}
+          />
+        </div>
+      )}
+
       {error && (
         <p role="alert" className="mt-4 text-sm text-red-600">
           {error}

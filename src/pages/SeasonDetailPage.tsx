@@ -80,6 +80,8 @@ import { PlayerAvatars, playerNames } from '../components/PlayerAvatars'
 import { ContestantAvatar } from '../components/ContestantAvatar'
 import { PhotoCropDialog } from '../components/PhotoCropDialog'
 import { CONTESTANT_CROP_SHAPE } from '../lib/photoCrop'
+import { MAX_PHOTO_MB, photoFileProblem } from '../lib/photoFile'
+import { uploadContestantPhoto } from '../lib/contestantPhotoApi'
 import {
   DEFAULT_ROSTER_SORT,
   nextRosterSort,
@@ -514,6 +516,20 @@ export function SeasonDetailPage() {
   const [croppingContestantId, setCroppingContestantId] = useState<string | null>(null)
   const [savingCrop, setSavingCrop] = useState(false)
   const [cropError, setCropError] = useState('')
+  /**
+   * A file chosen in that dialog, framed but not yet uploaded.
+   *
+   * Framed before it is sent, as a profile picture is: uploading first would
+   * put an unframed photo in front of the whole league for as long as it took
+   * to position it. `src` is an object URL — a handle on memory the browser
+   * holds until it is given back, hence the effect below.
+   */
+  const [pendingPhoto, setPendingPhoto] = useState<{ file: File; src: string } | null>(null)
+
+  useEffect(() => {
+    if (!pendingPhoto) return
+    return () => URL.revokeObjectURL(pendingPhoto.src)
+  }, [pendingPhoto])
 
   function openEditContestant(contestant: Contestant) {
     setEditContestantError('')
@@ -564,19 +580,26 @@ export function SeasonDetailPage() {
    * from them.
    */
   async function handleSaveContestantCrop(contestantId: string, crop: PhotoCrop) {
-    if (!seasonId) return
+    if (!seasonId || !user) return
     setCropError('')
     setSavingCrop(true)
     try {
-      await updateDoc(doc(db, 'seasons', seasonId, 'contestants', contestantId), {
-        photoCrop: crop,
-      })
+      if (pendingPhoto) {
+        // A new picture, so the file and the crop go together — the crop
+        // belongs to this photo and means nothing against the last one.
+        await uploadContestantPhoto(seasonId, contestantId, user.uid, pendingPhoto.file, crop)
+        setPendingPhoto(null)
+      } else {
+        await updateDoc(doc(db, 'seasons', seasonId, 'contestants', contestantId), {
+          photoCrop: crop,
+        })
+      }
       setCroppingContestantId(null)
     } catch {
       // Said on the dialog rather than swallowed: it stays open over the
       // framing that was just chosen, so the save can be tried again without
       // redoing it.
-      setCropError(t('contestant.photoCropFailed'))
+      setCropError(t(pendingPhoto ? 'contestant.photoUploadFailed' : 'contestant.photoCropFailed'))
     } finally {
       setSavingCrop(false)
     }
@@ -801,6 +824,28 @@ export function SeasonDetailPage() {
     })
     return sortRosterRows(rows, rosterSort)
   }, [contestants, entries, rosterSort])
+  /** Take a file chosen in the dialog, or say why it cannot be used. */
+  function handlePickContestantPhoto(file: File) {
+    const problem = photoFileProblem(file)
+    if (problem) {
+      setCropError(
+        t(problem === 'type' ? 'contestant.photoWrongType' : 'contestant.photoTooBig', {
+          max: MAX_PHOTO_MB,
+        })
+      )
+      return
+    }
+    setCropError('')
+    setPendingPhoto({ file, src: URL.createObjectURL(file) })
+  }
+
+  /** Shut the dialog, dropping a picture that was chosen and never saved. */
+  function closeCropDialog() {
+    setCroppingContestantId(null)
+    setPendingPhoto(null)
+    setCropError('')
+  }
+
   /** The contestant behind the crop dialog, drawn from the live documents so a
       photo changed elsewhere is the one being framed. */
   const croppingContestant = contestants.find((c) => c.id === croppingContestantId) ?? null
@@ -1447,21 +1492,32 @@ export function SeasonDetailPage() {
                               would be a column of buttons repeating what the
                               picture already offers.
 
-                              A button only where there is both a photo to move
-                              and somebody who may move it; everyone else gets
-                              the plain thumbnail, and a closed season's roster
-                              is a record like every other part of it. */}
-                          {canManageSeason && row.photoUrl ? (
+                              An empty frame is a control too: it is where a
+                              contestant who has never had a photo gets one,
+                              and the dialog opens on the file picker rather
+                              than on a stage with nothing to position.
+
+                              A button only for somebody who may use it;
+                              everyone else gets the plain thumbnail, and a
+                              closed season's roster is a record like every
+                              other part of it. */}
+                          {canManageSeason ? (
                             <button
                               type="button"
                               onClick={() => {
                                 setCropError('')
+                                setPendingPhoto(null)
                                 setCroppingContestantId(row.id)
                               }}
                               // The avatar is decorative and hidden from screen
                               // readers, so without this the button would be
                               // announced as an empty one.
-                              aria-label={t('contestant.adjustPhotoFor', { name: row.contestant })}
+                              aria-label={t(
+                                row.photoUrl
+                                  ? 'contestant.adjustPhotoFor'
+                                  : 'contestant.addPhotoFor',
+                                { name: row.contestant }
+                              )}
                               // `cursor-pointer` because the control is a
                               // photograph: a button that looks like a button
                               // says so by looking like one, and this does not.
@@ -1817,12 +1873,24 @@ export function SeasonDetailPage() {
           the same reason ContestantFields keys it on the picture's address. */}
       {croppingContestant && (
         <PhotoCropDialog
-          key={croppingContestant.id}
+          // Keyed on the picture as well as the contestant: choosing a file
+          // mounts a fresh dialog, so a new photo is framed from the middle
+          // rather than under the zoom and offset of the one it replaced.
+          key={`${croppingContestant.id}:${pendingPhoto?.src ?? croppingContestant.photoUrl}`}
           open
-          onClose={() => setCroppingContestantId(null)}
+          onClose={closeCropDialog}
           onSave={(crop) => handleSaveContestantCrop(croppingContestant.id, crop)}
-          src={croppingContestant.photoUrl}
-          crop={croppingContestant.photoCrop}
+          src={pendingPhoto?.src ?? croppingContestant.photoUrl}
+          // A crop describes one picture. A newly chosen file has none yet,
+          // and the stored one would frame a face that is not in it.
+          crop={pendingPhoto ? undefined : croppingContestant.photoCrop}
+          onPickFile={handlePickContestantPhoto}
+          pickLabel={t(
+            pendingPhoto || croppingContestant.photoUrl
+              ? 'photoCrop.replacePhoto'
+              : 'photoCrop.choosePhoto'
+          )}
+          pickHint={t('settings.userInfo.photoHint', { max: MAX_PHOTO_MB })}
           // The shape the cast is cropped to everywhere it is drawn — the
           // board's card, the roster's thumbnail — so what is framed here is
           // what appears there. See ContestantFields.
