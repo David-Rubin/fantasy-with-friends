@@ -17,11 +17,17 @@ import type {
   EpisodeScoreDoc,
   ContestantScoreDoc,
   ContestantScoreEntry,
+  ScorecardDraftDoc,
   ScoringRuleType,
 } from '../lib/types'
 import { evaluateRule, isPenalty, scoredCount } from '../lib/scoring'
 import { scorecardState } from '../lib/scorecard'
 import { decideProposal, proposeScores } from '../lib/scoreProposalApi'
+import {
+  clearScorecardDraft,
+  saveScorecardDraft,
+  scorecardDraftRef,
+} from '../lib/scorecardDraftApi'
 import {
   DEFAULT_RULE_TYPE,
   fingerprintOf,
@@ -134,6 +140,16 @@ function ScoreCount({
  * back to the stored count once it loses it. Without that, clearing the box to
  * replace 1 with 12 would put a 0 back under the cursor and leave "012" behind
  * — the same reason the pick timer in the setup panel settles on blur.
+ *
+ * A focused number input treats the wheel as increment/decrement, which on a
+ * scorecard is a trap: the table scrolls in both directions, so scrolling away
+ * from a box that was just typed into silently rewrote the count under it —
+ * and the only tell was the number itself, in a table full of numbers. The
+ * wheel is refused instead, leaving typing and the spinners as the only ways
+ * to change it. The listener is attached by hand because React routes wheel
+ * events through a passive listener at the root, where preventDefault does
+ * nothing; and it is attached always rather than on focus so there is no
+ * window between the two where the old behaviour returns.
  */
 function CountInput({
   count,
@@ -145,9 +161,24 @@ function CountInput({
   label: string
 }) {
   const [typed, setTyped] = useState<string | null>(null)
+  const ref = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // Only while it has focus: an unfocused number input ignores the wheel
+    // already, and swallowing the event there would stop the table scrolling
+    // whenever the pointer happened to be over a box.
+    const ignoreWheel = (e: WheelEvent) => {
+      if (document.activeElement === el) e.preventDefault()
+    }
+    el.addEventListener('wheel', ignoreWheel, { passive: false })
+    return () => el.removeEventListener('wheel', ignoreWheel)
+  }, [])
 
   return (
     <input
+      ref={ref}
       type="number"
       min={0}
       step={1}
@@ -198,6 +229,14 @@ export function EpisodeScoringPage() {
   // The admin pressed Edit or Reset and is now working on that card. Local to
   // the visit: nothing is written until they submit.
   const [adminEditingProposal, setAdminEditingProposal] = useState(false)
+  // This viewer's own half-finished card, if they left one here. Private to
+  // them — see ScorecardDraftDoc — so it says nothing about what anybody else
+  // thinks happened in the episode.
+  const [draftSaved, setDraftSaved] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
+  // Whether a suggestion is live, readable from inside the draft load for the
+  // same reason officiallyScoredRef exists: the reads land in any order.
+  const proposalPendingRef = useRef(false)
   const [proposeConfirm, setProposeConfirm] = useState(false)
   const [approveConfirm, setApproveConfirm] = useState(false)
   const [resetConfirm, setResetConfirm] = useState(false)
@@ -273,6 +312,7 @@ export function EpisodeScoringPage() {
       (snap) => {
         const next = snap.exists() ? (snap.data() as ScoreProposalDoc) : null
         setProposal(next)
+        proposalPendingRef.current = next?.status === 'pending'
         // Draw the card from the suggestion, so an admin deciding on one is
         // looking at what was actually proposed and can start from it rather
         // than retyping it.
@@ -289,6 +329,40 @@ export function EpisodeScoringPage() {
       }
     )
   }, [seasonId, episodeNumber, canView])
+
+  /**
+   * Load the card this viewer saved for later, if they saved one.
+   *
+   * A one-off read rather than a listener: it is this person's own document,
+   * written from this page, so there is no second writer to hear from — and a
+   * listener would echo each save back over whatever they had typed since.
+   *
+   * It yields to an episode that has a real result and to a live suggestion,
+   * both of which are answers of record that everyone sees; a draft is a
+   * private note behind them. Those arrive through listeners that land in an
+   * unpredictable order relative to this read, hence the refs: if they are
+   * already in, this skips, and if they are not, they overwrite it when they
+   * land.
+   */
+  useEffect(() => {
+    if (!seasonId || !episodeNumber || !user || !canView) return
+    let cancelled = false
+    getDoc(scorecardDraftRef(seasonId, user.uid, episodeNumber))
+      .then((snap) => {
+        if (cancelled || !snap.exists()) return
+        if (officiallyScoredRef.current || proposalPendingRef.current) return
+        const draft = snap.data() as ScorecardDraftDoc
+        setScores(draft.scores)
+        setEliminations(Object.fromEntries(draft.eliminations.map((id) => [id, true])))
+      })
+      .catch(() => {
+        // Nothing to restore. A draft is a convenience, and a page that will
+        // not load because one could not be read is worse than a blank card.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [seasonId, episodeNumber, user, canView])
 
   // Superadmins are admins of every season in the rules; the client matches.
   const isAdmin = myRole === 'owner' || myRole === 'admin' || isSuperadmin
@@ -371,6 +445,9 @@ export function EpisodeScoringPage() {
   }
 
   function setScore(contestantId: string, ruleId: string, value: boolean | number) {
+    // The card has moved on from what was saved, so the confirmation that it
+    // was saved is no longer true of what is on screen.
+    setDraftSaved(false)
     setScores((prev) => ({
       ...prev,
       [contestantId]: { ...(prev[contestantId] ?? {}), [ruleId]: value },
@@ -441,6 +518,10 @@ export function EpisodeScoringPage() {
 
       await afterCommit?.()
 
+      // The episode has an answer now, so this viewer's private draft of it is
+      // only a staler second one. See clearScorecardDraft.
+      await clearScorecardDraft(seasonId, user.uid, episodeNumber).catch(() => {})
+
       await logAuditEvent({ action: 'episode_scored', seasonId, episodeNumber: epNum })
       trackEvent('episode_scored', { season_id: seasonId, episode_number: epNum })
 
@@ -448,6 +529,32 @@ export function EpisodeScoringPage() {
       navigate(`/leagues/${leagueId}/seasons/${seasonId}`)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  /**
+   * Keep the card without claiming it is finished.
+   *
+   * Nothing else changes: no total moves, no admin is asked for anything, and
+   * nobody else can see it. The episode stays open — to this person and to
+   * everybody else, who may still fill it in and submit while this draft sits
+   * here. That is the same race the card has always had; what a draft adds is
+   * that losing it costs nothing, since it was never an answer.
+   */
+  async function handleSaveForLater() {
+    if (!seasonId || !episodeNumber || !user) return
+    setSavingDraft(true)
+    try {
+      await saveScorecardDraft(
+        seasonId,
+        user.uid,
+        episodeNumber,
+        Object.fromEntries(activeContestants.map((c) => [c.id, scores[c.id] ?? {}])),
+        activeContestants.filter((c) => eliminations[c.id]).map((c) => c.id)
+      )
+      setDraftSaved(true)
+    } finally {
+      setSavingDraft(false)
     }
   }
 
@@ -464,6 +571,7 @@ export function EpisodeScoringPage() {
         Object.fromEntries(activeContestants.map((c) => [c.id, scores[c.id] ?? {}])),
         activeContestants.filter((c) => eliminations[c.id]).map((c) => c.id)
       )
+      await clearScorecardDraft(seasonId, user.uid, episodeNumber).catch(() => {})
       trackEvent('episode_scores_proposed', { season_id: seasonId, episode_number: epNum })
       setProposeConfirm(false)
       navigate(`/leagues/${leagueId}/seasons/${seasonId}?tab=episodes`)
@@ -655,6 +763,7 @@ export function EpisodeScoringPage() {
                       type="button"
                       disabled={readOnlyTable}
                       onClick={() => {
+                        setDraftSaved(false)
                         if (!eliminations[contestant.id]) {
                           setEliminationConfirm(contestant.id)
                         } else {
@@ -691,6 +800,11 @@ export function EpisodeScoringPage() {
               {t('scoring.submitForApproval')}
             </Button>
           )}
+          {card.actions.includes('saveForLater') && (
+            <Button variant="secondary" loading={savingDraft} onClick={handleSaveForLater}>
+              {t('scoring.saveForLater')}
+            </Button>
+          )}
           {card.actions.includes('approve') && (
             <Button onClick={() => setApproveConfirm(true)}>{t('scoring.approveScores')}</Button>
           )}
@@ -705,6 +819,12 @@ export function EpisodeScoringPage() {
             </Button>
           )}
         </div>
+      )}
+
+      {draftSaved && (
+        <p className="mt-3 text-sm text-gray-500" role="status">
+          {t('scoring.draftSaved')}
+        </p>
       )}
 
       {card.notice === 'seasonClosed' && (
@@ -732,8 +852,10 @@ export function EpisodeScoringPage() {
             <Button
               variant="danger"
               onClick={() => {
-                if (eliminationConfirm)
+                if (eliminationConfirm) {
+                  setDraftSaved(false)
                   setEliminations((prev) => ({ ...prev, [eliminationConfirm]: true }))
+                }
                 setEliminationConfirm(null)
               }}
             >

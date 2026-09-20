@@ -410,6 +410,22 @@ service cloud.firestore {
         allow write: if isSeasonAdmin(seasonId);
       }
 
+      // A scorecard somebody is still filling in, private to them.
+      //
+      // Nested under the author's uid so the rule is about the path rather than
+      // the document: nobody but its author may even ask for it, which is what
+      // "no other user can see it until it is submitted" has to mean. A rule
+      // written against a `uid` field would be just as strict, but only for a
+      // get — a list of the collection would be the thing being refused, and
+      // the distinction is easy to lose the next time this path is touched.
+      //
+      // Nothing watches this path, so a draft moves no total. Scoring an
+      // episode is still a write to episodeScores, and suggesting one is still
+      // a write to scoreProposals.
+      match /scorecardDrafts/{uid}/episodes/{episodeNumber} {
+        allow read, write: if isSeasonMember(seasonId) && request.auth.uid == uid;
+      }
+
       match /draft/{draftId} {
         allow read: if isSeasonMember(seasonId);
         // Written only by Cloud Functions through the Admin SDK — startDraft

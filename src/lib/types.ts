@@ -512,3 +512,25 @@ export interface ScoringRule extends ScoringRuleDoc {
 export interface DraftPick extends DraftPickDoc {
   id: string
 }
+
+/**
+ * One person's half-finished scorecard for one episode.
+ *
+ * Private to whoever wrote it: it lives under their own uid at
+ * `seasons/{id}/scorecardDrafts/{uid}/episodes/{episodeNumber}`, and the rules
+ * let nobody else read it. A card being filled in is somebody thinking out
+ * loud, not a claim about what happened — an admin seeing one would read it as
+ * a suggestion, and a member seeing another's would nudge their own answers.
+ *
+ * Nothing watches this path, so saving one moves no total. It is the same
+ * shape as a proposal's payload minus the parts a decision needs, because
+ * saving for later is the step before either submitting or suggesting.
+ */
+export interface ScorecardDraftDoc {
+  /** contestantId → the same shape a contestantScores document stores. */
+  scores: Record<string, ContestantScoreEntry>
+  /** Contestants the drafter has marked as going out this episode. */
+  eliminations: string[]
+  uid: string
+  savedAt: number
+}

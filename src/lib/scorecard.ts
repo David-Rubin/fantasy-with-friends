@@ -15,7 +15,19 @@ import type { ScoreProposalStatus } from './types'
 
 /** Buttons the footer may offer. `submit` is the write that scores an episode. */
 export type ScorecardAction =
-  'submit' | 'submitForApproval' | 'approve' | 'edit' | 'reset' | 'unlock'
+  | 'submit'
+  | 'submitForApproval'
+  /**
+   * Keep the card as it stands without claiming it is finished. Offered only
+   * on an episode that is still open — an episode with a real result or a live
+   * suggestion already has an answer of record, and a private half-answer
+   * sitting behind it would be a second one nobody could see.
+   */
+  | 'saveForLater'
+  | 'approve'
+  | 'edit'
+  | 'reset'
+  | 'unlock'
 
 /**
  * The line under the table explaining why it cannot be edited, if it cannot.
@@ -90,7 +102,7 @@ export function scorecardState({
   // the score, anybody else's is a suggestion.
   return {
     editable: true,
-    actions: [isAdmin ? 'submit' : 'submitForApproval'],
+    actions: [isAdmin ? 'submit' : 'submitForApproval', 'saveForLater'],
     notice: null,
   }
 }

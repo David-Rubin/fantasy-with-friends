@@ -17,13 +17,17 @@ describe('scorecardState — an episode nobody has scored', () => {
   it('lets a member fill it in and offer it', () => {
     expect(state({})).toEqual({
       editable: true,
-      actions: ['submitForApproval'],
+      actions: ['submitForApproval', 'saveForLater'],
       notice: null,
     })
   })
 
   it('lets an admin fill it in and score it outright', () => {
-    expect(state({ isAdmin: true })).toEqual({ editable: true, actions: ['submit'], notice: null })
+    expect(state({ isAdmin: true })).toEqual({
+      editable: true,
+      actions: ['submit', 'saveForLater'],
+      notice: null,
+    })
   })
 
   // A discarded suggestion is not a live one: the episode is open again, to the
@@ -31,7 +35,7 @@ describe('scorecardState — an episode nobody has scored', () => {
   it('is open again once a suggestion has been discarded', () => {
     expect(state({ proposalStatus: 'discarded' })).toEqual({
       editable: true,
-      actions: ['submitForApproval'],
+      actions: ['submitForApproval', 'saveForLater'],
       notice: null,
     })
   })
@@ -124,6 +128,26 @@ describe('scorecardState — a season that has been closed', () => {
         actions: [],
         notice: 'seasonClosed',
       })
+    }
+  })
+})
+
+// Saving for later is private, and only ever an alternative to answering an
+// episode nobody has answered yet.
+describe('scorecardState — saving a card for later', () => {
+  it('is offered beside the submit on an open episode, to member and admin alike', () => {
+    expect(state({}).actions).toContain('saveForLater')
+    expect(state({ isAdmin: true }).actions).toContain('saveForLater')
+  })
+
+  it('is not offered once an episode has a result or a live suggestion', () => {
+    for (const over of [
+      { officiallyScored: true, isAdmin: true },
+      { proposalStatus: 'pending' as const, isAdmin: true },
+      { proposalStatus: 'pending' as const, isAdmin: true, adminEditingProposal: true },
+      { seasonClosed: true, isAdmin: true },
+    ]) {
+      expect(state(over).actions).not.toContain('saveForLater')
     }
   })
 })
