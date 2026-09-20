@@ -1462,7 +1462,10 @@ export function SeasonDetailPage() {
                               // readers, so without this the button would be
                               // announced as an empty one.
                               aria-label={t('contestant.adjustPhotoFor', { name: row.contestant })}
-                              className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                              // `cursor-pointer` because the control is a
+                              // photograph: a button that looks like a button
+                              // says so by looking like one, and this does not.
+                              className="shrink-0 cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                             >
                               <ContestantAvatar photoUrl={row.photoUrl} photoCrop={row.photoCrop} />
                             </button>

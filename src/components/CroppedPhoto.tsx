@@ -18,8 +18,8 @@ import { croppedImageStyle, readCrop, type PhotoCrop } from '../lib/photoCrop'
  * frame, big enough to cover it whatever shape the frame is, and the image is
  * laid out inside that box so the crop fills it exactly — see croppedImageStyle
  * for why the arithmetic comes out undistorted. That box is what makes a frame
- * of a different shape behave: a round roster thumbnail shows the middle of a
- * contestant's wider crop, rather than the crop squeezed into a circle.
+ * of a different shape behave: a round avatar shows the middle of a
+ * contestant's upright crop, rather than the crop squeezed into a circle.
  */
 export function CroppedPhoto({
   src,
