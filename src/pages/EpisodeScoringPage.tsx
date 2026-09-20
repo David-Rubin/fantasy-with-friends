@@ -232,7 +232,6 @@ export function EpisodeScoringPage() {
   // This viewer's own half-finished card, if they left one here. Private to
   // them — see ScorecardDraftDoc — so it says nothing about what anybody else
   // thinks happened in the episode.
-  const [restoredDraft, setRestoredDraft] = useState(false)
   const [draftSaved, setDraftSaved] = useState(false)
   const [savingDraft, setSavingDraft] = useState(false)
   // Whether a suggestion is live, readable from inside the draft load for the
@@ -355,7 +354,6 @@ export function EpisodeScoringPage() {
         const draft = snap.data() as ScorecardDraftDoc
         setScores(draft.scores)
         setEliminations(Object.fromEntries(draft.eliminations.map((id) => [id, true])))
-        setRestoredDraft(true)
       })
       .catch(() => {
         // Nothing to restore. A draft is a convenience, and a page that will
@@ -554,7 +552,6 @@ export function EpisodeScoringPage() {
         Object.fromEntries(activeContestants.map((c) => [c.id, scores[c.id] ?? {}])),
         activeContestants.filter((c) => eliminations[c.id]).map((c) => c.id)
       )
-      setRestoredDraft(false)
       setDraftSaved(true)
     } finally {
       setSavingDraft(false)
@@ -824,15 +821,9 @@ export function EpisodeScoringPage() {
         </div>
       )}
 
-      {card.actions.includes('saveForLater') && (
+      {draftSaved && (
         <p className="mt-3 text-sm text-gray-500" role="status">
-          {draftSaved ? t('scoring.draftSaved') : t('scoring.saveForLaterHint')}
-        </p>
-      )}
-
-      {restoredDraft && (
-        <p className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          {t('scoring.draftRestored')}
+          {t('scoring.draftSaved')}
         </p>
       )}
 
