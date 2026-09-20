@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { doc, collection, deleteField, updateDoc, addDoc } from 'firebase/firestore'
+import { doc, collection, deleteDoc, deleteField, updateDoc, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { listenDoc, listenQuery } from '../lib/listen'
 import { useAuth } from '../contexts/AuthContext'
@@ -21,7 +21,6 @@ import type {
   Contestant,
   AccentColor,
   ContestantScoreDoc,
-  PhotoCrop,
 } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
@@ -78,10 +77,12 @@ import {
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
 import { PlayerAvatars, playerNames } from '../components/PlayerAvatars'
 import { ContestantAvatar } from '../components/ContestantAvatar'
-import { PhotoCropDialog } from '../components/PhotoCropDialog'
-import { CONTESTANT_CROP_SHAPE } from '../lib/photoCrop'
-import { MAX_PHOTO_MB, photoFileProblem } from '../lib/photoFile'
 import { uploadContestantPhoto } from '../lib/contestantPhotoApi'
+import { ContestantPhotoButton } from '../components/ContestantPhotoButton'
+import {
+  ContestantPhotoDialog,
+  type ContestantPhotoChoice,
+} from '../components/ContestantPhotoDialog'
 import {
   DEFAULT_ROSTER_SORT,
   nextRosterSort,
@@ -487,7 +488,7 @@ export function SeasonDetailPage() {
     setContestantError('')
     setAddingContestant(true)
     try {
-      await addDoc(collection(db, 'seasons', seasonId, 'contestants'), {
+      const created = await addDoc(collection(db, 'seasons', seasonId, 'contestants'), {
         name: contestantForm.name.trim(),
         photoUrl: contestantForm.photoUrl.trim(),
         // Left off entirely when nobody framed the picture: absent is what the
@@ -498,7 +499,20 @@ export function SeasonDetailPage() {
         draftedRound: null,
         eliminatedEpisode: null,
       } satisfies ContestantDoc)
-      setContestantForm({ name: '', photoUrl: '', bio: '' })
+      // After the document, because the object is keyed by the contestant it
+      // belongs to — there was nothing to key it by until now. A contestant
+      // whose photo fails to upload is still a contestant, with a frame that
+      // offers the picture again.
+      if (contestantForm.photoFile && user) {
+        await uploadContestantPhoto(
+          seasonId,
+          created.id,
+          user.uid,
+          contestantForm.photoFile,
+          contestantForm.photoCrop
+        )
+      }
+      setContestantForm(emptyContestantForm)
     } finally {
       setAddingContestant(false)
     }
@@ -516,20 +530,9 @@ export function SeasonDetailPage() {
   const [croppingContestantId, setCroppingContestantId] = useState<string | null>(null)
   const [savingCrop, setSavingCrop] = useState(false)
   const [cropError, setCropError] = useState('')
-  /**
-   * A file chosen in that dialog, framed but not yet uploaded.
-   *
-   * Framed before it is sent, as a profile picture is: uploading first would
-   * put an unframed photo in front of the whole league for as long as it took
-   * to position it. `src` is an object URL — a handle on memory the browser
-   * holds until it is given back, hence the effect below.
-   */
-  const [pendingPhoto, setPendingPhoto] = useState<{ file: File; src: string } | null>(null)
-
-  useEffect(() => {
-    if (!pendingPhoto) return
-    return () => URL.revokeObjectURL(pendingPhoto.src)
-  }, [pendingPhoto])
+  /** The contestant an admin is about to drop from a season being set up. */
+  const [removingContestant, setRemovingContestant] = useState<Contestant | null>(null)
+  const [removingContestantBusy, setRemovingContestantBusy] = useState(false)
 
   function openEditContestant(contestant: Contestant) {
     setEditContestantError('')
@@ -564,6 +567,17 @@ export function SeasonDetailPage() {
         photoCrop: editContestantForm.photoCrop ?? deleteField(),
         bio: normaliseBio(editContestantForm.bio),
       })
+      // Second, so the address it writes is not overwritten by the form's own
+      // idea of the photo — which is the old one until this lands.
+      if (editContestantForm.photoFile && user) {
+        await uploadContestantPhoto(
+          seasonId,
+          editingContestantId,
+          user.uid,
+          editContestantForm.photoFile,
+          editContestantForm.photoCrop
+        )
+      }
       setEditingContestantId(null)
     } finally {
       setSavingContestant(false)
@@ -579,16 +593,18 @@ export function SeasonDetailPage() {
    * update a contestant at any point in the season, so this needs nothing new
    * from them.
    */
-  async function handleSaveContestantCrop(contestantId: string, crop: PhotoCrop) {
+  async function handleSaveContestantPhoto(
+    contestantId: string,
+    { crop, file }: ContestantPhotoChoice
+  ) {
     if (!seasonId || !user) return
     setCropError('')
     setSavingCrop(true)
     try {
-      if (pendingPhoto) {
+      if (file) {
         // A new picture, so the file and the crop go together — the crop
         // belongs to this photo and means nothing against the last one.
-        await uploadContestantPhoto(seasonId, contestantId, user.uid, pendingPhoto.file, crop)
-        setPendingPhoto(null)
+        await uploadContestantPhoto(seasonId, contestantId, user.uid, file, crop)
       } else {
         await updateDoc(doc(db, 'seasons', seasonId, 'contestants', contestantId), {
           photoCrop: crop,
@@ -599,9 +615,32 @@ export function SeasonDetailPage() {
       // Said on the dialog rather than swallowed: it stays open over the
       // framing that was just chosen, so the save can be tried again without
       // redoing it.
-      setCropError(t(pendingPhoto ? 'contestant.photoUploadFailed' : 'contestant.photoCropFailed'))
+      setCropError(t(file ? 'contestant.photoUploadFailed' : 'contestant.photoCropFailed'))
     } finally {
       setSavingCrop(false)
+    }
+  }
+
+  /**
+   * Drop a contestant from a season being set up.
+   *
+   * Setup only, which is when a cast is still being assembled: after the draft
+   * a contestant is on somebody's roster and in the scores, and removing one
+   * there would take points out of a season already being played. The rules let
+   * an admin delete at any point — this is the client withholding a control
+   * whose consequences nobody wants, not a boundary.
+   *
+   * The uploaded photo, if there is one, stays in the bucket: only whoever
+   * uploaded it may delete it, and the document that pointed at it is gone.
+   */
+  async function handleRemoveContestant() {
+    if (!seasonId || !removingContestant) return
+    setRemovingContestantBusy(true)
+    try {
+      await deleteDoc(doc(db, 'seasons', seasonId, 'contestants', removingContestant.id))
+      setRemovingContestant(null)
+    } finally {
+      setRemovingContestantBusy(false)
     }
   }
 
@@ -824,25 +863,9 @@ export function SeasonDetailPage() {
     })
     return sortRosterRows(rows, rosterSort)
   }, [contestants, entries, rosterSort])
-  /** Take a file chosen in the dialog, or say why it cannot be used. */
-  function handlePickContestantPhoto(file: File) {
-    const problem = photoFileProblem(file)
-    if (problem) {
-      setCropError(
-        t(problem === 'type' ? 'contestant.photoWrongType' : 'contestant.photoTooBig', {
-          max: MAX_PHOTO_MB,
-        })
-      )
-      return
-    }
-    setCropError('')
-    setPendingPhoto({ file, src: URL.createObjectURL(file) })
-  }
-
-  /** Shut the dialog, dropping a picture that was chosen and never saved. */
+  /** Shut the dialog. A picture chosen and never saved goes with it. */
   function closeCropDialog() {
     setCroppingContestantId(null)
-    setPendingPhoto(null)
     setCropError('')
   }
 
@@ -1066,7 +1089,10 @@ export function SeasonDetailPage() {
               className={contestants.length > 0 ? 'mb-4' : ''}
               contestants={contestants}
               compact
-              cardProps={(c) => ({ onEdit: () => openEditContestant(c) })}
+              cardProps={(c) => ({
+                onEdit: () => openEditContestant(c),
+                onRemove: () => setRemovingContestant(c),
+              })}
             />
             <form onSubmit={handleAddContestant} className="flex flex-col gap-2">
               <ContestantFields values={contestantForm} onChange={setContestantForm} />
@@ -1502,29 +1528,15 @@ export function SeasonDetailPage() {
                               closed season's roster is a record like every
                               other part of it. */}
                           {canManageSeason ? (
-                            <button
-                              type="button"
+                            <ContestantPhotoButton
+                              name={row.contestant}
+                              photoUrl={row.photoUrl}
+                              photoCrop={row.photoCrop}
                               onClick={() => {
                                 setCropError('')
-                                setPendingPhoto(null)
                                 setCroppingContestantId(row.id)
                               }}
-                              // The avatar is decorative and hidden from screen
-                              // readers, so without this the button would be
-                              // announced as an empty one.
-                              aria-label={t(
-                                row.photoUrl
-                                  ? 'contestant.adjustPhotoFor'
-                                  : 'contestant.addPhotoFor',
-                                { name: row.contestant }
-                              )}
-                              // `cursor-pointer` because the control is a
-                              // photograph: a button that looks like a button
-                              // says so by looking like one, and this does not.
-                              className="shrink-0 cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-                            >
-                              <ContestantAvatar photoUrl={row.photoUrl} photoCrop={row.photoCrop} />
-                            </button>
+                            />
                           ) : (
                             <ContestantAvatar photoUrl={row.photoUrl} photoCrop={row.photoCrop} />
                           )}
@@ -1872,34 +1884,43 @@ export function SeasonDetailPage() {
           dialog rather than reopening the last one's zoom over a new face —
           the same reason ContestantFields keys it on the picture's address. */}
       {croppingContestant && (
-        <PhotoCropDialog
-          // Keyed on the picture as well as the contestant: choosing a file
-          // mounts a fresh dialog, so a new photo is framed from the middle
-          // rather than under the zoom and offset of the one it replaced.
-          key={`${croppingContestant.id}:${pendingPhoto?.src ?? croppingContestant.photoUrl}`}
+        <ContestantPhotoDialog
+          key={croppingContestant.id}
           open
           onClose={closeCropDialog}
-          onSave={(crop) => handleSaveContestantCrop(croppingContestant.id, crop)}
-          src={pendingPhoto?.src ?? croppingContestant.photoUrl}
-          // A crop describes one picture. A newly chosen file has none yet,
-          // and the stored one would frame a face that is not in it.
-          crop={pendingPhoto ? undefined : croppingContestant.photoCrop}
-          onPickFile={handlePickContestantPhoto}
-          pickLabel={t(
-            pendingPhoto || croppingContestant.photoUrl
-              ? 'photoCrop.replacePhoto'
-              : 'photoCrop.choosePhoto'
-          )}
-          pickHint={t('settings.userInfo.photoHint', { max: MAX_PHOTO_MB })}
-          // The shape the cast is cropped to everywhere it is drawn — the
-          // board's card, the roster's thumbnail — so what is framed here is
-          // what appears there. See ContestantFields.
-          shape={CONTESTANT_CROP_SHAPE}
-          title={t('photoCrop.titleContestant')}
+          photoUrl={croppingContestant.photoUrl}
+          photoCrop={croppingContestant.photoCrop}
+          onSave={(choice) => handleSaveContestantPhoto(croppingContestant.id, choice)}
           saving={savingCrop}
           error={cropError}
         />
       )}
+
+      {/* Dropping one from a cast still being assembled. A plain confirm
+          rather than the type-the-name dialog a season deletion gets: a
+          contestant in setup has nothing behind them yet — no roster place, no
+          scores — so the cost of a slip is retyping a name. */}
+      <Modal
+        open={!!removingContestant}
+        onClose={() => setRemovingContestant(null)}
+        title={t('contestant.removeTitle', { name: removingContestant?.name ?? '' })}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRemovingContestant(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              loading={removingContestantBusy}
+              onClick={handleRemoveContestant}
+            >
+              {t('contestant.remove')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-gray-600">{t('contestant.removeConfirm')}</p>
+      </Modal>
     </Layout>
   )
 }

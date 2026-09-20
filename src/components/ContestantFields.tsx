@@ -1,15 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Input, Textarea } from './Input'
 import { Button } from './Button'
-import { CroppedPhoto } from './CroppedPhoto'
-import { PhotoCropDialog } from './PhotoCropDialog'
+import { ContestantPhotoButton } from './ContestantPhotoButton'
+import { ContestantPhotoDialog } from './ContestantPhotoDialog'
 import { BIO_MAX_LENGTH, normaliseBio } from '../lib/contestants'
-import { CONTESTANT_CROP_SHAPE, type PhotoCrop } from '../lib/photoCrop'
+import { useObjectUrl } from '../lib/useObjectUrl'
+import type { PhotoCrop } from '../lib/photoCrop'
 import { t } from '../lib/i18n'
 
 export interface ContestantFormValues {
   name: string
+  /** The photo as stored. Empty for a contestant who has never had one. */
   photoUrl: string
+  /**
+   * A picture chosen from this machine and not yet uploaded.
+   *
+   * The form carries the file rather than uploading on the spot because a
+   * contestant being added has no document to upload against yet: the object is
+   * keyed by the contestant it belongs to. Whoever saves the form does the
+   * upload — see uploadContestantPhoto.
+   */
+  photoFile?: File
   /** Which part of the photo to show. Absent until somebody frames it. */
   photoCrop?: PhotoCrop
   bio: string
@@ -24,6 +35,12 @@ export const emptyContestantForm: ContestantFormValues = { name: '', photoUrl: '
  * Shared rather than written twice so the two cannot drift: a limit or a hint
  * added to one of them is the sort of thing that quietly goes missing from the
  * other, and then a bio that will not save in one place saves in the other.
+ *
+ * The photo is a file from this machine. It used to be an address typed into a
+ * text field, which meant finding a picture already on the web and hoping it
+ * stayed there — a cast assembled that way went blank a photo at a time as the
+ * pages behind it moved. Addresses already stored still draw; they are simply
+ * not how a new one is chosen.
  */
 export function ContestantFields({
   values,
@@ -34,43 +51,14 @@ export function ContestantFields({
   onChange: (next: ContestantFormValues) => void
   autoFocus?: boolean
 }) {
-  const url = values.photoUrl.trim()
-
-  // Seeded from the current value so editing an existing contestant shows the
-  // picture it already has, without waiting for the field to be touched.
-  const [debouncedUrl, setDebouncedUrl] = useState(url)
-  // The address that failed, rather than a bare flag: keyed this way the error
-  // clears itself the moment a different address is being shown, with nothing
-  // to reset.
-  const [failedUrl, setFailedUrl] = useState('')
   const [cropping, setCropping] = useState(false)
-
-  /**
-   * Fetch a second after typing stops, rather than on every keystroke.
-   *
-   * A URL is not a valid image until it is finished being typed, so previewing
-   * as you go would request a string of broken addresses and flash an error
-   * under the field the whole time you were filling it in. The pause absorbs
-   * that without making you leave the field to see the result.
-   *
-   * Clearing the field takes effect without the wait — there is nothing to
-   * fetch, and a delay there would leave a picture up that no longer has an
-   * address behind it.
-   */
-  useEffect(() => {
-    if (url === debouncedUrl) return
-    const timer = setTimeout(() => setDebouncedUrl(url), url === '' ? 0 : 1000)
-    return () => clearTimeout(timer)
-  }, [url, debouncedUrl])
-
-  // Something typed that the preview has not caught up with yet.
-  const loading = url !== '' && url !== debouncedUrl
-  const previewUrl = debouncedUrl
-  const previewFailed = failedUrl !== '' && failedUrl === previewUrl
+  // A chosen file is previewed from memory; a stored one from its address.
+  const pickedUrl = useObjectUrl(values.photoFile)
+  const previewUrl = pickedUrl ?? values.photoUrl
 
   return (
     <>
-      <div className="flex flex-col sm:flex-row gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <Input
           label={t('contestant.name')}
           value={values.name}
@@ -79,112 +67,41 @@ export function ContestantFields({
           autoFocus={autoFocus}
           className="flex-1"
         />
-        {/* The preview shares a row with the field it belongs to, bottom-aligned
-            so it sits level with the input rather than the label above it. At
-            the input's own height it costs the form no vertical space, and the
-            field still takes the rest of the line at any width. */}
-        <div className="flex flex-1 items-end gap-2">
-          <Input
-            label={t('contestant.photo')}
-            value={values.photoUrl}
-            // A crop belongs to one picture. Pointing the field at another one
-            // and keeping the old crop would frame a face that is not there.
-            onChange={(e) =>
-              onChange({ ...values, photoUrl: e.target.value, photoCrop: undefined })
-            }
-            placeholder="https://…"
-            className="flex-1"
-          />
-          {loading ? (
-            <span
-              role="status"
-              aria-label={t('contestant.photoLoading')}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50"
+        {/* The photo shares a row with the name, bottom-aligned so it sits
+            level with the input rather than the label above it. */}
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-gray-700">{t('contestant.photo')}</span>
+          <div className="flex h-10 items-center gap-2">
+            <ContestantPhotoButton
+              name={values.name || t('contestant.thisContestant')}
+              photoUrl={previewUrl}
+              photoCrop={values.photoCrop}
+              onClick={() => setCropping(true)}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              className="!min-h-0 shrink-0 !px-3 !py-2 text-xs"
+              onClick={() => setCropping(true)}
             >
-              <svg
-                className="h-4 w-4 animate-spin text-gray-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-            </span>
-          ) : (
-            previewUrl &&
-            !previewFailed && (
-              <>
-                {/* The thumbnail is the frame the roster draws, at the size the
-                    roster draws it, so the field shows the crop rather than
-                    describing it — which means it is shaped from the same
-                    constant as the card and the roster row, not a square. */}
-                <span
-                  style={{ aspectRatio: CONTESTANT_CROP_SHAPE.aspect }}
-                  className="relative block h-10 shrink-0 overflow-hidden rounded-lg border border-gray-200"
-                >
-                  <CroppedPhoto
-                    src={previewUrl}
-                    crop={values.photoCrop}
-                    alt={t('contestant.photoPreviewAlt')}
-                  />
-                </span>
-                {/* Hidden from the loading branch above deliberately: framing a
-                    picture that has not arrived would open on an empty box. */}
-                <img
-                  src={previewUrl}
-                  alt=""
-                  onError={() => setFailedUrl(previewUrl)}
-                  className="hidden"
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="!min-h-0 shrink-0 !px-3 !py-2 text-xs"
-                  onClick={() => setCropping(true)}
-                >
-                  {t('contestant.adjustPhoto')}
-                </Button>
-              </>
-            )
-          )}
+              {t(previewUrl ? 'photoCrop.replacePhoto' : 'photoCrop.choosePhoto')}
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Full width rather than beside the field: the message is a sentence and
-          there is no room for it next to a 40px thumbnail. */}
-      {!loading && previewUrl && previewFailed && (
-        <p className="text-sm text-red-600">{t('contestant.photoFailed')}</p>
-      )}
-
-      {previewUrl && !previewFailed && (
-        <PhotoCropDialog
-          key={previewUrl}
-          open={cropping}
-          onClose={() => setCropping(false)}
-          onSave={(crop) => {
-            onChange({ ...values, photoCrop: crop })
-            setCropping(false)
-          }}
-          src={previewUrl}
-          crop={values.photoCrop}
-          // The shape of a draft-board card, which is the biggest a contestant's
-          // photo is ever drawn. The roster's circle cover-fits the same region.
-          shape={CONTESTANT_CROP_SHAPE}
-          title={t('photoCrop.titleContestant')}
-        />
-      )}
+      <ContestantPhotoDialog
+        open={cropping}
+        onClose={() => setCropping(false)}
+        photoUrl={previewUrl}
+        photoCrop={values.photoCrop}
+        // Kept on the form until it is saved. Nothing is uploaded from here:
+        // see ContestantPhotoDialog for why the write is the caller's.
+        onSave={({ crop, file }) => {
+          onChange({ ...values, photoFile: file ?? values.photoFile, photoCrop: crop })
+          setCropping(false)
+        }}
+      />
 
       {/* Its own line rather than a third column: a bio runs to a paragraph,
           and squeezed beside two single-line fields it would be a box too small
