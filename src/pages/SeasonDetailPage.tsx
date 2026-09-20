@@ -21,6 +21,7 @@ import type {
   Contestant,
   AccentColor,
   ContestantScoreDoc,
+  PhotoCrop,
 } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
@@ -77,6 +78,8 @@ import {
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
 import { PlayerAvatars, playerNames } from '../components/PlayerAvatars'
 import { ContestantAvatar } from '../components/ContestantAvatar'
+import { PhotoCropDialog } from '../components/PhotoCropDialog'
+import { CONTESTANT_CROP_SHAPE } from '../lib/photoCrop'
 import {
   DEFAULT_ROSTER_SORT,
   nextRosterSort,
@@ -499,6 +502,19 @@ export function SeasonDetailPage() {
     }
   }
 
+  /**
+   * The contestant whose photo is being reframed from the roster, if any.
+   *
+   * Framing a picture was part of entering the cast, so it lived in the setup
+   * panel and left with it: once a season started, a photo that sat badly —
+   * or that looked fine in the form and wrong beside a name — could not be
+   * moved. Nothing about a crop depends on the season's state, so the roster
+   * offers the same dialog the setup form does, on the photo itself.
+   */
+  const [croppingContestantId, setCroppingContestantId] = useState<string | null>(null)
+  const [savingCrop, setSavingCrop] = useState(false)
+  const [cropError, setCropError] = useState('')
+
   function openEditContestant(contestant: Contestant) {
     setEditContestantError('')
     setEditContestantForm({
@@ -535,6 +551,34 @@ export function SeasonDetailPage() {
       setEditingContestantId(null)
     } finally {
       setSavingContestant(false)
+    }
+  }
+
+  /**
+   * Store a crop chosen from the roster.
+   *
+   * Only the crop: the contestant's name, bio, owner and elimination are not
+   * this dialog's business, and writing the document from a form that does not
+   * hold them would take them with it. The rules already let a season's admin
+   * update a contestant at any point in the season, so this needs nothing new
+   * from them.
+   */
+  async function handleSaveContestantCrop(contestantId: string, crop: PhotoCrop) {
+    if (!seasonId) return
+    setCropError('')
+    setSavingCrop(true)
+    try {
+      await updateDoc(doc(db, 'seasons', seasonId, 'contestants', contestantId), {
+        photoCrop: crop,
+      })
+      setCroppingContestantId(null)
+    } catch {
+      // Said on the dialog rather than swallowed: it stays open over the
+      // framing that was just chosen, so the save can be tried again without
+      // redoing it.
+      setCropError(t('contestant.photoCropFailed'))
+    } finally {
+      setSavingCrop(false)
     }
   }
 
@@ -757,6 +801,9 @@ export function SeasonDetailPage() {
     })
     return sortRosterRows(rows, rosterSort)
   }, [contestants, entries, rosterSort])
+  /** The contestant behind the crop dialog, drawn from the live documents so a
+      photo changed elsewhere is the one being framed. */
+  const croppingContestant = contestants.find((c) => c.id === croppingContestantId) ?? null
   const episodeNumbers = Array.from({ length: season?.episodeCount ?? 0 }, (_, i) => i + 1)
   // Episode numbers that already have a scores document, whatever the season's
   // state — the one thing that constrains an edit.
@@ -1393,7 +1440,35 @@ export function SeasonDetailPage() {
                         ].join(' ')}
                       >
                         <span className="flex items-center gap-3">
-                          <ContestantAvatar photoUrl={row.photoUrl} photoCrop={row.photoCrop} />
+                          {/* The photo is the control. An admin who can see
+                              that a face sits badly in its frame is looking at
+                              the thing they want to move, so that is what they
+                              press — a separate Adjust button in a cast list
+                              would be a column of buttons repeating what the
+                              picture already offers.
+
+                              A button only where there is both a photo to move
+                              and somebody who may move it; everyone else gets
+                              the plain thumbnail, and a closed season's roster
+                              is a record like every other part of it. */}
+                          {canManageSeason && row.photoUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCropError('')
+                                setCroppingContestantId(row.id)
+                              }}
+                              // The avatar is decorative and hidden from screen
+                              // readers, so without this the button would be
+                              // announced as an empty one.
+                              aria-label={t('contestant.adjustPhotoFor', { name: row.contestant })}
+                              className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                            >
+                              <ContestantAvatar photoUrl={row.photoUrl} photoCrop={row.photoCrop} />
+                            </button>
+                          ) : (
+                            <ContestantAvatar photoUrl={row.photoUrl} photoCrop={row.photoCrop} />
+                          )}
                           {row.contestant}
                         </span>
                       </td>
@@ -1732,6 +1807,28 @@ export function SeasonDetailPage() {
           ))}
         </div>
       </Modal>
+
+      {/* Reframing a contestant's photo from the roster.
+          Keyed on the contestant, so opening one after another mounts a fresh
+          dialog rather than reopening the last one's zoom over a new face —
+          the same reason ContestantFields keys it on the picture's address. */}
+      {croppingContestant && (
+        <PhotoCropDialog
+          key={croppingContestant.id}
+          open
+          onClose={() => setCroppingContestantId(null)}
+          onSave={(crop) => handleSaveContestantCrop(croppingContestant.id, crop)}
+          src={croppingContestant.photoUrl}
+          crop={croppingContestant.photoCrop}
+          // The shape the cast is cropped to everywhere it is drawn — the
+          // board's card, the roster's thumbnail — so what is framed here is
+          // what appears there. See ContestantFields.
+          shape={CONTESTANT_CROP_SHAPE}
+          title={t('photoCrop.titleContestant')}
+          saving={savingCrop}
+          error={cropError}
+        />
+      )}
     </Layout>
   )
 }

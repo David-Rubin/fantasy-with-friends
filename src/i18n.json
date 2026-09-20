@@ -158,6 +158,8 @@
   "contestant.photoLoading": "Loading the photo",
   "contestant.photoFailed": "Nothing loaded from that address. Check the link.",
   "contestant.adjustPhoto": "Adjust",
+  "contestant.adjustPhotoFor": "Adjust {name}'s photo",
+  "contestant.photoCropFailed": "That could not be saved. Try again.",
   "contestant.bio": "Bio",
   "contestant.readBio": "Read {name}'s full bio",
   "contestant.bioOptional": "Bio (optional)",
