@@ -1026,7 +1026,7 @@ export function SeasonDetailPage() {
                       pickOrderMethod: e.target.value as SeasonDoc['pickOrderMethod'],
                     }))
                   }
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="admin-set">{t('draft.pickOrder.adminSet')}</option>
                   <option value="randomized">{t('draft.pickOrder.randomized')}</option>
@@ -1055,7 +1055,7 @@ export function SeasonDetailPage() {
                       timerSeconds: String(clampTimerSeconds(parseInt(s.timerSeconds, 10))),
                     }))
                   }
-                  className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -1068,7 +1068,7 @@ export function SeasonDetailPage() {
                       timerExpiry: e.target.value as SeasonDoc['timerExpiry'],
                     }))
                   }
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="auto-pick">{t('draft.timerExpiry.autoPick')}</option>
                   <option value="admin-picks">{t('draft.timerExpiry.adminPicks')}</option>
@@ -1111,7 +1111,7 @@ export function SeasonDetailPage() {
                         teamCount: String(clampTeamCount(parseInt(s.teamCount, 10))),
                       }))
                     }
-                    className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </label>
                 <TeamAssignmentBoard

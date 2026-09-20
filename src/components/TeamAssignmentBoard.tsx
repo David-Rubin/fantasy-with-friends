@@ -103,7 +103,7 @@ export function TeamAssignmentBoard({
           aria-label={t('team.assign.selectFor', { name: member.displayName })}
           value={current ?? ''}
           onChange={(e) => onAssign(member.uid, e.target.value || null)}
-          className="max-w-28 rounded border border-gray-300 bg-white px-1 py-0.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="max-w-28 rounded border border-gray-300 bg-white px-1 py-0.5 text-base sm:text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">{t('team.assign.unassigned')}</option>
           {ids.map((id) => (

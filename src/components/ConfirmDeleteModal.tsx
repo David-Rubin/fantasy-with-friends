@@ -108,7 +108,7 @@ function ConfirmDeleteModalBody({
             autoCorrect="off"
             spellCheck={false}
             aria-describedby={error ? errorId : undefined}
-            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
           />
         </div>
 

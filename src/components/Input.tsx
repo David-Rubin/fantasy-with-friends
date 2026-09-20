@@ -18,8 +18,20 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   hint?: string
 }
 
+/**
+ * `text-base sm:text-sm` rather than plain `text-sm`, and the same goes for
+ * every other field, select and textarea in the app.
+ *
+ * iOS zooms the whole page in when you focus a control whose text is smaller
+ * than 16px, and never zooms back out — the scale then follows you from page
+ * to page, so signing in left the entire app zoomed with its edges off the
+ * screen. Nothing can undo that from script: there is no API for the pinch
+ * scale, and the viewport-meta trick that forces a reset works by taking
+ * pinch-zoom away from everybody. 16px on a phone is what stops it happening,
+ * and `sm:` keeps the 14px this had everywhere a pointer is likely.
+ */
 const inputBase =
-  'block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500'
+  'block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500'
 
 export function Input({
   label,

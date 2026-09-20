@@ -140,6 +140,21 @@ document. Removing that field silently breaks the dashboard's listeners.
 only by its owner (it holds the email address), so a roster cannot look up names
 and copies them at write time.
 
+### A field on a phone is 16px
+
+Every `<input>`, `<select>` and `<textarea>` carries `text-base sm:text-sm`
+(or `sm:text-xs` where it was smaller still). iOS zooms the whole page in when
+a control smaller than 16px takes focus and never zooms back out — and the
+scale then follows the reader from page to page, so one tap on the password
+field left the entire app zoomed with its edges off screen.
+
+Nothing undoes that from script: there is no API for the pinch scale, and the
+`maximum-scale=1` trick that forces a reset works by taking pinch-zoom away
+from everyone who needs it. Preventing it is the only fix, so a new control
+that renders at `text-sm` on a phone reintroduces the bug.
+
+Checkboxes, radios and range sliders are exempt — they have no text to zoom to.
+
 ### Strings live in `src/i18n.json`
 
 All user-facing text goes through `t()`. No inline copy in components.
