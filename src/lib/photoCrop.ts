@@ -59,11 +59,18 @@ export const AVATAR_CROP_SHAPE: CropShape = { aspect: 1, round: true }
  * of it being one number: a card with a fixed height and a fluid width was a
  * different shape in each of those places, and matched the editor in none.
  *
- * 4:3 because it is close to what the draft board already was (about 207×160
- * at the width that board is usually read at), so the change is a nudge to the
- * shape people know rather than a new one.
+ * 3:4, upright. A contestant is a person, and a person photographs taller than
+ * they are wide: a landscape frame either cut the top of a head off or kept a
+ * band of background on either side of one.
+ *
+ * Crops stored under the 4:3 this used to be are left alone rather than
+ * migrated. A crop carries its own `aspect`, and CroppedPhoto lays that region
+ * out in a covering box, so an older one is drawn as the middle of what was
+ * kept — the right part of the picture, framed more tightly — instead of being
+ * squeezed. Reframing it stores 3:4, and nothing has to be rewritten for the
+ * rest to look right. See the note at the top of this file.
  */
-export const CONTESTANT_CROP_SHAPE: CropShape = { aspect: 4 / 3, round: false }
+export const CONTESTANT_CROP_SHAPE: CropShape = { aspect: 3 / 4, round: false }
 
 /** An image's own size in pixels — all the editor needs to know about the file. */
 export interface ImageSize {
@@ -243,13 +250,18 @@ export function readCrop(value: unknown): PhotoCrop | undefined {
 }
 
 /**
- * How much of the editor's square stage the cutout takes.
+ * How much of the editor's square stage the cutout takes, in its longer side.
  *
- * Short of the whole thing on purpose: the dimmed picture around it is the
- * point of the overlay, and with no margin there would be nothing to see out
- * there and no sense of what panning would bring in.
+ * All of it. The cutout keeps the crop's shape inside a square stage, so a
+ * portrait frame is already only three quarters as wide as it is tall — take
+ * another 28% off both sides and the picture being positioned ends up a
+ * postage stamp in a large black box. At 1 the photo meets the stage in at
+ * least one dimension, and the rest of it still shows, dimmed, down whichever
+ * sides are left over: for the 3:4 cast frame that is the width, where the
+ * context actually is, since a picture too tall for its frame is the case the
+ * margin was for.
  */
-export const CUTOUT_FRACTION = 0.72
+export const CUTOUT_FRACTION = 1
 
 /** The cutout's size, as fractions of a square stage. */
 export function cutoutBox(aspect: number): { w: number; h: number } {

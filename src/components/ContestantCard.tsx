@@ -105,6 +105,12 @@ export interface ContestantCardProps {
   compact?: boolean
   /** Renders an Edit control. Setup only — a drafted cast is settled. */
   onEdit?: () => void
+  /**
+   * Renders a Remove control beside Edit. Setup only, and for the same reason:
+   * once a season has drafted, a contestant is on somebody's roster and in the
+   * scores, and taking them out would rewrite a season being played.
+   */
+  onRemove?: () => void
 }
 
 export function ContestantCard({
@@ -116,6 +122,7 @@ export function ContestantCard({
   onPickFor,
   compact,
   onEdit,
+  onRemove,
 }: ContestantCardProps) {
   const isDrafted = !!contestant.draftedByUid
   const isEliminated = contestant.eliminatedEpisode !== null
@@ -176,14 +183,31 @@ export function ContestantCard({
           <p className="mt-2 text-xs text-gray-400">{t('contestant.owner', { name: ownerName })}</p>
         )}
 
-        {onEdit && (
-          <Button
-            variant="secondary"
-            onClick={onEdit}
-            className="mt-auto w-full pt-2 !min-h-0 !px-3 !py-1 text-xs"
-          >
-            {t('common.edit')}
-          </Button>
+        {(onEdit || onRemove) && (
+          // Pinned to the bottom of the card as the lone Edit button was, so a
+          // row of cards with bios of different lengths still lines its
+          // controls up. Remove is second and quieter: the two sit together,
+          // and the destructive one should not be the one the eye lands on.
+          <div className="mt-auto flex gap-2 pt-2">
+            {onEdit && (
+              <Button
+                variant="secondary"
+                onClick={onEdit}
+                className="w-full !min-h-0 !px-3 !py-1 text-xs"
+              >
+                {t('common.edit')}
+              </Button>
+            )}
+            {onRemove && (
+              <Button
+                variant="ghost"
+                onClick={onRemove}
+                className="w-full !min-h-0 !px-3 !py-1 text-xs !text-red-600 hover:!bg-red-50"
+              >
+                {t('contestant.remove')}
+              </Button>
+            )}
+          </div>
         )}
 
         {/* Actions */}

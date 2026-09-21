@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { MAX_AVATAR_MB } from './avatarFile'
+import { MAX_PHOTO_MB } from './photoFile'
 import { TEAM_NAME_MAX_LENGTH } from './teamName'
 import { BIO_MAX_LENGTH } from './contestants'
 
@@ -24,13 +24,15 @@ import { BIO_MAX_LENGTH } from './contestants'
  */
 const mirrored = [
   {
-    what: 'the avatar size limit',
+    what: 'the uploaded photo size limit',
     file: 'storage.rules',
-    // `request.resource.size <= 3 * 1024 * 1024`
+    // `request.resource.size <= 3 * 1024 * 1024` — once for an avatar, once
+    // for a contestant's photo. Both are pictures somebody picks from the same
+    // kind of file dialog, so both carry the same bound.
     pattern: /request\.resource\.size <= (\d+) \* 1024 \* 1024/g,
-    constant: () => MAX_AVATAR_MB,
-    source: 'MAX_AVATAR_MB in src/lib/avatarFile.ts',
-    occurrences: 1,
+    constant: () => MAX_PHOTO_MB,
+    source: 'MAX_PHOTO_MB in src/lib/photoFile.ts',
+    occurrences: 2,
   },
   {
     what: 'the team name length limit',

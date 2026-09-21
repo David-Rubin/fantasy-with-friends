@@ -1,11 +1,11 @@
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { deleteField, doc, updateDoc } from 'firebase/firestore'
 import { db, storage } from './firebase'
-import { avatarFileProblem } from './avatarFile'
+import { photoFileProblem } from './photoFile'
 import type { PhotoCrop } from './photoCrop'
 
 /**
- * The thin writer beside src/lib/avatarFile.ts, which decides.
+ * The thin writer beside src/lib/photoFile.ts, which decides.
  *
  * One fixed object per person, so uploading again replaces the picture rather
  * than leaving the old one orphaned in the bucket. Overwriting mints a fresh
@@ -16,7 +16,7 @@ import type { PhotoCrop } from './photoCrop'
  * to, so the new picture appears without a reload.
  */
 export async function uploadAvatar(uid: string, file: File, crop?: PhotoCrop): Promise<string> {
-  const problem = avatarFileProblem(file)
+  const problem = photoFileProblem(file)
   // Belt and braces: callers validate to show a message on the right control,
   // and the storage rule refuses anyway. This stops a caller that forgot.
   if (problem) throw new Error(`avatar/${problem}`)

@@ -23,9 +23,32 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
-    // Contestant photos are URLs typed into a text field, not uploads
-    // (src/components/ContestantFields.tsx), so there is nothing to store and
-    // nothing to allow. Open a path here when that changes.
+    // A contestant's photo, uploaded by whoever is putting the cast together.
+    // One can still be a URL typed into the setup form; this is the other way
+    // in, and what the roster's crop dialog uses.
+    //
+    // Scoped to the uploader rather than to the season, because the question
+    // that matters is one a Storage rule cannot ask. "Is this person an admin
+    // of that season" is about documents in Firestore, which these rules
+    // cannot read — there is no get() across the two services. What that
+    // question really guards is *attaching* a photo to a contestant, and that
+    // is a write to the contestant document, which firestore.rules already
+    // allows only to the season's admins.
+    //
+    // So the bytes land in the uploader's own folder — anyone signed in can
+    // already put an image in theirs, which is what avatars are — and only an
+    // admin can point a contestant at them. Same limits, for the same reasons
+    // as above. One object per contestant per uploader, so re-photographing
+    // somebody replaces the file rather than piling up.
+    match /contestantPhotos/{uid}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size <= 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg)');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }
