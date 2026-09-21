@@ -203,13 +203,16 @@ export function PhotoCropDialog({
               style={{
                 width: `${cutout.w * 100}%`,
                 height: `${cutout.h * 100}%`,
-                // The dim, and — inside the white ring — a dark hairline, so
-                // the edge of the frame is visible against a pale photo as well
-                // as a dark one.
+                // The dim outside, then the frame's own edge drawn *inside* it:
+                // a white ring and a dark hairline under it, so the edge shows
+                // against a pale photo as well as a dark one. Inset rather than
+                // a `ring`, which is painted outside the box and is therefore
+                // clipped away wherever the cutout meets the edge of the stage
+                // — which, at a cutout this size, is most of it.
                 boxShadow:
-                  '0 0 0 9999px rgba(17, 24, 39, 0.6), inset 0 0 0 1px rgba(17, 24, 39, 0.35)',
+                  '0 0 0 9999px rgba(17, 24, 39, 0.6), inset 0 0 0 2px rgba(255, 255, 255, 0.9), inset 0 0 0 3px rgba(17, 24, 39, 0.35)',
               }}
-              className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ring-2 ring-white/90 ${
+              className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${
                 shape.round ? 'rounded-full' : 'rounded-md'
               }`}
             />

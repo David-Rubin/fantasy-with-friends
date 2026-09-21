@@ -250,13 +250,18 @@ export function readCrop(value: unknown): PhotoCrop | undefined {
 }
 
 /**
- * How much of the editor's square stage the cutout takes.
+ * How much of the editor's square stage the cutout takes, in its longer side.
  *
- * Short of the whole thing on purpose: the dimmed picture around it is the
- * point of the overlay, and with no margin there would be nothing to see out
- * there and no sense of what panning would bring in.
+ * All of it. The cutout keeps the crop's shape inside a square stage, so a
+ * portrait frame is already only three quarters as wide as it is tall — take
+ * another 28% off both sides and the picture being positioned ends up a
+ * postage stamp in a large black box. At 1 the photo meets the stage in at
+ * least one dimension, and the rest of it still shows, dimmed, down whichever
+ * sides are left over: for the 3:4 cast frame that is the width, where the
+ * context actually is, since a picture too tall for its frame is the case the
+ * margin was for.
  */
-export const CUTOUT_FRACTION = 0.72
+export const CUTOUT_FRACTION = 1
 
 /** The cutout's size, as fractions of a square stage. */
 export function cutoutBox(aspect: number): { w: number; h: number } {

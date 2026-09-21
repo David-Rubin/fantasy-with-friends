@@ -71,37 +71,52 @@ export function ContestantFields({
             level with the input rather than the label above it. */}
         <div className="flex flex-col gap-1">
           <span className="text-sm font-medium text-gray-700">{t('contestant.photo')}</span>
+          {/* The button first, then what it produced: the control is what the
+              eye needs before there is a picture, and the preview reads as its
+              result rather than as something to be got past. */}
           <div className="flex h-10 items-center gap-2">
-            <ContestantPhotoButton
-              name={values.name || t('contestant.thisContestant')}
-              photoUrl={previewUrl}
-              photoCrop={values.photoCrop}
-              onClick={() => setCropping(true)}
-            />
             <Button
               type="button"
               variant="secondary"
               className="!min-h-0 shrink-0 !px-3 !py-2 text-xs"
               onClick={() => setCropping(true)}
             >
-              {t(previewUrl ? 'photoCrop.replacePhoto' : 'photoCrop.choosePhoto')}
+              {t(previewUrl ? 'contestant.modifyPhoto' : 'photoCrop.choosePhoto')}
             </Button>
+            {/* Only once there is one. An empty frame beside the button would
+                be a second control saying the same thing, and the button is
+                already the clearer of the two. */}
+            {previewUrl && (
+              <ContestantPhotoButton
+                name={values.name || t('contestant.thisContestant')}
+                photoUrl={previewUrl}
+                photoCrop={values.photoCrop}
+                onClick={() => setCropping(true)}
+              />
+            )}
           </div>
         </div>
       </div>
 
-      <ContestantPhotoDialog
-        open={cropping}
-        onClose={() => setCropping(false)}
-        photoUrl={previewUrl}
-        photoCrop={values.photoCrop}
-        // Kept on the form until it is saved. Nothing is uploaded from here:
-        // see ContestantPhotoDialog for why the write is the caller's.
-        onSave={({ crop, file }) => {
-          onChange({ ...values, photoFile: file ?? values.photoFile, photoCrop: crop })
-          setCropping(false)
-        }}
-      />
+      {/* Mounted only while it is open, which is what drops the file chosen
+          last time it was used. The dialog holds that file until it closes —
+          so a dialog left mounted across two contestants opened on the
+          previous one's photo instead of the file picker, and only came right
+          after being cancelled once. See ContestantPhotoDialog. */}
+      {cropping && (
+        <ContestantPhotoDialog
+          open
+          onClose={() => setCropping(false)}
+          photoUrl={previewUrl}
+          photoCrop={values.photoCrop}
+          // Kept on the form until it is saved. Nothing is uploaded from here:
+          // see ContestantPhotoDialog for why the write is the caller's.
+          onSave={({ crop, file }) => {
+            onChange({ ...values, photoFile: file ?? values.photoFile, photoCrop: crop })
+            setCropping(false)
+          }}
+        />
+      )}
 
       {/* Its own line rather than a third column: a bio runs to a paragraph,
           and squeezed beside two single-line fields it would be a box too small

@@ -155,6 +155,7 @@
   "contestant.name": "Name",
   "contestant.photo": "Photo",
   "contestant.adjustPhoto": "Adjust",
+  "contestant.modifyPhoto": "Modify",
   "contestant.remove": "Remove",
   "contestant.removeTitle": "Remove {name}?",
   "contestant.removeConfirm": "They are taken off the cast for this season. Nothing else changes.",

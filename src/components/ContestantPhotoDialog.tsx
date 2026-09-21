@@ -28,6 +28,13 @@ export interface ContestantPhotoChoice {
  * The file is framed before it is uploaded, as a profile picture is: sending it
  * first would put an unframed photo in front of the league for as long as it
  * took to position it.
+ *
+ * **Mount it only while it is open.** A file that has been chosen lives here
+ * until the dialog is closed or saved — deliberately, so a save that fails can
+ * be retried without finding the picture again — which means a dialog left
+ * mounted carries that file to whatever it is opened on next. Left mounted
+ * under the add-a-contestant form, it opened on the previous contestant's
+ * photo rather than the file picker.
  */
 export function ContestantPhotoDialog({
   open,
