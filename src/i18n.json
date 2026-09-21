@@ -175,7 +175,7 @@
   "contestant.eliminated": "Eliminated",
   "contestant.active": "Active",
   "contestant.markEliminated": "Mark {name} as eliminated?",
-  "contestant.markEliminatedConfirm": "They will not be eligible for future episode points.",
+  "contestant.markEliminatedConfirm": "Eliminating a contestant means they will not appear on scorecards for future episodes.",
   "contestant.owner": "Owned by {name}",
   "contestant.freeAgent": "Free agent",
   "contestant.assignToTeam": "Assign to team",
