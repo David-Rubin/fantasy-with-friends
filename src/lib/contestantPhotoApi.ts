@@ -1,7 +1,7 @@
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { deleteField, doc, updateDoc } from 'firebase/firestore'
 import { db, storage } from './firebase'
-import { photoFileProblem } from './photoFile'
+import { PHOTO_CACHE_CONTROL, photoFileProblem } from './photoFile'
 import type { PhotoCrop } from './photoCrop'
 
 /**
@@ -34,7 +34,12 @@ export async function uploadContestantPhoto(
   if (problem) throw new Error(`contestantPhoto/${problem}`)
 
   const object = ref(storage, `contestantPhotos/${uploaderUid}/${seasonId}_${contestantId}`)
-  await uploadBytes(object, file, { contentType: file.type })
+  await uploadBytes(object, file, {
+    contentType: file.type,
+    // See PHOTO_CACHE_CONTROL: safe to cache hard, because replacing this
+    // picture changes the address rather than the bytes behind it.
+    cacheControl: PHOTO_CACHE_CONTROL,
+  })
   const photoUrl = await getDownloadURL(object)
   // Written together, because a crop belongs to one picture: a new photo
   // landing under the last one's crop would frame a face that is not there.

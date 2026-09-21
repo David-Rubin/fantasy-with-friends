@@ -27,6 +27,26 @@ export const ACCEPTED_PHOTO_TYPES = ['image/png', 'image/jpeg'] as const
 /** The `accept` attribute for the file input, kept beside the types it mirrors. */
 export const PHOTO_ACCEPT = '.png,.jpg,.jpeg,image/png,image/jpeg'
 
+/**
+ * How long a browser may keep an uploaded photo. A year, and immutable.
+ *
+ * An upload carries no cache header unless one is set, so every page view
+ * fetched every picture again: a roster of twenty pulled twenty photos from
+ * the bucket to draw twenty thumbnails, and the same twenty on the next visit.
+ * That is paid for in egress and waited for on a phone.
+ *
+ * `immutable` is honest here because a stored photo never changes underneath
+ * its address. Both upload paths write to a fixed object per subject, and
+ * overwriting one mints a fresh download token — so a replaced picture arrives
+ * at a URL no cache has seen, rather than at the old one with new bytes. A
+ * crop moving changes no bytes at all; it is a field on a document.
+ *
+ * Set at upload time because it is object metadata: it applies to pictures
+ * uploaded from now on, and an older one keeps being refetched until it is
+ * replaced. Nothing needs rewriting for that — it is the same cost as today.
+ */
+export const PHOTO_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+
 export type PhotoProblem = 'type' | 'size'
 
 /**

@@ -1,7 +1,7 @@
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { deleteField, doc, updateDoc } from 'firebase/firestore'
 import { db, storage } from './firebase'
-import { photoFileProblem } from './photoFile'
+import { PHOTO_CACHE_CONTROL, photoFileProblem } from './photoFile'
 import type { PhotoCrop } from './photoCrop'
 
 /**
@@ -22,7 +22,12 @@ export async function uploadAvatar(uid: string, file: File, crop?: PhotoCrop): P
   if (problem) throw new Error(`avatar/${problem}`)
 
   const object = ref(storage, `avatars/${uid}/avatar`)
-  await uploadBytes(object, file, { contentType: file.type })
+  await uploadBytes(object, file, {
+    contentType: file.type,
+    // See PHOTO_CACHE_CONTROL: safe to cache hard, because replacing this
+    // picture changes the address rather than the bytes behind it.
+    cacheControl: PHOTO_CACHE_CONTROL,
+  })
   const photoUrl = await getDownloadURL(object)
   // The crop belongs to the picture, so the two are written together: a new
   // photo landing without its crop would be framed by the last one's, and the
