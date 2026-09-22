@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { draftLobbyVisible, teamCapacity } from '../lib/draft'
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
 import { draftedOwners, mergeDraftToasts, newDraftToasts, type DraftToast } from '../lib/draftToast'
+import { clockOffsetMs, recordClockSample, serverNow } from '../lib/serverClock'
 import { teamColorFor } from '../lib/teamColor'
 import { accentLeftBorder } from './accentStyles'
 import { PlayerAvatars, playerNames } from './PlayerAvatars'
@@ -74,6 +75,18 @@ export function DraftRoom({
   const [confirmClose, setConfirmClose] = useState(false)
   const [togglingTimer, setTogglingTimer] = useState(false)
   const [toasts, setToasts] = useState<DraftToast[]>([])
+  /**
+   * Bumped whenever a clock measurement lands, and part of the banner's key.
+   *
+   * The banner is seeded from the deadline on its first paint and has nothing
+   * to animate from — an invariant worth keeping, since the bar used to sweep
+   * across on every resume. A measurement arriving after it mounted would have
+   * broken it in a new way: the seed would be the uncorrected number, and the
+   * first tick 250ms later would animate the correction. Remounting on a new
+   * measurement re-seeds it instead, and a fresh element has no previous width
+   * to transition from.
+   */
+  const [clockSyncs, setClockSyncs] = useState(0)
 
   const isPaused = draft?.status === 'paused'
   // An admin stopped the clock. Distinct from `status: 'paused'` above, which is
@@ -128,17 +141,46 @@ export function DraftRoom({
    * belief can be stale by the time the server acts on it, and the moment it is
    * most likely to be stale is this one.
    *
+   * It doubles as the draft's clock check. Both calls answer with the server's
+   * own `Date.now()`, which is the clock a turn's deadline is written from and
+   * the clock the server judges an expiry by — so comparing it with this
+   * device's is what stops a phone with a wandering clock showing a countdown
+   * the draft does not agree with. Two samples because the better of them
+   * wins, and the first pays a cold start the second does not.
+   *
    * Failure is ignored on purpose. Nothing depends on it — the only thing lost
-   * is the head start.
+   * is the head start, and a clock reading nobody has yet been misled by.
    *
    * Mounted with the draft rather than with the page, which is tighter than it
    * used to be: the season page is also the page for a season in setup and a
    * season being read months later, and neither is about to touch the clock.
    */
+  /**
+   * One reading of the server's clock, from a call that has just come back.
+   *
+   * Shared by the warm-up below and by a real pick, because those two differ
+   * in the one way that matters to a measurement: the warm-up may be paying a
+   * cold start, which is minutes of nothing followed by a slow round trip,
+   * while a pick is a call to an instance that is already up. Only the fastest
+   * sample is kept (see serverClock), so a pick's reading supersedes a cold
+   * warm-up's without anything here having to know which was which.
+   */
+  const noteServerClock = useCallback((sentAt: number, serverTime?: number) => {
+    if (!serverTime) return
+    const before = clockOffsetMs()
+    recordClockSample(sentAt, serverTime, Date.now())
+    // Only a measurement that actually moved the estimate re-seeds the banner.
+    if (clockOffsetMs() !== before) setClockSyncs((n) => n + 1)
+  }, [])
+
   useEffect(() => {
-    setTimerPaused({ seasonId, paused: false, warm: true }).catch(() => {})
-    submitPick({ seasonId, warm: true }).catch(() => {})
-  }, [seasonId])
+    const warm = async (call: Promise<{ data: { serverNow?: number } }>) => {
+      const sentAt = Date.now()
+      noteServerClock(sentAt, (await call).data.serverNow)
+    }
+    warm(setTimerPaused({ seasonId, paused: false, warm: true })).catch(() => {})
+    warm(submitPick({ seasonId, warm: true })).catch(() => {})
+  }, [seasonId, noteServerClock])
 
   /**
    * Announce a pick on every screen in the room.
@@ -196,7 +238,10 @@ export function DraftRoom({
       }).catch((error) => console.error('Could not resolve expired turn', error))
     }
 
-    const msLeft = draft.timerExpiresAt - Date.now()
+    // On the server's clock, like the deadline itself: a device running fast
+    // would otherwise nudge the server early, every turn, and be told nothing
+    // had expired.
+    const msLeft = draft.timerExpiresAt - serverNow()
     if (msLeft <= 0) {
       fire()
       return
@@ -292,8 +337,10 @@ export function DraftRoom({
 
     setPicking(true)
     setPickError('')
+    const sentAt = Date.now()
     try {
       const { data } = await submitPick({ seasonId, contestantId, onBehalfOf })
+      noteServerClock(sentAt, data.serverNow)
 
       trackEvent('draft_pick_made', {
         round: draft.currentRound,
@@ -489,7 +536,7 @@ export function DraftRoom({
                   than showing the previous turn's width for a frame and
                   animating across. */}
               <TimerBanner
-                key={draft.timerExpiresAt}
+                key={`${draft.timerExpiresAt}-${clockSyncs}`}
                 pickerName={currentPickerName}
                 timerExpiresAt={draft.timerExpiresAt}
                 durationSeconds={season.timerSeconds}
