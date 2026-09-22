@@ -4,6 +4,9 @@ import { CroppedPhoto } from './CroppedPhoto'
 import type { AccentColor, PhotoCrop } from '../lib/types'
 
 const sizes = {
+  // For a circle that sits in the corner of a card rather than at the head of
+  // a row: small enough not to compete with the name beside it.
+  xs: 'h-6 w-6 text-xs',
   sm: 'h-8 w-8 text-sm',
   lg: 'h-20 w-20 text-2xl',
 } as const
