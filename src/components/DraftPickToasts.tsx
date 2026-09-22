@@ -10,22 +10,28 @@ import { t } from '../lib/i18n'
  * What raises one is in src/lib/draftToast.ts; this is only the showing of it.
  * Two things about the placement are load-bearing:
  *
- * The stack is `fixed` and its container takes no pointer events, only the
- * cards do. A toast that swallowed clicks across the bottom of the screen
- * would have covered the pick buttons on a phone for five seconds after every
- * pick — which is the one thing a draft cannot afford, since the clock is
- * still running underneath it. Nothing here touches the timer: the countdown
- * is the draft document's deadline, read by TimerBanner, and a toast neither
- * writes to it nor unmounts the banner.
+ * It sits in the middle of the screen, which is where a pick is hardest to
+ * miss — and the cost of the middle is that it is over the board rather than
+ * beside it, so how it behaves for the five seconds it is there matters more
+ * than where it is:
  *
- * It is full width at the bottom on a phone and a column in the corner from
- * `sm` up, with the safe-area inset added so it clears the home indicator.
+ * The container takes no pointer events; only the cards do. It spans the whole
+ * screen, so anything else would have made the board untouchable for five
+ * seconds after every pick — which is the one thing a draft cannot afford,
+ * since the clock is running underneath it. Nothing here touches that clock:
+ * the countdown is the draft document's deadline, read by TimerBanner, and a
+ * toast neither writes to it nor unmounts the banner.
+ *
+ * `h-dvh` rather than `inset-0` alone for the same reason the modal uses it:
+ * `inset-0` is the layout viewport, which on a phone runs on behind the
+ * browser's toolbars, and centring in it puts the card low rather than in the
+ * middle of what the reader can see.
  *
  * `z-40`, one layer below a dialog. A draft does not stop while somebody has
- * a dialog open, so a pick can land while one is up — and at the same layer
- * the toast covered the bottom sheet's footer, which on a phone is exactly
- * where the button they opened it to press is.
- * The dismiss button is a full-height 44px target inside the card rather than
+ * a dialog open, so a pick can land while one is up, and the middle of the
+ * screen is where a dialog is too.
+ *
+ * The dismiss button is a full-width 44px target inside the card rather than
  * a corner cross, because a cross small enough to sit in a toast's corner is
  * smaller than a thumb.
  */
@@ -45,8 +51,7 @@ export function DraftPickToasts({
       // already reading out about the contestant list.
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-3 pb-3 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:items-end sm:px-0 sm:pb-0"
-      style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+      className="pointer-events-none fixed inset-0 z-40 flex h-dvh flex-col items-center justify-center gap-3 px-4"
     >
       {toasts.map((toast) => (
         <ToastCard key={toast.id} toast={toast} onDismiss={onDismiss} />

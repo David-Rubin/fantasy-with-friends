@@ -118,9 +118,10 @@ body {
 
 /* ── The draft pick toast ─────────────────────────────────────────────────────
    A pick lands on every screen in the draft at once, so the entrance is a
-   bounce rather than a fade: it has to be noticed out of the corner of an eye
-   by somebody reading the contestant list, without being a thing to dismiss
-   before they can carry on.
+   bounce rather than a fade. The card arrives in the middle of the screen, so
+   it grows from the middle rather than rising from an edge: a card that slides
+   up and then stops in the centre reads as one that failed to get where it was
+   going.
 
    Inside the reduced-motion guard for the same reason the champion banner is —
    a viewer who asked for less movement gets the toast sitting still, which is
@@ -129,15 +130,15 @@ body {
   @keyframes draft-toast-in {
     0% {
       opacity: 0;
-      transform: translateY(1.5rem) scale(0.85);
+      transform: scale(0.7);
     }
     60% {
       opacity: 1;
-      transform: translateY(-0.25rem) scale(1.04);
+      transform: scale(1.06);
     }
     100% {
       opacity: 1;
-      transform: translateY(0) scale(1);
+      transform: scale(1);
     }
   }
 

@@ -55,7 +55,7 @@ describe('DraftPickToasts', () => {
     const onDismiss = vi.fn()
     render(<DraftPickToasts toasts={[toast()]} onDismiss={onDismiss} />)
 
-    await user.click(screen.getByRole('button', { name: 'Cool, kindly fuck off' }))
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(onDismiss).toHaveBeenCalledWith('c1')
   })
 

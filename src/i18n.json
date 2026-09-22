@@ -249,7 +249,7 @@
   "draft.active.timeRemaining": "{n}s remaining",
   "draft.toast.drafted": "{contestant} was drafted to team {team}!",
   "draft.toast.yours": "You chose {contestant}!",
-  "draft.toast.dismiss": "Cool, kindly fuck off",
+  "draft.toast.dismiss": "Dismiss",
   "draft.settle.titleStalled": "Draft paused — nobody is picking",
   "draft.settle.titleFinished": "Draft picking is finished",
   "draft.settle.benchCountOne": "1 contestant is still on the bench",
