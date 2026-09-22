@@ -9,7 +9,6 @@ import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMembe
 import { seasonTrail } from '../lib/breadcrumbs'
 import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
-import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { LeaderboardRow } from '../components/LeaderboardRow'
 import type {
   ScoreProposalDoc,
@@ -60,7 +59,7 @@ import {
 } from '../lib/teamAssignment'
 import { TeamAssignmentBoard } from '../components/TeamAssignmentBoard'
 import { Switch } from '../components/Switch'
-import { reconcilePickOrder } from '../lib/draft'
+import { draftLobbyVisible, reconcilePickOrder } from '../lib/draft'
 import { canCompleteSeason, seasonWinner } from '../lib/seasonCompletion'
 import { SeasonChampion } from '../components/SeasonChampion'
 import { PickOrderList } from '../components/PickOrderList'
@@ -68,9 +67,10 @@ import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
 import { ContestantGrid } from '../components/ContestantGrid'
 import { DraftRoom } from '../components/DraftRoom'
-import { reopenSeasonSetup } from '../lib/draftApi'
+import { reopenSeasonSetup, startDraft } from '../lib/draftApi'
 import {
   useSeasonContestants,
+  useSeasonDraft,
   useSeasonScoringRules,
   useSeasonTeams,
 } from '../lib/useSeasonCollections'
@@ -183,6 +183,12 @@ export function SeasonDetailPage() {
   const contestants = useSeasonContestants(seasonId, canView)
   const rules = useSeasonScoringRules(seasonId, canView)
   const teams = useSeasonTeams(seasonId, canView)
+  // Read here as well as in the room, because the header's Start draft button
+  // is only offered while the draft has not opened — the same condition the
+  // room uses to show its lobby.
+  const { draft, draftLoaded } = useSeasonDraft(seasonId, canView)
+  const [startingDraft, setStartingDraft] = useState(false)
+  const [startDraftError, setStartDraftError] = useState('')
   const [resetDraftOpen, setResetDraftOpen] = useState(false)
   const [resettingDraft, setResettingDraft] = useState(false)
   const [resetDraftError, setResetDraftError] = useState('')
@@ -695,6 +701,26 @@ export function SeasonDetailPage() {
    * panel is on this same page, and the season listener brings it in as soon as
    * the state changes.
    */
+  /**
+   * Open the board. One server call — the order, the pick positions and the
+   * first deadline are all set there, on the server's clock. See startDraft in
+   * functions/src/index.ts.
+   */
+  async function handleStartDraft() {
+    if (!seasonId || startingDraft) return
+    setStartingDraft(true)
+    setStartDraftError('')
+    try {
+      const { data } = await startDraft({ seasonId })
+      trackEvent('draft_started', { season_id: seasonId, player_count: data.pickOrder.length })
+    } catch (error) {
+      setStartDraftError((error as { message?: string }).message ?? t('draft.error.start'))
+      console.error('Start draft rejected', error)
+    } finally {
+      setStartingDraft(false)
+    }
+  }
+
   async function handleResetDraft() {
     if (!seasonId) return
     setResettingDraft(true)
@@ -958,7 +984,6 @@ export function SeasonDetailPage() {
           <p className="text-gray-500">{showName}</p>
         </div>
         <div className="flex items-center gap-3">
-          <SeasonStateBadge state={season.state} />
           {/* Deliberately not gated on season.state — a name or episode count
               can need correcting long after the draft has opened. */}
           {isAdmin && (
@@ -973,7 +998,7 @@ export function SeasonDetailPage() {
               Named for what it costs — Edit season changes a label, this throws
               the draft away — since the two sit side by side. */}
           {isAdmin && season.state === 'draft' && (
-            <Button variant="secondary" onClick={() => setResetDraftOpen(true)}>
+            <Button variant="danger" onClick={() => setResetDraftOpen(true)}>
               {t('draft.editSettings')}
             </Button>
           )}
@@ -985,8 +1010,16 @@ export function SeasonDetailPage() {
               {t('season.reopen')}
             </Button>
           )}
+          {isAdmin &&
+            season.state === 'draft' &&
+            draftLobbyVisible(draftLoaded, draft?.status ?? null) && (
+              <Button onClick={handleStartDraft} loading={startingDraft}>
+                {t('draft.lobby.startDraft')}
+              </Button>
+            )}
         </div>
       </div>
+      {startDraftError && <p className="mb-4 text-sm text-red-600">{startDraftError}</p>}
 
       {/* Your team, in every state of the season.
           It used to live only in the draft room, which meant a member who
@@ -1030,7 +1063,6 @@ export function SeasonDetailPage() {
           <h2 className="mb-1 text-lg font-semibold text-gray-900">
             {t('season.participants.heading', { n: members.length })}
           </h2>
-          <p className="mb-4 text-sm text-gray-500">{t('season.participants.help')}</p>
           {members.length === 0 ? (
             <p className="text-sm text-gray-400">{t('season.participants.empty')}</p>
           ) : (

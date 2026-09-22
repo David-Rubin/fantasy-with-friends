@@ -61,8 +61,7 @@ export function TeamIdentityCard({
   // Once the season is under way, naming your team is something you did weeks
   // ago; while it is still being set up or drafted, an open form is easier to
   // notice than one you have to expand first.
-  const startCollapsed = seasonState === 'active' || seasonState === 'complete'
-  const [editing, setEditing] = useState(!startCollapsed)
+  const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(teamName)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -123,7 +122,7 @@ export function TeamIdentityCard({
 
   if (!editing) {
     return (
-      <div className="mb-6 flex items-center gap-2 px-4 py-2.5 text-lg">
+      <div className="flex items-center gap-2 py-2.5 text-lg font-bold">
         <TeamColorDot color={teamColor} teamName={teamName} />
         {/* The name alone. The dot beside it is the colour, and the heading
             this collapses from already said whose team it is. */}
@@ -167,7 +166,7 @@ export function TeamIdentityCard({
         {/* Only where the card opened closed — otherwise there is nothing to
             go back to, and a collapse control on a season still being set up
             hides the field it is there to offer. */}
-        {startCollapsed && (
+        {editing && (
           <button
             type="button"
             onClick={() => setEditing(false)}

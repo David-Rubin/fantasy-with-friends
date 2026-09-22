@@ -103,7 +103,7 @@ export function ScoringRulesCard({
     // from reaching the summary, or entering edit mode would toggle the panel
     // shut on the way in.
     return (
-      <details className="mb-6 rounded-xl border border-gray-200 bg-white">
+      <details className="my-2 rounded-xl border border-gray-200 bg-white">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-5 py-3 marker:content-none hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
           <span className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
             <svg
