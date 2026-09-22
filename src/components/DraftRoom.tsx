@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from './Button'
 import { ContestantGrid } from './ContestantGrid'
 import { DraftLobby } from './DraftLobby'
+import { DraftPickToasts } from './DraftPickToasts'
 import { TimerBanner } from './TimerBanner'
 import { useAuth } from '../contexts/AuthContext'
 import { draftLobbyVisible, teamCapacity } from '../lib/draft'
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
+import { draftedOwners, mergeDraftToasts, newDraftToasts, type DraftToast } from '../lib/draftToast'
 import { teamColorFor } from '../lib/teamColor'
 import { accentLeftBorder } from './accentStyles'
 import { PlayerAvatars, playerNames } from './PlayerAvatars'
@@ -71,6 +73,7 @@ export function DraftRoom({
   const [assigning, setAssigning] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [togglingTimer, setTogglingTimer] = useState(false)
+  const [toasts, setToasts] = useState<DraftToast[]>([])
 
   const isPaused = draft?.status === 'paused'
   // An admin stopped the clock. Distinct from `status: 'paused'` above, which is
@@ -95,7 +98,9 @@ export function DraftRoom({
   // What the draft is between: members, or teams in team mode. Every key the
   // draft document carries is one of these — see src/lib/entries.ts.
   const teamMode = isTeamMode(season)
-  const entries = seasonEntries(season, members, teams)
+  // Memoised because the toast effect below takes it as a dependency: a fresh
+  // array every render would re-run that effect on every tick of the clock.
+  const entries = useMemo(() => seasonEntries(season, members, teams), [season, members, teams])
   const myKey = entryKeyFor(
     season,
     members.find((m) => m.uid === user?.uid)
@@ -134,6 +139,45 @@ export function DraftRoom({
     setTimerPaused({ seasonId, paused: false, warm: true }).catch(() => {})
     submitPick({ seasonId, warm: true }).catch(() => {})
   }, [seasonId])
+
+  /**
+   * Announce a pick on every screen in the room.
+   *
+   * The trigger is the contestant listener this page already has: a pick sets
+   * `draftedByUid`, so every client sees it land without a listener of its own
+   * and without the picker having to tell anyone. What counts as new is
+   * decided in src/lib/draftToast.ts; `seenOwners` is what the previous
+   * snapshot said, and starting it at null is what stops a page opened
+   * mid-draft announcing every pick taken before its reader arrived.
+   *
+   * Deliberately outside the timer's path. The countdown is the draft
+   * document's deadline and the expiry nudge above is scheduled from it, so a
+   * toast appearing, sitting there or being dismissed neither restarts the
+   * clock nor delays the turn — which is also why the toast owns no focus and
+   * is not a modal.
+   */
+  const seenOwners = useRef<ReturnType<typeof draftedOwners> | null>(null)
+
+  useEffect(() => {
+    const fresh = newDraftToasts(seenOwners.current, contestants, entries, myKey)
+    // Not recorded until the cast has actually arrived: the first snapshot of
+    // a query can be empty, and priming from it would make the whole drafted
+    // board look like it had just happened. See newDraftToasts.
+    if (contestants.length > 0) seenOwners.current = draftedOwners(contestants)
+    if (fresh.length === 0) return
+    setToasts((current) => mergeDraftToasts(current, fresh))
+    // `entries` and `myKey` are here because the wording depends on them, but
+    // a change to either alone announces nothing: the snapshot recorded below
+    // is already current, so every drafted contestant is one this client has
+    // already seen drafted.
+  }, [contestants, entries, myKey])
+
+  // Stable, because each card holds it in an effect keyed on its own id — a
+  // new function every render would restart every toast's five seconds
+  // whenever anything else on the board moved.
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id))
+  }, [])
 
   /**
    * Nudge the server when the clock runs out. Purely a prompt — the server
@@ -274,6 +318,11 @@ export function DraftRoom({
 
   return (
     <>
+      {/* Every pick, announced on every screen in the room. Rendered outside
+          the draft's phase blocks because it is a fixed overlay: what decides
+          whether anything is showing is the toast list, not the layout. */}
+      <DraftPickToasts toasts={toasts} onDismiss={dismissToast} />
+
       {/* Lobby — the wait before the draft opens, and what there is to read
           during it. Gated on the draft listener having answered as well as on
           what it said: see draftLobbyVisible. */}

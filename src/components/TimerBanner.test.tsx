@@ -35,4 +35,11 @@ describe('TimerBanner', () => {
     const bar = renderBanner(60)
     expect((bar.firstElementChild as HTMLElement).style.width).toBe('100%')
   })
+
+  // A deadline further out than the duration — a season whose timer was raised
+  // while a turn was already running — filled the track to 750% of its width.
+  it('never draws a bar wider than its track', () => {
+    const bar = renderBanner(900, 120)
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe('100%')
+  })
 })
