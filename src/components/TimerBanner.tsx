@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { t } from '../lib/i18n'
+import { serverNow } from '../lib/serverClock'
 
 interface TimerBannerProps {
   pickerName: string
@@ -9,10 +10,19 @@ interface TimerBannerProps {
   isYourTurn: boolean
 }
 
-/** What the clock reads now. `durationSeconds` stands in when it is not running. */
+/**
+ * What the clock reads now. `durationSeconds` stands in when it is not running.
+ *
+ * Measured against the server's clock, not this device's. The deadline was
+ * written by a Cloud Function from the server's, and the server is also what
+ * decides a turn has expired — so a device whose own clock is off would
+ * otherwise show a countdown that disagreed with the draft it was counting
+ * down. Twenty seconds fast opened every turn of a sixty-second draft at
+ * forty. See src/lib/serverClock.
+ */
 function remainingSeconds(expiresAt: number | null, durationSeconds: number): number {
   if (!expiresAt) return durationSeconds
-  return Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
+  return Math.max(0, Math.ceil((expiresAt - serverNow()) / 1000))
 }
 
 export function TimerBanner({

@@ -272,149 +272,148 @@ export const removeLeagueMember = functions.https.onCall(
  * checked together against committed state, which also removes the race where
  * two clients pick the same contestant from a stale snapshot.
  */
-export const submitPick = functions
-  .runWith(INTERACTIVE)
-  .https.onCall(
-    async (
-      data: { seasonId: string; contestantId?: string; onBehalfOf?: string; warm?: boolean },
-      context
-    ): Promise<{ status: 'active' | 'awaiting-close' | 'complete'; warmed?: boolean }> => {
-      if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+export const submitPick = functions.runWith(INTERACTIVE).https.onCall(
+  async (
+    data: { seasonId: string; contestantId?: string; onBehalfOf?: string; warm?: boolean },
+    context
+  ): Promise<{
+    status: 'active' | 'awaiting-close' | 'complete'
+    warmed?: boolean
+    serverNow?: number
+  }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
+    }
+    // The first pick of a draft pays the same cold start as the first pause.
+    // See the note on warming above setTimerPaused.
+    //
+    // The warm-up carries the server's clock back with it, because a turn's
+    // deadline is a moment on *this* clock and the countdown is drawn
+    // against the reader's. A device twenty seconds fast showed every turn
+    // of a sixty-second draft opening at forty. Nothing is read or written
+    // to answer, so it stays the cheap call it was. See src/lib/serverClock.
+    if (data.warm) return { status: 'active', warmed: true, serverNow: Date.now() }
+    const actingUid = context.auth.uid
+    const { seasonId, contestantId, onBehalfOf } = data
+
+    if (!seasonId || !contestantId) {
+      throw new functions.https.HttpsError('invalid-argument', 'seasonId and contestantId required')
+    }
+
+    const seasonRef = db.doc(`seasons/${seasonId}`)
+    const seasonSnap = await seasonRef.get()
+    if (!seasonSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Season not found')
+    }
+    const leagueId = seasonSnap.data()?.leagueId as string
+    const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
+
+    // Proxy picks (PRD 3.3.2) are admin-only, and get recorded with the acting
+    // admin's id so the audit trail shows who actually pressed the button.
+    const isAdmin = await isLeagueAdmin(leagueId, actingUid)
+    if (onBehalfOf && !isAdmin) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only an admin can pick on behalf of another member'
+      )
+    }
+    // `onBehalfOf` and `pickerUid` are entry keys — a member's uid, or in
+    // team mode the id of the team they play for, which is what the turn
+    // belongs to and what the contestant is recorded against. Any member of
+    // the team on the clock may take its pick.
+    const entries = await loadEntries(seasonId, seasonSnap.data() ?? {})
+    const pickerUid = onBehalfOf ?? entries.keyFor(actingUid)
+    if (!pickerUid) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        entries.teamMode ? 'not-on-a-team' : 'You are not a member of this season'
+      )
+    }
+
+    // The draft doc has a generated id, so find it rather than assume one.
+    const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
+    if (draftQuery.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+    }
+    const draftRef = draftQuery.docs[0].ref
+    const contestantRef = db.doc(`seasons/${seasonId}/contestants/${contestantId}`)
+    const contestantsCol = db.collection(`seasons/${seasonId}/contestants`)
+
+    const result = await db.runTransaction(async (tx) => {
+      const [draftSnap, contestantSnap, allContestants] = await Promise.all([
+        tx.get(draftRef),
+        tx.get(contestantRef),
+        tx.get(contestantsCol),
+      ])
+
+      const draft = draftSnap.data()
+      // `paused` is a live draft awaiting an admin proxy pick for the member
+      // who missed their turn, so picks are still accepted here.
+      if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
+        throw new functions.https.HttpsError('failed-precondition', 'Draft is not active')
       }
-      // The first pick of a draft pays the same cold start as the first pause.
-      // See the note on warming above setTimerPaused.
-      if (data.warm) return { status: 'active', warmed: true }
-      const actingUid = context.auth.uid
-      const { seasonId, contestantId, onBehalfOf } = data
-
-      if (!seasonId || !contestantId) {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          'seasonId and contestantId required'
-        )
+      if (!contestantSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Contestant not found')
       }
 
-      const seasonRef = db.doc(`seasons/${seasonId}`)
-      const seasonSnap = await seasonRef.get()
-      if (!seasonSnap.exists) {
-        throw new functions.https.HttpsError('not-found', 'Season not found')
+      const contestant = contestantSnap.data()
+      if (contestant?.draftedByUid) {
+        throw new functions.https.HttpsError('aborted', 'That contestant has already been drafted')
       }
-      const leagueId = seasonSnap.data()?.leagueId as string
-      const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
-
-      // Proxy picks (PRD 3.3.2) are admin-only, and get recorded with the acting
-      // admin's id so the audit trail shows who actually pressed the button.
-      const isAdmin = await isLeagueAdmin(leagueId, actingUid)
-      if (onBehalfOf && !isAdmin) {
-        throw new functions.https.HttpsError(
-          'permission-denied',
-          'Only an admin can pick on behalf of another member'
-        )
-      }
-      // `onBehalfOf` and `pickerUid` are entry keys — a member's uid, or in
-      // team mode the id of the team they play for, which is what the turn
-      // belongs to and what the contestant is recorded against. Any member of
-      // the team on the clock may take its pick.
-      const entries = await loadEntries(seasonId, seasonSnap.data() ?? {})
-      const pickerUid = onBehalfOf ?? entries.keyFor(actingUid)
-      if (!pickerUid) {
-        throw new functions.https.HttpsError(
-          'permission-denied',
-          entries.teamMode ? 'not-on-a-team' : 'You are not a member of this season'
-        )
+      if (contestant?.eliminatedEpisode !== null && contestant?.eliminatedEpisode !== undefined) {
+        throw new functions.https.HttpsError('failed-precondition', 'Contestant is eliminated')
       }
 
-      // The draft doc has a generated id, so find it rather than assume one.
-      const draftQuery = await db.collection(`seasons/${seasonId}/draft`).limit(1).get()
-      if (draftQuery.empty) {
-        throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+      // An admin may pick out of turn only via onBehalfOf; picking for yourself
+      // still requires it to actually be your turn.
+      if (draft.currentPickerUid !== pickerUid) {
+        throw new functions.https.HttpsError('failed-precondition', 'It is not that member’s turn')
       }
-      const draftRef = draftQuery.docs[0].ref
-      const contestantRef = db.doc(`seasons/${seasonId}/contestants/${contestantId}`)
-      const contestantsCol = db.collection(`seasons/${seasonId}/contestants`)
 
-      const result = await db.runTransaction(async (tx) => {
-        const [draftSnap, contestantSnap, allContestants] = await Promise.all([
-          tx.get(draftRef),
-          tx.get(contestantRef),
-          tx.get(contestantsCol),
-        ])
+      const pickOrder = (draft.pickOrder ?? []) as string[]
 
-        const draft = draftSnap.data()
-        // `paused` is a live draft awaiting an admin proxy pick for the member
-        // who missed their turn, so picks are still accepted here.
-        if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
-          throw new functions.https.HttpsError('failed-precondition', 'Draft is not active')
-        }
-        if (!contestantSnap.exists) {
-          throw new functions.https.HttpsError('not-found', 'Contestant not found')
-        }
-
-        const contestant = contestantSnap.data()
-        if (contestant?.draftedByUid) {
-          throw new functions.https.HttpsError(
-            'aborted',
-            'That contestant has already been drafted'
-          )
-        }
-        if (contestant?.eliminatedEpisode !== null && contestant?.eliminatedEpisode !== undefined) {
-          throw new functions.https.HttpsError('failed-precondition', 'Contestant is eliminated')
-        }
-
-        // An admin may pick out of turn only via onBehalfOf; picking for yourself
-        // still requires it to actually be your turn.
-        if (draft.currentPickerUid !== pickerUid) {
-          throw new functions.https.HttpsError(
-            'failed-precondition',
-            'It is not that member’s turn'
-          )
-        }
-
-        const pickOrder = (draft.pickOrder ?? []) as string[]
-
-        tx.create(draftRef.collection('picks').doc(), {
-          contestantId,
-          pickerUid,
-          actingAdminUid: onBehalfOf ? actingUid : null,
-          round: draft.currentRound,
-          pickNumber: draft.currentPickNumber,
-          timestamp: Date.now(),
-        })
-
-        tx.update(contestantRef, {
-          draftedByUid: pickerUid,
-          draftedRound: draft.currentRound,
-        })
-
-        // The draft finishes once every team is full. Until then the turn goes
-        // to the next player in the snake with room, past anyone already full.
-        const board = boardState(allContestants.docs, pickOrder, contestantId, pickerUid)
-        if (draftOutcome(board.remaining, board.rosterCounts, board.capacity) === 'complete') {
-          tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
-          tx.update(seasonRef, { state: 'active' })
-          return { status: 'complete' as const }
-        }
-
-        // Somebody picked, so the room is not abandoned.
-        advanceTurn(tx, draftRef, pickOrder, draft, board, timerSeconds)
-        return { status: 'active' as const }
-      })
-
-      // Logged here rather than by the caller — a client that skipped the call
-      // used to leave a proxy pick with no trace (PRD 10.1).
-      await db.collection('auditLogs').add({
-        action: onBehalfOf ? 'admin_proxy_pick' : 'draft_pick',
-        seasonId,
+      tx.create(draftRef.collection('picks').doc(), {
         contestantId,
-        targetUid: onBehalfOf ?? null,
-        actorUid: actingUid,
+        pickerUid,
+        actingAdminUid: onBehalfOf ? actingUid : null,
+        round: draft.currentRound,
+        pickNumber: draft.currentPickNumber,
         timestamp: Date.now(),
       })
 
-      return result
-    }
-  )
+      tx.update(contestantRef, {
+        draftedByUid: pickerUid,
+        draftedRound: draft.currentRound,
+      })
+
+      // The draft finishes once every team is full. Until then the turn goes
+      // to the next player in the snake with room, past anyone already full.
+      const board = boardState(allContestants.docs, pickOrder, contestantId, pickerUid)
+      if (draftOutcome(board.remaining, board.rosterCounts, board.capacity) === 'complete') {
+        tx.update(draftRef, { status: 'complete', currentPickerUid: null, timerExpiresAt: null })
+        tx.update(seasonRef, { state: 'active' })
+        return { status: 'complete' as const }
+      }
+
+      // Somebody picked, so the room is not abandoned.
+      advanceTurn(tx, draftRef, pickOrder, draft, board, timerSeconds)
+      return { status: 'active' as const }
+    })
+
+    // Logged here rather than by the caller — a client that skipped the call
+    // used to leave a proxy pick with no trace (PRD 10.1).
+    await db.collection('auditLogs').add({
+      action: onBehalfOf ? 'admin_proxy_pick' : 'draft_pick',
+      seasonId,
+      contestantId,
+      targetUid: onBehalfOf ?? null,
+      actorUid: actingUid,
+      timestamp: Date.now(),
+    })
+
+    return result
+  }
+)
 
 // ── Draft: resolve an expired pick timer ──────────────────────────────────────
 
@@ -835,83 +834,87 @@ export const startDraft = functions
  * Separate from `status: 'paused'`, which means a turn expired under the
  * admin-picks policy. Here the turn is untouched and its holder can still pick.
  */
-export const setTimerPaused = functions
-  .runWith(INTERACTIVE)
-  .https.onCall(
-    async (
-      data: { seasonId: string; paused: boolean; warm?: boolean },
-      context
-    ): Promise<{ paused: boolean; remainingMs: number | null; warmed?: boolean }> => {
-      if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
-      }
-      // See the note on warming above: returns before touching any state.
-      if (data.warm) return { paused: false, remainingMs: null, warmed: true }
-      const { seasonId, paused } = data
-      if (!seasonId || typeof paused !== 'boolean') {
-        throw new functions.https.HttpsError('invalid-argument', 'seasonId and paused required')
-      }
-
-      // Fetched together: neither read depends on the other, and this runs while
-      // an admin watches the button spin.
-      const [seasonSnap, draftQuery] = await Promise.all([
-        db.doc(`seasons/${seasonId}`).get(),
-        db.collection(`seasons/${seasonId}/draft`).limit(1).get(),
-      ])
-      if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
-
-      if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
-        throw new functions.https.HttpsError('permission-denied', 'Admins only')
-      }
-
-      if (draftQuery.empty) {
-        throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
-      }
-      const draftRef = draftQuery.docs[0].ref
-      const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
-
-      const result = await db.runTransaction(async (tx) => {
-        const draftSnap = await tx.get(draftRef)
-        const draft = draftSnap.data()
-        if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
-          throw new functions.https.HttpsError('failed-precondition', 'Draft is not running')
-        }
-
-        const bankedMs = draft.timerPausedRemainingMs as number | null
-
-        if (paused) {
-          if (bankedMs !== null && bankedMs !== undefined) {
-            return { paused: true, remainingMs: bankedMs } // already paused
-          }
-          const expiresAt = draft.timerExpiresAt as number | null
-          // Bank whatever is left, never a negative. An already-expired clock
-          // banks nothing, so resuming hands back a fresh turn rather than one
-          // that fires the moment it restarts.
-          const remainingMs = expiresAt ? Math.max(0, expiresAt - Date.now()) : timerSeconds * 1000
-          tx.update(draftRef, { timerPausedRemainingMs: remainingMs, timerExpiresAt: null })
-          return { paused: true, remainingMs }
-        }
-
-        if (bankedMs === null || bankedMs === undefined) {
-          return { paused: false, remainingMs: null } // already running
-        }
-        tx.update(draftRef, {
-          timerPausedRemainingMs: null,
-          timerExpiresAt: Date.now() + (bankedMs > 0 ? bankedMs : timerSeconds * 1000),
-        })
-        return { paused: false, remainingMs: null }
-      })
-
-      await db.collection('auditLogs').add({
-        action: paused ? 'draft_timer_paused' : 'draft_timer_resumed',
-        seasonId,
-        actorUid: context.auth.uid,
-        timestamp: Date.now(),
-      })
-
-      return result
+export const setTimerPaused = functions.runWith(INTERACTIVE).https.onCall(
+  async (
+    data: { seasonId: string; paused: boolean; warm?: boolean },
+    context
+  ): Promise<{
+    paused: boolean
+    remainingMs: number | null
+    warmed?: boolean
+    serverNow?: number
+  }> => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be signed in')
     }
-  )
+    // See the note on warming above: returns before touching any state.
+    // Carries the server clock back too — see the same return in submitPick.
+    if (data.warm) return { paused: false, remainingMs: null, warmed: true, serverNow: Date.now() }
+    const { seasonId, paused } = data
+    if (!seasonId || typeof paused !== 'boolean') {
+      throw new functions.https.HttpsError('invalid-argument', 'seasonId and paused required')
+    }
+
+    // Fetched together: neither read depends on the other, and this runs while
+    // an admin watches the button spin.
+    const [seasonSnap, draftQuery] = await Promise.all([
+      db.doc(`seasons/${seasonId}`).get(),
+      db.collection(`seasons/${seasonId}/draft`).limit(1).get(),
+    ])
+    if (!seasonSnap.exists) throw new functions.https.HttpsError('not-found', 'Season not found')
+
+    if (!(await isLeagueAdmin(seasonSnap.data()?.leagueId as string, context.auth.uid))) {
+      throw new functions.https.HttpsError('permission-denied', 'Admins only')
+    }
+
+    if (draftQuery.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'Draft has not been opened')
+    }
+    const draftRef = draftQuery.docs[0].ref
+    const timerSeconds = (seasonSnap.data()?.timerSeconds as number) ?? 60
+
+    const result = await db.runTransaction(async (tx) => {
+      const draftSnap = await tx.get(draftRef)
+      const draft = draftSnap.data()
+      if (!draft || (draft.status !== 'active' && draft.status !== 'paused')) {
+        throw new functions.https.HttpsError('failed-precondition', 'Draft is not running')
+      }
+
+      const bankedMs = draft.timerPausedRemainingMs as number | null
+
+      if (paused) {
+        if (bankedMs !== null && bankedMs !== undefined) {
+          return { paused: true, remainingMs: bankedMs } // already paused
+        }
+        const expiresAt = draft.timerExpiresAt as number | null
+        // Bank whatever is left, never a negative. An already-expired clock
+        // banks nothing, so resuming hands back a fresh turn rather than one
+        // that fires the moment it restarts.
+        const remainingMs = expiresAt ? Math.max(0, expiresAt - Date.now()) : timerSeconds * 1000
+        tx.update(draftRef, { timerPausedRemainingMs: remainingMs, timerExpiresAt: null })
+        return { paused: true, remainingMs }
+      }
+
+      if (bankedMs === null || bankedMs === undefined) {
+        return { paused: false, remainingMs: null } // already running
+      }
+      tx.update(draftRef, {
+        timerPausedRemainingMs: null,
+        timerExpiresAt: Date.now() + (bankedMs > 0 ? bankedMs : timerSeconds * 1000),
+      })
+      return { paused: false, remainingMs: null }
+    })
+
+    await db.collection('auditLogs').add({
+      action: paused ? 'draft_timer_paused' : 'draft_timer_resumed',
+      seasonId,
+      actorUid: context.auth.uid,
+      timestamp: Date.now(),
+    })
+
+    return result
+  }
+)
 
 // ── Draft: bench assignment and closing ───────────────────────────────────────
 

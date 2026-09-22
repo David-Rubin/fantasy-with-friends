@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { draftLobbyVisible, teamCapacity } from '../lib/draft'
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
 import { draftedOwners, mergeDraftToasts, newDraftToasts, type DraftToast } from '../lib/draftToast'
+import { recordClockSample, serverNow } from '../lib/serverClock'
 import { teamColorFor } from '../lib/teamColor'
 import { accentLeftBorder } from './accentStyles'
 import { PlayerAvatars, playerNames } from './PlayerAvatars'
@@ -128,16 +129,28 @@ export function DraftRoom({
    * belief can be stale by the time the server acts on it, and the moment it is
    * most likely to be stale is this one.
    *
+   * It doubles as the draft's clock check. Both calls answer with the server's
+   * own `Date.now()`, which is the clock a turn's deadline is written from and
+   * the clock the server judges an expiry by — so comparing it with this
+   * device's is what stops a phone with a wandering clock showing a countdown
+   * the draft does not agree with. Two samples because the better of them
+   * wins, and the first pays a cold start the second does not.
+   *
    * Failure is ignored on purpose. Nothing depends on it — the only thing lost
-   * is the head start.
+   * is the head start, and a clock reading nobody has yet been misled by.
    *
    * Mounted with the draft rather than with the page, which is tighter than it
    * used to be: the season page is also the page for a season in setup and a
    * season being read months later, and neither is about to touch the clock.
    */
   useEffect(() => {
-    setTimerPaused({ seasonId, paused: false, warm: true }).catch(() => {})
-    submitPick({ seasonId, warm: true }).catch(() => {})
+    const timeAndWarm = async (call: Promise<{ data: { serverNow?: number } }>) => {
+      const sentAt = Date.now()
+      const { data } = await call
+      if (data.serverNow) recordClockSample(sentAt, data.serverNow, Date.now())
+    }
+    timeAndWarm(setTimerPaused({ seasonId, paused: false, warm: true })).catch(() => {})
+    timeAndWarm(submitPick({ seasonId, warm: true })).catch(() => {})
   }, [seasonId])
 
   /**
@@ -196,7 +209,10 @@ export function DraftRoom({
       }).catch((error) => console.error('Could not resolve expired turn', error))
     }
 
-    const msLeft = draft.timerExpiresAt - Date.now()
+    // On the server's clock, like the deadline itself: a device running fast
+    // would otherwise nudge the server early, every turn, and be told nothing
+    // had expired.
+    const msLeft = draft.timerExpiresAt - serverNow()
     if (msLeft <= 0) {
       fire()
       return

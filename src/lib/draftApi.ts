@@ -13,7 +13,7 @@ import { functions } from './firebase'
  */
 export const submitPick = httpsCallable<
   { seasonId: string; contestantId?: string; onBehalfOf?: string; warm?: boolean },
-  { status: 'active' | 'awaiting-close' | 'complete'; warmed?: boolean }
+  { status: 'active' | 'awaiting-close' | 'complete'; warmed?: boolean; serverNow?: number }
 >(functions, 'submitPick')
 
 /**
@@ -49,7 +49,7 @@ export const startDraft = httpsCallable<
  */
 export const setTimerPaused = httpsCallable<
   { seasonId: string; paused: boolean; warm?: boolean },
-  { paused: boolean; remainingMs: number | null; warmed?: boolean }
+  { paused: boolean; remainingMs: number | null; warmed?: boolean; serverNow?: number }
 >(functions, 'setTimerPaused')
 
 /** Close a draft that is waiting on an admin. Admin only. */
