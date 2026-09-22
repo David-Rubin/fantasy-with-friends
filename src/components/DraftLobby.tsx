@@ -1,4 +1,3 @@
-import { Button } from './Button'
 import { ContestantGrid } from './ContestantGrid'
 import { ScoringRulesCard } from './ScoringRulesCard'
 import { PlayerAvatars, playerNames, type EntryPlayer } from './PlayerAvatars'
@@ -41,8 +40,6 @@ export function DraftLobby({
   leagueId,
   episodeCount,
   isAdmin,
-  onStartDraft,
-  startingDraft,
 }: {
   entries: LobbyEntry[]
   /** Whether the rows are teams — in which case the team's name leads. */
@@ -52,15 +49,30 @@ export function DraftLobby({
   seasonId: string
   leagueId: string
   episodeCount: number
+  /** Passed down rather than asked for again — see the note in useIsAdmin.ts. */
   isAdmin: boolean
-  onStartDraft: () => void
-  startingDraft: boolean
 }) {
   return (
-    <div className="mb-6 flex flex-col gap-6">
+    <div className="mb-6 flex flex-col gap-4">
+      {/* Not for the admin: they are who the sentence is waiting on, and
+          telling them somebody else will start the draft is both wrong and a
+          line between them and the button that does it. A marquee for
+          everyone else, because the wait is the point: the sentence is the only
+          thing on this screen that is not a list, and it moving is what says
+          the room is live rather than stuck. It re-enters on the left the
+          instant it clears the right — see .lobby-marquee in src/index.css,
+          which is where the width of this window becomes the distance. */}
+      {!isAdmin && (
+        <div className="lobby-marquee overflow-hidden">
+          <p className="lobby-marquee-track w-max whitespace-nowrap italic">
+            {t('draft.lobby.waitingForAdmin')}
+          </p>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-gray-200 bg-white p-6">
-        <p className="text-gray-500 mb-4">{t('draft.lobby.waitingForAdmin')}</p>
-        <div className="flex flex-col gap-2 mb-4">
+        <p className="mb-4 text-sm">{t('draft.lobby.yourOpponentsHeading')}</p>
+        <div className="flex gap-4 flex-wrap">
           {entries.map((entry) => (
             <div key={entry.key} className="flex items-center justify-between gap-2 text-sm">
               <span className="flex min-w-0 items-center gap-2">
@@ -92,23 +104,7 @@ export function DraftLobby({
             </div>
           ))}
         </div>
-        {isAdmin && (
-          <Button onClick={onStartDraft} loading={startingDraft}>
-            {t('draft.lobby.startDraft')}
-          </Button>
-        )}
       </div>
-
-      {/* Compact cards: the whole cast at once is what a lobby is for — looking
-          the field over — rather than a few at a time to choose between, which
-          is the board's job once picking starts. */}
-      {contestants.length > 0 && (
-        <ContestantGrid
-          heading={t('draft.lobby.cast', { n: contestants.length })}
-          contestants={contestants}
-          compact
-        />
-      )}
 
       <ScoringRulesCard
         seasonId={seasonId}
@@ -117,6 +113,17 @@ export function DraftLobby({
         episodeCount={episodeCount}
         canEdit={false}
       />
+
+      {/* Compact cards: the whole cast at once is what a lobby is for — looking
+          the field over — rather than a few at a time to choose between, which
+          is the board's job once picking starts. */}
+      {contestants.length > 0 && (
+        <ContestantGrid
+          heading={t('draft.lobby.contestants', { n: contestants.length })}
+          contestants={contestants}
+          compact
+        />
+      )}
     </div>
   )
 }

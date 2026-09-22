@@ -44,8 +44,15 @@ export function RuleSummary({ rule }: { rule: ScoringRule }) {
       {/* "each" on a count rule, because the number beside a rule that pays per
           occurrence is not what the rule is worth — it is what one of them is
           worth, and the two read identically without it. */}
-      {rule.points > 0 ? '+' : ''}
-      {rule.points} {rule.type === 'number' ? t('rules.ptsEach') : t('rules.pts')}
+      {/* Coloured by sign, so what a rule pays and what it costs are told
+          apart at a glance in a list that is otherwise one grey paragraph per
+          rule. The sign stays in the text: colour alone is not a difference a
+          reader who cannot see it can read. A rule worth zero is rejected by
+          validation, so there is no third case. */}
+      <span className={rule.points > 0 ? 'font-medium text-green-700' : 'font-medium text-red-600'}>
+        {rule.points > 0 ? '+' : ''}
+        {rule.points} {rule.type === 'number' ? t('rules.ptsEach') : t('rules.pts')}
+      </span>
       {' · '}
       {/* Named episodes rather than a count: "Ep 2, 5" is the thing a reader
           wants, and a rule covering the season says so in as few words. An

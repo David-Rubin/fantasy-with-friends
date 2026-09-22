@@ -11,7 +11,6 @@ import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
 import { Modal } from '../components/Modal'
 import type {
-  MemberRole,
   ScoreProposalDoc,
   SeasonDoc,
   EpisodeScoreDoc,
@@ -35,6 +34,7 @@ import {
   rulesFingerprint,
 } from '../lib/scoringRules'
 import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
+import { useIsAdmin } from '../lib/useIsAdmin'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
@@ -202,7 +202,7 @@ export function EpisodeScoringPage() {
     seasonId: string
     episodeNumber: string
   }>()
-  const { user, userDoc, isSuperadmin } = useAuth()
+  const { user, userDoc } = useAuth()
   const navigate = useNavigate()
   const epNum = parseInt(episodeNumber ?? '1', 10)
 
@@ -245,16 +245,10 @@ export function EpisodeScoringPage() {
   const rules = useSeasonScoringRules(seasonId, canView)
   // Entering scores is admin-only; every season member may read them. Without
   // this the page offered a member the full form and let the rules reject the
-  // save at the end of it.
-  const [myRole, setMyRole] = useState<MemberRole | null>(null)
+  // save at the end of it. Superadmins are admins of every season in the
+  // rules, and useLeagueRole matches.
+  const isAdmin = useIsAdmin(leagueId, canView)
   const { leagueName, seasonName } = useTrailNames(leagueId, seasonId)
-
-  useEffect(() => {
-    if (!leagueId || !user || !canView) return
-    getDoc(doc(db, 'leagues', leagueId, 'members', user.uid))
-      .then((snap) => setMyRole(snap.exists() ? (snap.data() as { role: MemberRole }).role : null))
-      .catch(() => setMyRole(null))
-  }, [leagueId, user, canView])
 
   useEffect(() => {
     if (!seasonId || !canView) return
@@ -363,9 +357,6 @@ export function EpisodeScoringPage() {
       cancelled = true
     }
   }, [seasonId, episodeNumber, user, canView])
-
-  // Superadmins are admins of every season in the rules; the client matches.
-  const isAdmin = myRole === 'owner' || myRole === 'admin' || isSuperadmin
 
   // Active contestants for this episode (not eliminated before this episode)
   const activeContestants = contestants.filter(

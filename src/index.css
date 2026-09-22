@@ -164,3 +164,42 @@ body {
     animation: draft-toast-pop 480ms cubic-bezier(0.34, 1.56, 0.64, 1) 120ms both;
   }
 }
+
+/* ── The lobby's waiting line ─────────────────────────────────────────────────
+   The one sentence on the screen before a draft opens, crossing it left to
+   right and starting again the moment it leaves.
+
+   The travel is the width of the window plus the width of the sentence, and
+   neither is known here: the card is as wide as the page and the sentence is
+   as long as its translation. So the two ends are written in different units —
+   `-100%` is the element's own width, which is the sentence just clear of the
+   left edge, and `100cqw` is the width of .lobby-marquee, which is the
+   sentence's leading edge just past the right one. Both in transform, so the
+   whole thing is one composited move and nothing relayouts 60 times a second.
+   That is what container-type on .lobby-marquee is for; it is not a layout
+   choice, and removing it silently makes cqw mean the viewport.
+
+   One copy, not two: with the loop starting exactly where it ends there is no
+   moment when the sentence is missing for the second copy to cover.
+
+   Inside the reduced-motion guard like everything else that moves here. With
+   the animation off the sentence sits where it is written, which is an
+   ordinary still paragraph. See src/components/DraftLobby.tsx. */
+.lobby-marquee {
+  container-type: inline-size;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes lobby-marquee {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100cqw);
+    }
+  }
+
+  .lobby-marquee-track {
+    animation: lobby-marquee 14s linear infinite;
+  }
+}

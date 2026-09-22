@@ -18,7 +18,6 @@ import {
   assignFromBench,
   closeDraft,
   setTimerPaused,
-  startDraft,
 } from '../lib/draftApi'
 import { useSeasonDraft } from '../lib/useSeasonCollections'
 import type { Contestant, ScoringRule, SeasonDoc, SeasonMember, SeasonTeam } from '../lib/types'
@@ -68,7 +67,6 @@ export function DraftRoom({
   // `true` because this is rendered inside the season page's membership gate:
   // anyone who can see a draft at all can read its document.
   const { draft, draftLoaded } = useSeasonDraft(seasonId, true)
-  const [startingDraft, setStartingDraft] = useState(false)
   const [picking, setPicking] = useState(false)
   const [pickError, setPickError] = useState('')
   const [assigning, setAssigning] = useState(false)
@@ -302,31 +300,6 @@ export function DraftRoom({
   }
 
   /**
-   * Open the board. One server call, where it used to be a document written
-   * from here plus an update per member issued one at a time.
-   *
-   * The order and the pick positions moved with it, but the clock is the
-   * reason. A deadline is measured against the server's clock everywhere else
-   * — when a turn expires, what a pause banks — so writing it here handed the
-   * draft whatever this machine believed the time was. See startDraft in
-   * functions/src/index.ts.
-   */
-  async function handleStartDraft() {
-    if (!user) return
-    setStartingDraft(true)
-    setPickError('')
-    try {
-      const { data } = await startDraft({ seasonId })
-      trackEvent('draft_started', { season_id: seasonId, player_count: data.pickOrder.length })
-    } catch (error) {
-      setPickError((error as { message?: string }).message ?? t('draft.error.start'))
-      console.error('Start draft rejected', error)
-    } finally {
-      setStartingDraft(false)
-    }
-  }
-
-  /**
    * A pick is one server call. Writing it from here meant four writes across
    * documents an ordinary member cannot touch, so a member's pick stalled the
    * draft halfway through. The function validates turn and availability in a
@@ -383,8 +356,6 @@ export function DraftRoom({
           leagueId={leagueId}
           episodeCount={season.episodeCount}
           isAdmin={isAdmin}
-          onStartDraft={handleStartDraft}
-          startingDraft={startingDraft}
         />
       )}
 

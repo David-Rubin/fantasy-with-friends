@@ -9,7 +9,6 @@ import { NotASeasonMember, useSeasonMembership } from '../components/SeasonMembe
 import { seasonTrail } from '../lib/breadcrumbs'
 import { useTrailNames } from '../lib/useTrailNames'
 import { Button } from '../components/Button'
-import { SeasonStateBadge } from '../components/SeasonStateBadge'
 import { LeaderboardRow } from '../components/LeaderboardRow'
 import type {
   ScoreProposalDoc,
@@ -17,7 +16,6 @@ import type {
   ContestantDoc,
   SeasonMemberDoc,
   EpisodeScoreDoc,
-  MemberRole,
   Contestant,
   AccentColor,
   ContestantScoreDoc,
@@ -60,7 +58,7 @@ import {
 } from '../lib/teamAssignment'
 import { TeamAssignmentBoard } from '../components/TeamAssignmentBoard'
 import { Switch } from '../components/Switch'
-import { reconcilePickOrder } from '../lib/draft'
+import { draftLobbyVisible, reconcilePickOrder } from '../lib/draft'
 import { canCompleteSeason, seasonWinner } from '../lib/seasonCompletion'
 import { SeasonChampion } from '../components/SeasonChampion'
 import { PickOrderList } from '../components/PickOrderList'
@@ -68,13 +66,15 @@ import { calcContestantTotal, latestEpisodePoints } from '../lib/scoring'
 import { BIO_MAX_LENGTH, bioProblem, normaliseBio } from '../lib/contestants'
 import { ContestantGrid } from '../components/ContestantGrid'
 import { DraftRoom } from '../components/DraftRoom'
-import { reopenSeasonSetup } from '../lib/draftApi'
+import { reopenSeasonSetup, startDraft } from '../lib/draftApi'
 import {
   useSeasonContestants,
+  useSeasonDraft,
   useSeasonScoringRules,
   useSeasonTeams,
 } from '../lib/useSeasonCollections'
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
+import { useIsAdmin } from '../lib/useIsAdmin'
 import { PlayerAvatars, playerNames } from '../components/PlayerAvatars'
 import { ContestantAvatar } from '../components/ContestantAvatar'
 import { uploadContestantPhoto } from '../lib/contestantPhotoApi'
@@ -162,7 +162,7 @@ function RosterHeader({
 
 export function SeasonDetailPage() {
   const { leagueId, seasonId } = useParams<{ leagueId: string; seasonId: string }>()
-  const { user, isSuperadmin } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
   // In the URL rather than component state, so a breadcrumb or a shared link
   // can open the page on the tab it means. An unknown or absent value falls
@@ -178,11 +178,22 @@ export function SeasonDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingSeason, setDeletingSeason] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  // A listener rather than a read, and gated on canView: see useLeagueRole.
+  // Superadmins are folded in there because the security rules already treat
+  // them as an admin of every season (isSeasonAdmin resolves through
+  // isLeagueAdmin, which is true for them). Leaving them out only meant the
+  // client hid controls the server would have accepted.
+  const isAdmin = useIsAdmin(leagueId, canView)
   const contestants = useSeasonContestants(seasonId, canView)
   const rules = useSeasonScoringRules(seasonId, canView)
   const teams = useSeasonTeams(seasonId, canView)
+  // Read here as well as in the room, because the header's Start draft button
+  // is only offered while the draft has not opened — the same condition the
+  // room uses to show its lobby.
+  const { draft, draftLoaded } = useSeasonDraft(seasonId, canView)
+  const [startingDraft, setStartingDraft] = useState(false)
+  const [startDraftError, setStartDraftError] = useState('')
   const [resetDraftOpen, setResetDraftOpen] = useState(false)
   const [resettingDraft, setResettingDraft] = useState(false)
   const [resetDraftError, setResetDraftError] = useState('')
@@ -391,24 +402,6 @@ export function SeasonDetailPage() {
     return unsub
   }, [seasonId, user, canView])
 
-  // My role in the league, as a listener of its own. It used to be a one-shot
-  // read inside the roster listener above, which failed whenever that listener
-  // first fired from the cache with the client offline — the read threw
-  // "client is offline", the role stayed null, and an admin on a slow
-  // connection got the member's view with no setup panel. A listener waits
-  // for the connection instead, and follows a role change while the page is
-  // open, which the read never did.
-  useEffect(() => {
-    if (!leagueId || !user || !canView) return
-    return listenDoc(
-      doc(db, 'leagues', leagueId, 'members', user.uid),
-      'my league role',
-      (snap) => {
-        setMyRole(snap.exists() ? (snap.data() as { role: MemberRole }).role : null)
-      }
-    )
-  }, [leagueId, user, canView])
-
   useEffect(() => {
     if (!seasonId || !canView) return
     const unsub = listenQuery(
@@ -468,12 +461,6 @@ export function SeasonDetailPage() {
     )
     return () => unsubs.forEach((u) => u())
   }, [seasonId, canView, scoredEpisodeKey])
-
-  // Superadmins are folded in here because the security rules already treat
-  // them as an admin of every season (isSeasonAdmin resolves through
-  // isLeagueAdmin, which is true for them). Leaving them out only meant the
-  // client hid controls the server would have accepted.
-  const isAdmin = myRole === 'owner' || myRole === 'admin' || isSuperadmin
 
   async function handleAddContestant(e: React.FormEvent) {
     e.preventDefault()
@@ -695,6 +682,26 @@ export function SeasonDetailPage() {
    * panel is on this same page, and the season listener brings it in as soon as
    * the state changes.
    */
+  /**
+   * Open the board. One server call — the order, the pick positions and the
+   * first deadline are all set there, on the server's clock. See startDraft in
+   * functions/src/index.ts.
+   */
+  async function handleStartDraft() {
+    if (!seasonId || startingDraft) return
+    setStartingDraft(true)
+    setStartDraftError('')
+    try {
+      const { data } = await startDraft({ seasonId })
+      trackEvent('draft_started', { season_id: seasonId, player_count: data.pickOrder.length })
+    } catch (error) {
+      setStartDraftError((error as { message?: string }).message ?? t('draft.error.start'))
+      console.error('Start draft rejected', error)
+    } finally {
+      setStartingDraft(false)
+    }
+  }
+
   async function handleResetDraft() {
     if (!seasonId) return
     setResettingDraft(true)
@@ -958,7 +965,6 @@ export function SeasonDetailPage() {
           <p className="text-gray-500">{showName}</p>
         </div>
         <div className="flex items-center gap-3">
-          <SeasonStateBadge state={season.state} />
           {/* Deliberately not gated on season.state — a name or episode count
               can need correcting long after the draft has opened. */}
           {isAdmin && (
@@ -973,7 +979,7 @@ export function SeasonDetailPage() {
               Named for what it costs — Edit season changes a label, this throws
               the draft away — since the two sit side by side. */}
           {isAdmin && season.state === 'draft' && (
-            <Button variant="secondary" onClick={() => setResetDraftOpen(true)}>
+            <Button variant="danger" onClick={() => setResetDraftOpen(true)}>
               {t('draft.editSettings')}
             </Button>
           )}
@@ -985,8 +991,16 @@ export function SeasonDetailPage() {
               {t('season.reopen')}
             </Button>
           )}
+          {isAdmin &&
+            season.state === 'draft' &&
+            draftLobbyVisible(draftLoaded, draft?.status ?? null) && (
+              <Button onClick={handleStartDraft} loading={startingDraft}>
+                {t('draft.lobby.startDraft')}
+              </Button>
+            )}
         </div>
       </div>
+      {startDraftError && <p className="mb-4 text-sm text-red-600">{startDraftError}</p>}
 
       {/* Your team, in every state of the season.
           It used to live only in the draft room, which meant a member who
@@ -1030,7 +1044,6 @@ export function SeasonDetailPage() {
           <h2 className="mb-1 text-lg font-semibold text-gray-900">
             {t('season.participants.heading', { n: members.length })}
           </h2>
-          <p className="mb-4 text-sm text-gray-500">{t('season.participants.help')}</p>
           {members.length === 0 ? (
             <p className="text-sm text-gray-400">{t('season.participants.empty')}</p>
           ) : (

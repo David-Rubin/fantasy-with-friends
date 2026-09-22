@@ -16,6 +16,7 @@ import { Input, Textarea } from '../components/Input'
 import { JoinLeagueButton } from '../components/JoinLeagueButton'
 import { useMySeasonIds } from '../components/SeasonMemberGate'
 import { leagueTrail } from '../lib/breadcrumbs'
+import { hasAdminRole, hasOwnerRole } from '../lib/roles'
 import { updateLeagueDetails, removeLeagueMember } from '../lib/leagueApi'
 import { approveJoinRequest, rejectJoinRequest, useMyJoinRequests } from '../lib/joinRequests'
 import { canJoinDraft, canJoinSeason, canLeaveSeason } from '../lib/seasonMembership'
@@ -146,8 +147,11 @@ export function LeagueDetailPage() {
   }, [leagueId])
 
   const isMember = myRole !== null
-  const isAdmin = myRole === 'owner' || myRole === 'admin'
-  const isOwner = myRole === 'owner'
+  // The predicates, not the hook: this page is reachable before joining, so it
+  // asks about membership through the collection-group listener above rather
+  // than by reading a roster closed to non-members. See useLeagueRole.
+  const isAdmin = hasAdminRole(myRole)
+  const isOwner = hasOwnerRole(myRole)
   // Editing the league, deciding requests and removing members are all the
   // owner's call. A superadmin qualifies too — the rules already treat them as
   // an owner everywhere, and the remove callable checks for the same pair.
