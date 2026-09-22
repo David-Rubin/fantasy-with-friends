@@ -26,7 +26,7 @@ export function PlayerAvatars({
 }: {
   players: EntryPlayer[]
   ringColor?: AccentColor
-  size?: 'sm' | 'lg'
+  size?: 'xs' | 'sm' | 'lg'
 }) {
   if (players.length === 0) return null
   return (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from './Button'
+import { ContestantAvatar } from './ContestantAvatar'
 import { ContestantGrid } from './ContestantGrid'
 import { DraftLobby } from './DraftLobby'
 import { DraftPickToasts } from './DraftPickToasts'
@@ -554,9 +555,16 @@ export function DraftRoom({
                 <ContestantGrid
                   heading={t('draft.active.drafted', { n: drafted.length })}
                   contestants={drafted}
-                  cardProps={(c) => ({
-                    ownerName: entryByKey(entries, c.draftedByUid)?.label,
-                  })}
+                  cardProps={(c) => {
+                    const owner = entryByKey(entries, c.draftedByUid)
+                    return {
+                      teamName: owner?.teamName,
+                      // Undefined for a pick whose entry has since gone, so the
+                      // card falls back to its plain border rather than to some
+                      // other team's colour.
+                      teamColor: owner && teamColorFor(owner),
+                    }
+                  }}
                 />
               )}
             </div>
@@ -580,18 +588,38 @@ export function DraftRoom({
                         key={entry.key}
                         className={`rounded-xl border border-l-4 p-4 ${accentLeftBorder[teamColorFor(entry)]} ${isCurrentPicker ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}
                       >
-                        <p className="text-sm font-semibold text-gray-800 mb-2">{entry.teamName}</p>
-                        <p className="mb-2 flex items-center gap-2 text-xs text-gray-400">
-                          <PlayerAvatars players={entry.players} />
-                          <span className="min-w-0 truncate">{playerNames(entry.players)}</span>
-                        </p>
+                        {/* Who plays for the team sits in the top right, across
+                            from the team's name rather than beneath it: the
+                            picks below are what a reader scans down this column
+                            for, and a line of people in front of them pushed
+                            every team's picks a row further apart. The circle
+                            goes last so it lands in the corner, and small,
+                            because at this size it is a marker beside a name
+                            and not a portrait. */}
+                        <div className="mb-2 flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold text-gray-800">{entry.teamName}</p>
+                          <p className="flex min-w-0 items-center gap-1.5 text-xs text-gray-400">
+                            <span className="min-w-0 truncate">{playerNames(entry.players)}</span>
+                            <PlayerAvatars players={entry.players} size="xs" />
+                          </p>
+                        </div>
                         {teamContestants.length === 0 ? (
                           <p className="text-xs text-gray-300 italic">{t('draft.noPicksYet')}</p>
                         ) : (
-                          <ul className="flex flex-col gap-1">
+                          /* Wrapping row rather than a column: a full team is
+                             five or six names, and a column of them made every
+                             card as tall as its roster — the teams below it
+                             pushed off the screen by whoever had drafted most.
+                             With the pictures beside the names a column would
+                             have been taller still. */
+                          <ul className="flex flex-wrap gap-x-3 gap-y-2">
                             {teamContestants.map((c) => (
-                              <li key={c.id} className="text-xs text-gray-700">
-                                • {c.name}
+                              <li
+                                key={c.id}
+                                className="flex items-center gap-1.5 text-xs text-gray-700"
+                              >
+                                <ContestantAvatar photoUrl={c.photoUrl} photoCrop={c.photoCrop} />
+                                {c.name}
                               </li>
                             ))}
                           </ul>

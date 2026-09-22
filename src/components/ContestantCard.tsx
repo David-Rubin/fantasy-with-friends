@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useState } from 'react'
-import type { Contestant } from '../lib/types'
+import type { AccentColor, Contestant } from '../lib/types'
+import { accentBorder } from './accentStyles'
 import { Badge } from './Badge'
 import { Button } from './Button'
 import { t } from '../lib/i18n'
@@ -92,7 +93,14 @@ function ContestantBio({ contestant }: { contestant: Contestant }) {
 
 export interface ContestantCardProps {
   contestant: Contestant
-  ownerName?: string
+  /**
+   * The entry that drafted them, named and coloured. The name is the team's in
+   * both modes — in a solo season that is the name the member gave their own
+   * team, which is what the rest of the draft calls them too.
+   */
+  teamName?: string
+  /** Draws the card's border in the team's colour. See accentStyles. */
+  teamColor?: AccentColor
   canPick?: boolean
   canPickFor?: string // member display name for admin proxy
   onPick?: () => void
@@ -115,7 +123,8 @@ export interface ContestantCardProps {
 
 export function ContestantCard({
   contestant,
-  ownerName,
+  teamName,
+  teamColor,
   canPick,
   canPickFor,
   onPick,
@@ -130,7 +139,13 @@ export function ContestantCard({
   return (
     <div
       className={[
-        'rounded-xl border border-gray-200 bg-white shadow-sm transition-opacity',
+        'rounded-xl border bg-white shadow-sm transition-opacity',
+        // A drafted card is drawn in the colour of the team that took them, so
+        // the board says who holds whom without being read — the same colour
+        // the team's own card and its row edge carry. Two pixels because the
+        // card is faded to half opacity once drafted, and a hairline in a
+        // mid-tone colour disappears at that weight.
+        teamColor ? `border-2 ${accentBorder[teamColor]}` : 'border-gray-200',
         // Equal heights across a row, with the Edit button pinned to the
         // bottom: a cast with bios of different lengths otherwise leaves the
         // buttons at five different heights. Compact only — the draft board is
@@ -179,8 +194,10 @@ export function ContestantCard({
           {contestant.name}
         </h3>
         {contestant.bio && <ContestantBio contestant={contestant} />}
-        {ownerName && (
-          <p className="mt-2 text-xs text-gray-400">{t('contestant.owner', { name: ownerName })}</p>
+        {teamName && (
+          <p className="mt-2 text-xs text-gray-400">
+            {t('contestant.joinedTeam', { team: teamName })}
+          </p>
         )}
 
         {(onEdit || onRemove) && (
