@@ -56,7 +56,13 @@ export function TimerBanner({
     return () => clearInterval(id)
   }, [timerExpiresAt, durationSeconds])
 
-  const pct = timerExpiresAt ? (secondsLeft / durationSeconds) * 100 : 100
+  // Clamped, because the deadline and the duration can disagree: raising a
+  // season's timer mid-draft leaves the turn in progress running to a deadline
+  // set from the old one, and a turn seeded by hand can outrun it outright. A
+  // bar measured at 750% is invisible — the track clips it — but it is a track
+  // that is silently lying about being full, and the arithmetic reads as
+  // wrong to the next person here.
+  const pct = timerExpiresAt ? Math.min(100, (secondsLeft / durationSeconds) * 100) : 100
   const isLow = secondsLeft <= 10
   const isCritical = secondsLeft <= 5
 

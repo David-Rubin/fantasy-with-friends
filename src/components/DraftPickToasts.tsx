@@ -20,6 +20,11 @@ import { t } from '../lib/i18n'
  *
  * It is full width at the bottom on a phone and a column in the corner from
  * `sm` up, with the safe-area inset added so it clears the home indicator.
+ *
+ * `z-40`, one layer below a dialog. A draft does not stop while somebody has
+ * a dialog open, so a pick can land while one is up — and at the same layer
+ * the toast covered the bottom sheet's footer, which on a phone is exactly
+ * where the button they opened it to press is.
  * The dismiss button is a full-height 44px target inside the card rather than
  * a corner cross, because a cross small enough to sit in a toast's corner is
  * smaller than a thumb.
@@ -40,7 +45,7 @@ export function DraftPickToasts({
       // already reading out about the contestant list.
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex flex-col items-center gap-2 px-3 pb-3 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:items-end sm:px-0 sm:pb-0"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-3 pb-3 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:items-end sm:px-0 sm:pb-0"
       style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
     >
       {toasts.map((toast) => (
