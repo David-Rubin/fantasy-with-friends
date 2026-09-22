@@ -13,7 +13,12 @@ import { functions } from './firebase'
  */
 export const submitPick = httpsCallable<
   { seasonId: string; contestantId?: string; onBehalfOf?: string; warm?: boolean },
-  { status: 'active' | 'awaiting-close' | 'complete'; warmed?: boolean; serverNow?: number }
+  {
+    status: 'active' | 'awaiting-close' | 'complete'
+    warmed?: boolean
+    /** The server's clock at the moment it answered — see src/lib/serverClock. */
+    serverNow?: number
+  }
 >(functions, 'submitPick')
 
 /**

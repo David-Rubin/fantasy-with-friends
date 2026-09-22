@@ -8,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { draftLobbyVisible, teamCapacity } from '../lib/draft'
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
 import { draftedOwners, mergeDraftToasts, newDraftToasts, type DraftToast } from '../lib/draftToast'
-import { recordClockSample, serverNow } from '../lib/serverClock'
+import { clockOffsetMs, recordClockSample, serverNow } from '../lib/serverClock'
 import { teamColorFor } from '../lib/teamColor'
 import { accentLeftBorder } from './accentStyles'
 import { PlayerAvatars, playerNames } from './PlayerAvatars'
@@ -75,6 +75,18 @@ export function DraftRoom({
   const [confirmClose, setConfirmClose] = useState(false)
   const [togglingTimer, setTogglingTimer] = useState(false)
   const [toasts, setToasts] = useState<DraftToast[]>([])
+  /**
+   * Bumped whenever a clock measurement lands, and part of the banner's key.
+   *
+   * The banner is seeded from the deadline on its first paint and has nothing
+   * to animate from — an invariant worth keeping, since the bar used to sweep
+   * across on every resume. A measurement arriving after it mounted would have
+   * broken it in a new way: the seed would be the uncorrected number, and the
+   * first tick 250ms later would animate the correction. Remounting on a new
+   * measurement re-seeds it instead, and a fresh element has no previous width
+   * to transition from.
+   */
+  const [clockSyncs, setClockSyncs] = useState(0)
 
   const isPaused = draft?.status === 'paused'
   // An admin stopped the clock. Distinct from `status: 'paused'` above, which is
@@ -143,15 +155,32 @@ export function DraftRoom({
    * used to be: the season page is also the page for a season in setup and a
    * season being read months later, and neither is about to touch the clock.
    */
+  /**
+   * One reading of the server's clock, from a call that has just come back.
+   *
+   * Shared by the warm-up below and by a real pick, because those two differ
+   * in the one way that matters to a measurement: the warm-up may be paying a
+   * cold start, which is minutes of nothing followed by a slow round trip,
+   * while a pick is a call to an instance that is already up. Only the fastest
+   * sample is kept (see serverClock), so a pick's reading supersedes a cold
+   * warm-up's without anything here having to know which was which.
+   */
+  const noteServerClock = useCallback((sentAt: number, serverTime?: number) => {
+    if (!serverTime) return
+    const before = clockOffsetMs()
+    recordClockSample(sentAt, serverTime, Date.now())
+    // Only a measurement that actually moved the estimate re-seeds the banner.
+    if (clockOffsetMs() !== before) setClockSyncs((n) => n + 1)
+  }, [])
+
   useEffect(() => {
-    const timeAndWarm = async (call: Promise<{ data: { serverNow?: number } }>) => {
+    const warm = async (call: Promise<{ data: { serverNow?: number } }>) => {
       const sentAt = Date.now()
-      const { data } = await call
-      if (data.serverNow) recordClockSample(sentAt, data.serverNow, Date.now())
+      noteServerClock(sentAt, (await call).data.serverNow)
     }
-    timeAndWarm(setTimerPaused({ seasonId, paused: false, warm: true })).catch(() => {})
-    timeAndWarm(submitPick({ seasonId, warm: true })).catch(() => {})
-  }, [seasonId])
+    warm(setTimerPaused({ seasonId, paused: false, warm: true })).catch(() => {})
+    warm(submitPick({ seasonId, warm: true })).catch(() => {})
+  }, [seasonId, noteServerClock])
 
   /**
    * Announce a pick on every screen in the room.
@@ -308,8 +337,10 @@ export function DraftRoom({
 
     setPicking(true)
     setPickError('')
+    const sentAt = Date.now()
     try {
       const { data } = await submitPick({ seasonId, contestantId, onBehalfOf })
+      noteServerClock(sentAt, data.serverNow)
 
       trackEvent('draft_pick_made', {
         round: draft.currentRound,
@@ -505,7 +536,7 @@ export function DraftRoom({
                   than showing the previous turn's width for a frame and
                   animating across. */}
               <TimerBanner
-                key={draft.timerExpiresAt}
+                key={`${draft.timerExpiresAt}-${clockSyncs}`}
                 pickerName={currentPickerName}
                 timerExpiresAt={draft.timerExpiresAt}
                 durationSeconds={season.timerSeconds}

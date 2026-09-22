@@ -411,7 +411,11 @@ export const submitPick = functions.runWith(INTERACTIVE).https.onCall(
       timestamp: Date.now(),
     })
 
-    return result
+    // The clock ride-along, as on the warm-up — but measured through a call
+    // that has just done real work on a warm instance, so its round trip is
+    // the short one and its estimate is the one that survives. See
+    // src/lib/serverClock.
+    return { ...result, serverNow: Date.now() }
   }
 )
 

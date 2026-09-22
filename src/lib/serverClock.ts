@@ -21,6 +21,13 @@
 /** The current best estimate, and how good the sample that produced it was. */
 let offsetMs = 0
 let bestRoundTripMs = Number.POSITIVE_INFINITY
+/**
+ * When that sample was taken, on the monotonic clock rather than the wall one
+ * — the wall clock is the thing being measured, and a device that corrects it
+ * mid-draft would otherwise make its own sample look hours old or not yet
+ * taken.
+ */
+let bestTakenAt = Number.NEGATIVE_INFINITY
 
 /**
  * A round trip that took longer than this says nothing useful: the estimate
@@ -28,6 +35,23 @@ let bestRoundTripMs = Number.POSITIVE_INFINITY
  * that assumption is worth less than the error it is trying to correct.
  */
 const MAX_USEFUL_ROUND_TRIP_MS = 10_000
+
+/**
+ * How long the best sample holds its title.
+ *
+ * Without this, "fastest wins" is permanent, and a device whose clock is put
+ * right during a draft — a phone that picks up the network's time, a laptop
+ * waking from sleep — would keep being corrected by an offset measured against
+ * the clock it used to have, which is worse than not correcting it at all.
+ * After a minute any usable sample takes over, and a draft produces one on
+ * every pick.
+ */
+const BEST_SAMPLE_TTL_MS = 60_000
+
+/** Monotonic where it exists, so a clock that jumps cannot age a sample. */
+function monotonicNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
 
 /**
  * The offset implied by one round trip, the way NTP reads one: the server's
@@ -39,17 +63,19 @@ export function clockOffset(sentAt: number, serverNow: number, receivedAt: numbe
 }
 
 /**
- * Record a measurement, keeping the one from the fastest round trip seen.
+ * Record a measurement, keeping the one from the fastest recent round trip.
  *
- * Fastest rather than most recent, because a slow call's estimate is a worse
- * one and arriving later does not make it better — the quantity being measured
- * is a clock difference, which does not move.
+ * Fastest, because a slow call estimates the same quantity worse and arriving
+ * later does not make it better. Recent, because that quantity does move when
+ * a device's own clock is put right — see BEST_SAMPLE_TTL_MS.
  */
 export function recordClockSample(sentAt: number, serverNow: number, receivedAt: number): void {
   const roundTrip = receivedAt - sentAt
   if (roundTrip < 0 || roundTrip > MAX_USEFUL_ROUND_TRIP_MS) return
-  if (roundTrip >= bestRoundTripMs) return
+  const heldFor = monotonicNow() - bestTakenAt
+  if (roundTrip >= bestRoundTripMs && heldFor < BEST_SAMPLE_TTL_MS) return
   bestRoundTripMs = roundTrip
+  bestTakenAt = monotonicNow()
   offsetMs = clockOffset(sentAt, serverNow, receivedAt)
 }
 
@@ -67,4 +93,5 @@ export function clockOffsetMs(): number {
 export function resetClock(): void {
   offsetMs = 0
   bestRoundTripMs = Number.POSITIVE_INFINITY
+  bestTakenAt = Number.NEGATIVE_INFINITY
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { clockOffset, clockOffsetMs, recordClockSample, resetClock, serverNow } from './serverClock'
 
 describe('clockOffset', () => {
@@ -42,5 +42,33 @@ describe('the measured clock', () => {
     const now = Date.now()
     recordClockSample(now, now + 30_000, now + 11_000)
     expect(clockOffsetMs()).toBe(0)
+  })
+})
+
+// "Fastest wins" must not be permanent. A phone that picks up the network's
+// time mid-draft, or a laptop waking from sleep, has moved the very quantity
+// being measured — and an offset measured against the clock it used to have is
+// worse than none.
+describe('a clock that is put right mid-draft', () => {
+  beforeEach(() => resetClock())
+  afterEach(() => vi.useRealTimers())
+
+  it('lets a later sample take over once the best one is a minute old', () => {
+    const now = Date.now()
+    recordClockSample(now, now - 20_000, now + 30)
+    expect(clockOffsetMs()).toBeLessThan(-19_000)
+
+    // A minute later, on the monotonic clock, with the device now correct.
+    vi.spyOn(performance, 'now').mockReturnValue(120_000)
+    recordClockSample(now, now, now + 300)
+    expect(Math.abs(clockOffsetMs())).toBeLessThan(200)
+  })
+
+  it('still prefers the faster of two samples taken close together', () => {
+    const now = Date.now()
+    recordClockSample(now, now + 3_000, now + 60)
+    const fast = clockOffsetMs()
+    recordClockSample(now, now + 9_000, now + 900)
+    expect(clockOffsetMs()).toBe(fast)
   })
 })
