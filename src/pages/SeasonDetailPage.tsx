@@ -16,7 +16,6 @@ import type {
   ContestantDoc,
   SeasonMemberDoc,
   EpisodeScoreDoc,
-  MemberRole,
   Contestant,
   AccentColor,
   ContestantScoreDoc,
@@ -75,6 +74,7 @@ import {
   useSeasonTeams,
 } from '../lib/useSeasonCollections'
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
+import { useIsAdmin } from '../lib/useIsAdmin'
 import { PlayerAvatars, playerNames } from '../components/PlayerAvatars'
 import { ContestantAvatar } from '../components/ContestantAvatar'
 import { uploadContestantPhoto } from '../lib/contestantPhotoApi'
@@ -162,7 +162,7 @@ function RosterHeader({
 
 export function SeasonDetailPage() {
   const { leagueId, seasonId } = useParams<{ leagueId: string; seasonId: string }>()
-  const { user, isSuperadmin } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
   // In the URL rather than component state, so a breadcrumb or a shared link
   // can open the page on the tab it means. An unknown or absent value falls
@@ -178,8 +178,13 @@ export function SeasonDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingSeason, setDeletingSeason] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const [myRole, setMyRole] = useState<MemberRole | null>(null)
   const { canView, blocked } = useSeasonMembership(seasonId)
+  // A listener rather than a read, and gated on canView: see useLeagueRole.
+  // Superadmins are folded in there because the security rules already treat
+  // them as an admin of every season (isSeasonAdmin resolves through
+  // isLeagueAdmin, which is true for them). Leaving them out only meant the
+  // client hid controls the server would have accepted.
+  const isAdmin = useIsAdmin(leagueId, canView)
   const contestants = useSeasonContestants(seasonId, canView)
   const rules = useSeasonScoringRules(seasonId, canView)
   const teams = useSeasonTeams(seasonId, canView)
@@ -397,24 +402,6 @@ export function SeasonDetailPage() {
     return unsub
   }, [seasonId, user, canView])
 
-  // My role in the league, as a listener of its own. It used to be a one-shot
-  // read inside the roster listener above, which failed whenever that listener
-  // first fired from the cache with the client offline — the read threw
-  // "client is offline", the role stayed null, and an admin on a slow
-  // connection got the member's view with no setup panel. A listener waits
-  // for the connection instead, and follows a role change while the page is
-  // open, which the read never did.
-  useEffect(() => {
-    if (!leagueId || !user || !canView) return
-    return listenDoc(
-      doc(db, 'leagues', leagueId, 'members', user.uid),
-      'my league role',
-      (snap) => {
-        setMyRole(snap.exists() ? (snap.data() as { role: MemberRole }).role : null)
-      }
-    )
-  }, [leagueId, user, canView])
-
   useEffect(() => {
     if (!seasonId || !canView) return
     const unsub = listenQuery(
@@ -474,12 +461,6 @@ export function SeasonDetailPage() {
     )
     return () => unsubs.forEach((u) => u())
   }, [seasonId, canView, scoredEpisodeKey])
-
-  // Superadmins are folded in here because the security rules already treat
-  // them as an admin of every season (isSeasonAdmin resolves through
-  // isLeagueAdmin, which is true for them). Leaving them out only meant the
-  // client hid controls the server would have accepted.
-  const isAdmin = myRole === 'owner' || myRole === 'admin' || isSuperadmin
 
   async function handleAddContestant(e: React.FormEvent) {
     e.preventDefault()
