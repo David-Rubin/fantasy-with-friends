@@ -39,6 +39,7 @@ export function DraftLobby({
   seasonId,
   leagueId,
   episodeCount,
+  isAdmin,
 }: {
   entries: LobbyEntry[]
   /** Whether the rows are teams — in which case the team's name leads. */
@@ -48,19 +49,26 @@ export function DraftLobby({
   seasonId: string
   leagueId: string
   episodeCount: number
+  /** Passed down rather than asked for again — see the note in useIsAdmin.ts. */
+  isAdmin: boolean
 }) {
   return (
     <div className="mb-6 flex flex-col gap-4">
-      {/* A marquee, because the wait is the point: the sentence is the only
+      {/* Not for the admin: they are who the sentence is waiting on, and
+          telling them somebody else will start the draft is both wrong and a
+          line between them and the button that does it. A marquee for
+          everyone else, because the wait is the point: the sentence is the only
           thing on this screen that is not a list, and it moving is what says
           the room is live rather than stuck. It re-enters on the left the
           instant it clears the right — see .lobby-marquee in src/index.css,
           which is where the width of this window becomes the distance. */}
-      <div className="lobby-marquee overflow-hidden">
-        <p className="lobby-marquee-track w-max whitespace-nowrap italic">
-          {t('draft.lobby.waitingForAdmin')}
-        </p>
-      </div>
+      {!isAdmin && (
+        <div className="lobby-marquee overflow-hidden">
+          <p className="lobby-marquee-track w-max whitespace-nowrap italic">
+            {t('draft.lobby.waitingForAdmin')}
+          </p>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-gray-200 bg-white p-6">
         <p className="mb-4 text-sm">{t('draft.lobby.yourOpponentsHeading')}</p>

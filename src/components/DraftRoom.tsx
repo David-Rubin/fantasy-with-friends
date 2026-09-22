@@ -355,6 +355,7 @@ export function DraftRoom({
           seasonId={seasonId}
           leagueId={leagueId}
           episodeCount={season.episodeCount}
+          isAdmin={isAdmin}
         />
       )}
 
