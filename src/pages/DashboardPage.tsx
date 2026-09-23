@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   collection,
@@ -7,7 +7,6 @@ import {
   where,
   orderBy,
   doc,
-  getDoc,
   getDocs,
   addDoc,
   setDoc,
@@ -24,22 +23,19 @@ import { JoinLeagueButton } from '../components/JoinLeagueButton'
 import { dashboardTrail } from '../lib/breadcrumbs'
 import { useMyJoinRequests } from '../lib/joinRequests'
 import { storedPhotoFields } from '../lib/photoCrop'
-import { leadingSeason, sortLeaguesByStatus } from '../lib/leagueStatus'
+import { sortLeaguesByStatus } from '../lib/leagueStatus'
+import {
+  chunkIds,
+  groupSeasonsByLeague,
+  joinLeaguesWithSeasons,
+  leagueIdKey,
+} from '../lib/dashboardLeagues'
 import type { LeagueDoc, LeagueMemberDoc, SeasonDoc } from '../lib/types'
 import { t } from '../lib/i18n'
 import { trackEvent } from '../lib/analytics'
 
-interface LeagueWithSeason {
-  id: string
-  league: LeagueDoc
-  /**
-   * The season this league is judged by — see leadingSeason. Not its newest:
-   * a league that lines up next year's season while this year's is still being
-   * scored is still playing this year's, and that is what a reader wants the
-   * badge to say.
-   */
-  currentSeason: (SeasonDoc & { id: string }) | null
-}
+type LeagueWithId = LeagueDoc & { id: string }
+type SeasonWithId = SeasonDoc & { id: string }
 
 function memberCountLabel(count: number): string {
   return count === 1 ? t('league.memberCountOne') : t('league.memberCount', { n: count })
@@ -48,9 +44,23 @@ function memberCountLabel(count: number): string {
 export function DashboardPage() {
   const { user, userDoc } = useAuth()
   const navigate = useNavigate()
-  const [leagues, setLeagues] = useState<LeagueWithSeason[]>([])
-  const [allLeagues, setAllLeagues] = useState<(LeagueDoc & { id: string })[]>([])
-  const [loading, setLoading] = useState(true)
+  /**
+   * The three pieces the "my leagues" list is assembled from, each settling on
+   * its own. `null` means "not answered yet" — distinct from an answered
+   * empty, which is what the empty state is allowed to render.
+   */
+  const [myLeagueIds, setMyLeagueIds] = useState<string[] | null>(null)
+  const [allLeagues, setAllLeagues] = useState<LeagueWithId[] | null>(null)
+  /**
+   * The seasons, tagged with the membership they were fetched for. Tagged
+   * rather than bare so a list left over from the previous membership is never
+   * mistaken for an answer about the current one — the rows would otherwise
+   * render with the wrong badge for as long as the new fetch took.
+   */
+  const [seasons, setSeasons] = useState<{
+    key: string
+    byLeague: Record<string, SeasonWithId[]>
+  } | null>(null)
   const joinRequestStatus = useMyJoinRequests(user?.uid)
   const [createOpen, setCreateOpen] = useState(false)
   const [leagueName, setLeagueName] = useState('')
@@ -66,10 +76,10 @@ export function DashboardPage() {
     // query that constrains a field, so removing it breaks the listener.
     const membersQuery = query(collectionGroup(db, 'members'), where('uid', '==', user.uid))
 
-    const unsubscribe = listenQuery(
+    return listenQuery(
       membersQuery,
       'dashboard leagues',
-      async (snap) => {
+      (snap) => {
         const leagueIds = new Set<string>()
         snap.docs.forEach((d) => {
           // Only leagues/{id}/members/{uid} docs, not seasons/{id}/members/{uid}
@@ -78,58 +88,72 @@ export function DashboardPage() {
             if (leagueId) leagueIds.add(leagueId)
           }
         })
-
-        try {
-          const results: LeagueWithSeason[] = []
-          for (const leagueId of leagueIds) {
-            const leagueSnap = await getDoc(doc(db, 'leagues', leagueId))
-            if (!leagueSnap.exists()) continue
-            const league = leagueSnap.data() as LeagueDoc
-
-            // Every season, not just the newest: which one speaks for the
-            // league is a question about their states, and only one of them
-            // can be answered by a query's ordering. A league has a handful.
-            const seasonsSnap = await getDocs(
-              query(
-                collection(db, 'seasons'),
-                where('leagueId', '==', leagueId),
-                orderBy('createdAt', 'desc')
-              )
-            )
-            const currentSeason = leadingSeason(
-              seasonsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as SeasonDoc) }))
-            )
-
-            results.push({ id: leagueId, league, currentSeason })
-          }
-          setLeagues(results)
-        } catch (error) {
-          // A rejection in here used to skip setLoading(false) and hang the page
-          console.error('Failed to load leagues', error)
-        } finally {
-          setLoading(false)
-        }
+        // No reads happen here any more: this handler only says which leagues
+        // the user is in. The documents themselves arrive through the listener
+        // below, and the seasons through one batched fetch — so a member write
+        // that leaves the membership unchanged costs nothing.
+        setMyLeagueIds([...leagueIds])
       },
-      // listenQuery logs; this clears the spinner so a denied read shows the
+      // listenQuery logs; this settles the state so a denied read shows the
       // empty state rather than hanging on "Loading…"
-      () => setLoading(false)
+      () => setMyLeagueIds([])
     )
-
-    return unsubscribe
   }, [user])
 
-  // Every league in the app, member or not — the browse list below. Only the
-  // league documents are read here: seasons are fetched per league above, and
-  // only for leagues this user actually belongs to, so browsing stays one query
-  // however many leagues exist.
+  // Every league in the app, member or not. It feeds both lists: the browse
+  // list below, and — since a league document is readable by any signed-in user
+  // — the rows for the user's own leagues, which therefore need no per-league
+  // fetch of their own.
   useEffect(() => {
     if (!user) return
     return listenQuery(
       query(collection(db, 'leagues'), orderBy('createdAt', 'desc')),
       'all leagues',
-      (snap) => setAllLeagues(snap.docs.map((d) => ({ id: d.id, ...(d.data() as LeagueDoc) })))
+      (snap) => setAllLeagues(snap.docs.map((d) => ({ id: d.id, ...(d.data() as LeagueDoc) }))),
+      () => setAllLeagues([])
     )
   }, [user])
+
+  // Which leagues to fetch seasons for, as a value that only changes when the
+  // membership itself does — so a renamed member does not restart the fetch.
+  const myLeagueKey = myLeagueIds ? leagueIdKey(myLeagueIds) : null
+
+  // The seasons of every league this user belongs to, in one round trip (or one
+  // per 30 leagues, run together). This replaces a per-league query awaited in
+  // series, which is what made a dashboard with several leagues crawl.
+  useEffect(() => {
+    if (!user || myLeagueKey === null) return
+    const ids = myLeagueKey === '' ? [] : myLeagueKey.split(',')
+
+    // A fetch that lands after the membership has moved on would overwrite the
+    // newer one with stale seasons, so a superseded fetch drops its result.
+    let live = true
+    Promise.all(
+      chunkIds(ids).map((chunk) =>
+        getDocs(query(collection(db, 'seasons'), where('leagueId', 'in', chunk)))
+      )
+    )
+      .then((snaps) => {
+        if (!live) return
+        const fetched = snaps.flatMap((snap) =>
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as SeasonDoc) }))
+        )
+        // No orderBy on the query: leadingSeason breaks its own ties by
+        // createdAt, so the ordering never depended on the clause anyway — and
+        // without it the query needs only Firestore's automatic single-field
+        // index.
+        setSeasons({ key: myLeagueKey, byLeague: groupSeasonsByLeague(fetched) })
+      })
+      .catch((error) => {
+        // A rejection in here used to skip setLoading(false) and hang the page
+        console.error('Failed to load seasons for dashboard leagues', error)
+        if (live) setSeasons({ key: myLeagueKey, byLeague: {} })
+      })
+
+    return () => {
+      live = false
+    }
+  }, [user, myLeagueKey])
 
   async function handleCreateLeague(e: React.FormEvent) {
     e.preventDefault()
@@ -170,14 +194,29 @@ export function DashboardPage() {
     }
   }
 
+  // The list is ready once every piece has answered. The seasons are waited
+  // for rather than filled in late so the rows do not reshuffle under the
+  // reader — sortLeaguesByStatus orders by season state, so a badge arriving
+  // after the fact would move its row.
+  const loading =
+    myLeagueIds === null || allLeagues === null || seasons === null || seasons.key !== myLeagueKey
+
+  // The leagues in the order they should be read — see sortLeaguesByStatus.
+  const sortedLeagues = useMemo(
+    () =>
+      sortLeaguesByStatus(
+        joinLeaguesWithSeasons(myLeagueIds ?? [], allLeagues ?? [], seasons?.byLeague ?? {})
+      ),
+    [myLeagueIds, allLeagues, seasons]
+  )
+
   // Leagues to browse: everything this user is not already in. Derived rather
   // than filtered in the listener so it re-settles as soon as a membership
   // arrives — an approved league moves from one section to the other on its own.
-  const myLeagueIds = new Set(leagues.map((l) => l.id))
-  const otherLeagues = allLeagues.filter((l) => !myLeagueIds.has(l.id))
-
-  // The leagues in the order they should be read — see sortLeaguesByStatus.
-  const sortedLeagues = sortLeaguesByStatus(leagues)
+  const otherLeagues = useMemo(() => {
+    const mine = new Set(myLeagueIds ?? [])
+    return (allLeagues ?? []).filter((l) => !mine.has(l.id))
+  }, [myLeagueIds, allLeagues])
 
   return (
     <Layout breadcrumbs={dashboardTrail()}>
@@ -192,7 +231,7 @@ export function DashboardPage() {
       ) : (
         <>
           <h2 className="mb-3 text-lg font-semibold text-gray-900">{t('dashboard.myLeagues')}</h2>
-          {leagues.length === 0 ? (
+          {sortedLeagues.length === 0 ? (
             <div className="rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
               <p className="text-gray-500">{t('dashboard.noLeagues')}</p>
               <p className="mt-1 text-sm text-gray-400">{t('dashboard.noLeaguesSubtext')}</p>
