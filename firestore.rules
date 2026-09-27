@@ -426,6 +426,27 @@ service cloud.firestore {
         allow read, write: if isSeasonMember(seasonId) && request.auth.uid == uid;
       }
 
+      // How far one participant has watched — see WatchProgressDoc in
+      // src/lib/types.ts. Nobody else's business, so nobody else may read it,
+      // an admin included: it holds nothing an admin decides anything with.
+      //
+      // Written only by somebody who plays in the season, which is an exists()
+      // on their own roster document rather than isSeasonMember(): a
+      // superadmin reading a season they are not in passes that, and has no
+      // progress to keep. The shape is pinned so the document cannot become a
+      // place to store anything else.
+      match /watchProgress/{uid} {
+        allow read: if isSignedIn() && request.auth.uid == uid;
+        allow create, update: if isSignedIn()
+          && request.auth.uid == uid
+          && exists(/databases/$(database)/documents/seasons/$(seasonId)/members/$(uid))
+          && request.resource.data.keys().hasOnly(['caughtUpThroughEpisode', 'updatedAt'])
+          && request.resource.data.caughtUpThroughEpisode is int
+          && request.resource.data.caughtUpThroughEpisode >= 0
+          && request.resource.data.updatedAt is int;
+        allow delete: if false;
+      }
+
       match /draft/{draftId} {
         allow read: if isSeasonMember(seasonId);
         // Written only by Cloud Functions through the Admin SDK — startDraft

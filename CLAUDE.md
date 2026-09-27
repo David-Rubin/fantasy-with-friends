@@ -96,8 +96,8 @@ can only load where those exist. So decisions worth testing live in modules that
 import nothing reaching it:
 
 `src/lib/breadcrumbs.ts`, `src/lib/seasonDetails.ts`, `src/lib/draft.ts`,
-`src/lib/scoring.ts`, `functions/src/membership.ts`, `functions/src/draft.ts`,
-`functions/src/scoring.ts`.
+`src/lib/scoring.ts`, `src/lib/spoilers.ts`, `functions/src/membership.ts`,
+`functions/src/draft.ts`, `functions/src/scoring.ts`.
 
 The pattern is a pure module beside a thin writer: `seasonDetails.ts` decides,
 `seasonApi.ts` writes. Keep it that way when adding logic worth asserting on.
@@ -119,6 +119,21 @@ that decides which. Get a key from `entryKeyFor` / `seasonEntries` and nowhere
 else; a component that reaches for `member.uid` as a key is wrong in team mode.
 Solo mode yields one entry per member with `key === uid`, which is why seasons
 from before teams existed need no migration.
+
+### Results are drawn through the spoiler guard
+
+A participant who has not watched an episode must not see what it did. Each
+one's progress is a single number, `watchProgress/{uid}.caughtUpThroughEpisode`,
+and `useSpoilerGuard` turns it into `through`: null for everything, or the
+episode the page is drawn as of. The past state is _derived_, never
+snapshotted — totals from `teamEpisodeTotals[key][N]`, eliminations masked by
+`contestantsAsOf`, episodes filtered by `episodesAsOf` (`src/lib/spoilers.ts`).
+
+So anything new that shows a score, a total, a ranking, an elimination or a
+winner reads through `through`, or it leaks. Team names, colours and photos
+are not results and need nothing. Whoever scores or suggests an episode is
+marked as having watched it (`recordWatched`), so nobody is warned about
+their own result.
 
 ### Every listener goes through `src/lib/listen.ts`
 

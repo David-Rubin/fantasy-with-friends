@@ -1543,6 +1543,7 @@ export const deleteUser = functions.https.onCall(
     for (const d of leagueMemberDocs) batch.delete(d.ref)
     for (const season of plan.leaving) {
       batch.delete(db.doc(`seasons/${season.id}/members/${uid}`))
+      batch.delete(db.doc(`seasons/${season.id}/watchProgress/${uid}`))
     }
     for (const league of leagueMemberDocs) {
       const leagueId = league.ref.parent.parent!.id
