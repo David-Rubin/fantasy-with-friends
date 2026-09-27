@@ -32,14 +32,17 @@ function logFailure(label: string, onError?: (error: FirestoreError) => void) {
   }
 }
 
-/** Listen to a single document. */
+/** Listen to a single document. `options` as for listenQuery below. */
 export function listenDoc(
   ref: DocumentReference,
   label: string,
   next: (snap: DocumentSnapshot) => void,
-  onError?: (error: FirestoreError) => void
+  onError?: (error: FirestoreError) => void,
+  options?: SnapshotListenOptions
 ): Unsubscribe {
-  return onSnapshot(ref, next, logFailure(label, onError))
+  return options
+    ? onSnapshot(ref, options, next, logFailure(label, onError))
+    : onSnapshot(ref, next, logFailure(label, onError))
 }
 
 /**

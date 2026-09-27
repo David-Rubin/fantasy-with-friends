@@ -15,7 +15,6 @@ import type {
   SeasonDoc,
   ContestantDoc,
   SeasonMemberDoc,
-  EpisodeScoreDoc,
   Contestant,
   AccentColor,
   ContestantScoreDoc,
@@ -68,11 +67,21 @@ import { ContestantGrid } from '../components/ContestantGrid'
 import { DraftRoom } from '../components/DraftRoom'
 import { reopenSeasonSetup, startDraft } from '../lib/draftApi'
 import {
+  useScoredEpisodes,
   useSeasonContestants,
   useSeasonDraft,
   useSeasonScoringRules,
   useSeasonTeams,
 } from '../lib/useSeasonCollections'
+import { useSpoilerGuard } from '../lib/useSpoilerGuard'
+import {
+  contestantsAsOf,
+  episodesAsOf,
+  isAhead,
+  seasonSpoiler,
+  standingAsOf,
+} from '../lib/spoilers'
+import { SpoilerPrompt, SpoilerShield, SpoilerToast } from '../components/SpoilerGuard'
 import { entryByKey, entryKeyFor, isTeamMode, seasonEntries } from '../lib/entries'
 import { useIsAdmin } from '../lib/useIsAdmin'
 import { PlayerAvatars, playerNames } from '../components/PlayerAvatars'
@@ -178,7 +187,7 @@ export function SeasonDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingSeason, setDeletingSeason] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const { canView, blocked } = useSeasonMembership(seasonId)
+  const { canView, blocked, membership } = useSeasonMembership(seasonId)
   // A listener rather than a read, and gated on canView: see useLeagueRole.
   // Superadmins are folded in there because the security rules already treat
   // them as an admin of every season (isSeasonAdmin resolves through
@@ -198,7 +207,9 @@ export function SeasonDetailPage() {
   const [resettingDraft, setResettingDraft] = useState(false)
   const [resetDraftError, setResetDraftError] = useState('')
   const { leagueName, showName } = useTrailNames(leagueId)
-  const [episodeStatuses, setEpisodeStatuses] = useState<Record<string, boolean>>({})
+  // Every scored episode, whatever the viewer has watched. What they are shown
+  // is `shownEpisodeStatuses`, below.
+  const { episodes: episodeStatuses, loaded: episodesLoaded } = useScoredEpisodes(seasonId, canView)
   /** Episodes somebody has suggested scores for, awaiting an admin's decision. */
   const [episodesAwaitingReview, setEpisodesAwaitingReview] = useState<Set<string>>(new Set()) // episodeNumber -> locked
   // Per-contestant scores, keyed by episode number. A cache, not the source of
@@ -289,6 +300,28 @@ export function SeasonDetailPage() {
   // See src/lib/entries.ts.
   const teamMode = isTeamMode(season)
   const entries = useMemo(() => seasonEntries(season, members, teams), [season, members, teams])
+
+  // Keeping results from a participant who has not watched them yet — see
+  // src/lib/spoilers.ts. Only once there are results to keep, and only for
+  // somebody playing: an admin or superadmin reading a season they are not in
+  // has no watch progress and nothing to be protected from.
+  const scoring = season?.state === 'active' || season?.state === 'complete'
+  const spoiler = useSpoilerGuard({
+    seasonId,
+    uid: user?.uid,
+    participant: membership === 'member' && scoring,
+    scope: `season:${seasonId}`,
+    inputsReady: () => season !== null && membership !== 'loading' && (!scoring || episodesLoaded),
+    horizonAt: (caughtUpThrough) => seasonSpoiler(caughtUpThrough, Object.keys(episodeStatuses)),
+  })
+  // The episode the leaderboard, roster and episode list are drawn through:
+  // null for everything, or where the viewer is caught up to. Scores are
+  // listened to all the while, so catching up is a redraw, not a fetch.
+  const through = spoiler.through
+  const shownContestants = useMemo(
+    () => contestantsAsOf(contestants, through),
+    [contestants, through]
+  )
 
   // The team layout as the setup form has it, which is ahead of what is
   // stored: a count typed but not saved, a drag not yet written. The setup
@@ -401,22 +434,6 @@ export function SeasonDetailPage() {
     )
     return unsub
   }, [seasonId, user, canView])
-
-  useEffect(() => {
-    if (!seasonId || !canView) return
-    const unsub = listenQuery(
-      collection(db, 'seasons', seasonId, 'episodeScores'),
-      'episode statuses',
-      (snap) => {
-        const statuses: Record<string, boolean> = {}
-        snap.docs.forEach((d) => {
-          statuses[d.id] = (d.data() as EpisodeScoreDoc).locked
-        })
-        setEpisodeStatuses(statuses)
-      }
-    )
-    return unsub
-  }, [seasonId, canView])
 
   // What is waiting to be decided on, so the episode list can say so rather
   // than sending an admin into every unscored episode to find out. Pending
@@ -807,12 +824,15 @@ export function SeasonDetailPage() {
   const canClose = season
     ? canCompleteSeason(season.state, season.episodeCount, episodeStatuses)
     : false
-  const winner = seasonClosed
-    ? seasonWinner(
-        entries.map((e) => e.key),
-        season?.teamTotals ?? {}
-      )
-    : null
+  // Not while anything is hidden: the champion is the finale's result, which
+  // is the one spoiler everybody is trying to avoid.
+  const winner =
+    seasonClosed && through === null
+      ? seasonWinner(
+          entries.map((e) => e.key),
+          season?.teamTotals ?? {}
+        )
+      : null
 
   const openProblem = openDraftProblem(
     contestants.length,
@@ -852,7 +872,7 @@ export function SeasonDetailPage() {
   // sorted — see sortRosterRows for why the sort works on that text and not on
   // the contestant documents behind it.
   const rosterRows = useMemo(() => {
-    const rows = contestants.map((c) => {
+    const rows = shownContestants.map((c) => {
       const owner = entryByKey(entries, c.draftedByUid)
       return {
         id: c.id,
@@ -869,7 +889,7 @@ export function SeasonDetailPage() {
       }
     })
     return sortRosterRows(rows, rosterSort)
-  }, [contestants, entries, rosterSort])
+  }, [shownContestants, entries, rosterSort])
   /** Shut the dialog. A picture chosen and never saved goes with it. */
   function closeCropDialog() {
     setCroppingContestantId(null)
@@ -884,7 +904,11 @@ export function SeasonDetailPage() {
   // state — the one thing that constrains an edit.
   // Only the episodes that are still scored, so a cached entry for one that has
   // gone cannot keep counting towards a season total.
-  const episodeScoreDocs = Object.keys(episodeStatuses)
+  //
+  // And only those the viewer has watched: this is what the leaderboard's
+  // per-contestant breakdown adds up.
+  const shownEpisodeStatuses = episodesAsOf(episodeStatuses, through)
+  const episodeScoreDocs = Object.keys(shownEpisodeStatuses)
     .filter((ep) => scoresByEpisode[ep])
     .map((ep) => ({ episodeNumber: parseInt(ep, 10), scores: scoresByEpisode[ep] }))
 
@@ -1407,7 +1431,7 @@ export function SeasonDetailPage() {
 
       {/* Tabs (active/complete seasons) */}
       {['active', 'complete'].includes(season.state) && (
-        <>
+        <SpoilerShield phase={spoiler.phase}>
           <nav className="flex border-b border-gray-200 mb-6 overflow-x-auto" role="tablist">
             {tabs.map(({ key, label }) => (
               <button
@@ -1420,7 +1444,7 @@ export function SeasonDetailPage() {
                     trackEvent('leaderboard_viewed', { season_id: seasonId ?? '' })
                 }}
                 className={[
-                  'px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
+                  'cursor-pointer px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
                   tab === key
                     ? 'border-blue-600 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700',
@@ -1453,23 +1477,20 @@ export function SeasonDetailPage() {
               {entries.length === 0 ? (
                 <p className="text-gray-400">{t('leaderboard.noScoresYet')}</p>
               ) : (
-                [...entries]
-                  .sort((a, b) => (season.teamTotals[b.key] ?? 0) - (season.teamTotals[a.key] ?? 0))
-                  .map((entry, idx) => {
-                    const scoredEpisodes = Object.keys(season.teamEpisodeTotals[entry.key] ?? {})
-                      .map(Number)
-                      .sort((a, b) => a - b)
-                    const lastEp = scoredEpisodes[scoredEpisodes.length - 1]
-                    const prevEp = scoredEpisodes[scoredEpisodes.length - 2]
-                    const delta =
-                      lastEp !== undefined
-                        ? (season.teamEpisodeTotals[entry.key]?.[lastEp] ?? 0) -
-                          (prevEp !== undefined
-                            ? (season.teamEpisodeTotals[entry.key]?.[prevEp] ?? 0)
-                            : 0)
-                        : null
-
-                    const teamContestants = contestants.filter((c) => c.draftedByUid === entry.key)
+                entries
+                  .map((entry) => ({
+                    entry,
+                    standing: standingAsOf(
+                      season.teamTotals[entry.key],
+                      season.teamEpisodeTotals[entry.key],
+                      through
+                    ),
+                  }))
+                  .sort((a, b) => b.standing.total - a.standing.total)
+                  .map(({ entry, standing }, idx) => {
+                    const teamContestants = shownContestants.filter(
+                      (c) => c.draftedByUid === entry.key
+                    )
 
                     return (
                       <LeaderboardRow
@@ -1477,8 +1498,8 @@ export function SeasonDetailPage() {
                         rank={idx + 1}
                         teamName={entry.teamName}
                         players={entry.players}
-                        totalPoints={season.teamTotals[entry.key] ?? 0}
-                        delta={delta}
+                        totalPoints={standing.total}
+                        delta={standing.delta}
                         teamColor={teamColorFor(entry)}
                         contestants={teamContestants.map((c) => ({
                           contestant: c,
@@ -1612,6 +1633,29 @@ export function SeasonDetailPage() {
           {tab === 'episodes' && (
             <div className="flex flex-col gap-3">
               {episodeNumbers.map((n) => {
+                // Scored, but past where the viewer is caught up to. Said so
+                // rather than drawn as unscored, which would offer an admin
+                // "Score episode" on an episode that already has one; the
+                // link goes to its card, which asks before it shows anything.
+                const hiddenScores = episodeStatuses[String(n)] !== undefined && isAhead(n, through)
+                if (hiddenScores) {
+                  return (
+                    <div
+                      key={n}
+                      className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4"
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {t('scoring.episodeTitle', { n })}
+                        </p>
+                        <p className="text-xs text-gray-400">{t('spoilers.episodeHidden')}</p>
+                      </div>
+                      <Link to={`/leagues/${leagueId}/seasons/${seasonId}/score/${n}`}>
+                        <Button variant="ghost">{t('scoring.viewScores')}</Button>
+                      </Link>
+                    </div>
+                  )
+                }
                 const scored = episodeStatuses[String(n)] !== undefined
                 const locked = episodeStatuses[String(n)]
                 const awaitingReview = episodesAwaitingReview.has(String(n))
@@ -1691,7 +1735,22 @@ export function SeasonDetailPage() {
               })}
             </div>
           )}
-        </>
+        </SpoilerShield>
+      )}
+
+      <SpoilerPrompt
+        open={spoiler.phase === 'prompt'}
+        horizon={spoiler.horizon}
+        busy={spoiler.catchingUp}
+        onConfirm={spoiler.catchUp}
+        onDecline={spoiler.decline}
+      />
+      {spoiler.phase === 'hidden' && (
+        <SpoilerToast
+          message={t('spoilers.toast.season')}
+          busy={spoiler.catchingUp}
+          onRefresh={spoiler.catchUp}
+        />
       )}
 
       {/* Edit contestant */}

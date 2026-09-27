@@ -431,5 +431,16 @@
   "settings.userInfo.nameSaved": "Your display name has been updated.",
   "settings.userInfo.nameFailed": "Your display name could not be saved. Please try again.",
   "settings.userInfo.email": "Email address",
-  "settings.userInfo.emailHint": "This is the address you log in with, and it cannot be changed."
+  "settings.userInfo.emailHint": "This is the address you log in with, and it cannot be changed.",
+  "spoilers.checking": "Checking for spoilers…",
+  "spoilers.prompt.title": "Spoilers ahead!",
+  "spoilers.prompt.scored": "New scores have been submitted up to episode {n}, spoilers ahead! If you want to avoid spoilers, please confirm you are caught up!",
+  "spoilers.prompt.suggested": "New scores have been suggested for episode {n}, spoilers ahead! If you want to avoid spoilers, please confirm you are caught up!",
+  "spoilers.prompt.caughtUp": "I've watched episode {n}",
+  "spoilers.prompt.notCaughtUp": "Not yet — hide spoilers",
+  "spoilers.toast.season": "The season has updated scores. Click {refresh} to view the latest. Warning: Spoilers ahead!",
+  "spoilers.toast.episodeScored": "This episode has been scored. Click {refresh} to view the scores. Warning: Spoilers ahead!",
+  "spoilers.toast.episodeSuggested": "Scores have been suggested for this episode. Click {refresh} to view them. Warning: Spoilers ahead!",
+  "spoilers.toast.refresh": "refresh",
+  "spoilers.episodeHidden": "Scored — hidden until you're caught up"
 }

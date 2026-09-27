@@ -434,6 +434,23 @@ export interface ContestantScoreDoc {
   totalPoints: number
 }
 
+/**
+ * How far one participant has watched, at `seasons/{id}/watchProgress/{uid}`.
+ *
+ * The only thing stored to keep a season's results from somebody who has not
+ * seen them — what they are shown instead is worked out from it. See
+ * src/lib/spoilers.ts.
+ *
+ * Its own document rather than a field on the member's: every viewer of the
+ * season listens to the roster, and how far each person has watched is
+ * nobody's business but theirs. The rules make it readable and writable by its
+ * owner alone. Absent means nothing confirmed, which reads as zero.
+ */
+export interface WatchProgressDoc {
+  caughtUpThroughEpisode: number
+  updatedAt: number
+}
+
 export interface DraftDoc {
   status: DraftStatus
   /** An entry key — a uid, or a team id in team mode. See src/lib/entries.ts. */

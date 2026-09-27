@@ -33,11 +33,20 @@ import {
   ruleCoversEpisode,
   rulesFingerprint,
 } from '../lib/scoringRules'
-import { useSeasonContestants, useSeasonScoringRules } from '../lib/useSeasonCollections'
+import {
+  useScoredEpisodes,
+  useSeasonContestants,
+  useSeasonScoringRules,
+} from '../lib/useSeasonCollections'
+import { useSpoilerGuard } from '../lib/useSpoilerGuard'
+import { alreadyWatched, contestantsAsOf, episodeSpoiler } from '../lib/spoilers'
+import { SpoilerPrompt, SpoilerShield, SpoilerToast } from '../components/SpoilerGuard'
 import { useIsAdmin } from '../lib/useIsAdmin'
 import { t } from '../lib/i18n'
 import { logAuditEvent } from '../lib/audit'
 import { trackEvent } from '../lib/analytics'
+
+const NOTHING: Record<string, ContestantScoreEntry> = {}
 
 /** A scored/not-scored cell, for the read-only table a member sees. */
 /**
@@ -240,7 +249,11 @@ export function EpisodeScoringPage() {
   const [proposeConfirm, setProposeConfirm] = useState(false)
   const [approveConfirm, setApproveConfirm] = useState(false)
   const [resetConfirm, setResetConfirm] = useState(false)
-  const { canView, blocked } = useSeasonMembership(seasonId)
+  // Whether the proposal listener has answered, so the spoiler check does not
+  // settle as "nothing suggested" before it knows.
+  const [proposalLoaded, setProposalLoaded] = useState(false)
+  const { canView, blocked, membership } = useSeasonMembership(seasonId)
+  const { episodes: scoredEpisodes, loaded: episodesLoaded } = useScoredEpisodes(seasonId, canView)
   const contestants = useSeasonContestants(seasonId, canView)
   const rules = useSeasonScoringRules(seasonId, canView)
   // Entering scores is admin-only; every season member may read them. Without
@@ -306,6 +319,7 @@ export function EpisodeScoringPage() {
       (snap) => {
         const next = snap.exists() ? (snap.data() as ScoreProposalDoc) : null
         setProposal(next)
+        setProposalLoaded(true)
         proposalPendingRef.current = next?.status === 'pending'
         // Draw the card from the suggestion, so an admin deciding on one is
         // looking at what was actually proposed and can start from it rather
@@ -358,8 +372,40 @@ export function EpisodeScoringPage() {
     }
   }, [seasonId, episodeNumber, user, canView])
 
+  // Keeping this card, and who is still in, from a participant who has not
+  // watched this far — see episodeSpoiler. A suggestion counts here, unlike on
+  // the season page, because this card is the one place it is shown.
+  const spoiler = useSpoilerGuard({
+    seasonId,
+    uid: user?.uid,
+    participant: membership === 'loading' ? undefined : membership === 'member',
+    scope: `episode:${seasonId}:${epNum}`,
+    // An episode already watched is settled by where the viewer is alone:
+    // nothing on its card is past that, so it does not wait on membership,
+    // the episode list or the suggestion — three fresh listeners that can
+    // take seconds on a congested connection.
+    inputsReady: (caughtUpThrough) =>
+      alreadyWatched(caughtUpThrough, epNum) ||
+      (membership !== 'loading' && episodesLoaded && proposalLoaded),
+    horizonAt: (caughtUpThrough) =>
+      episodeSpoiler(
+        caughtUpThrough,
+        epNum,
+        Object.keys(scoredEpisodes),
+        proposal?.status === 'pending'
+      ),
+  })
+  /**
+   * Drawn as it was before anything the viewer has not watched: nobody in the
+   * cast gone who went out since, and nothing on the card. Read-only with no
+   * actions until they catch up — the contestants listed are not the ones
+   * still in, so anything written from here would be written against the
+   * wrong cast.
+   */
+  const masked = spoiler.phase !== 'clear'
+
   // Active contestants for this episode (not eliminated before this episode)
-  const activeContestants = contestants.filter(
+  const activeContestants = contestantsAsOf(contestants, spoiler.through).filter(
     (c) => c.eliminatedEpisode === null || c.eliminatedEpisode >= epNum
   )
 
@@ -401,7 +447,7 @@ export function EpisodeScoringPage() {
     name: string
     points: number
     type?: ScoringRuleType
-  }> = showingAsRecorded ? appliedRules : episodeRules
+  }> = showingAsRecorded && !masked ? appliedRules : episodeRules
 
   /**
    * Who may do what to this card. See src/lib/scorecard.ts — the branches got
@@ -416,7 +462,13 @@ export function EpisodeScoringPage() {
     proposalStatus: proposal?.status ?? 'none',
     adminEditingProposal,
   })
-  const readOnlyTable = !card.editable
+  const readOnlyTable = masked || !card.editable
+  const actions = masked ? [] : card.actions
+  // The season being closed says nothing about the episode; a suggestion
+  // waiting on it is what the notice at the bottom of the screen is saying.
+  const notice = masked && card.notice === 'pendingApproval' ? null : card.notice
+  const shownScores = masked ? NOTHING : scores
+  const shownEliminations: Record<string, boolean> = masked ? {} : eliminations
 
   /** Drop ticks for rules that no longer apply, so a stale one cannot be stored. */
   function applyRuleChanges() {
@@ -453,6 +505,9 @@ export function EpisodeScoringPage() {
 
   async function handleSubmit(afterCommit?: () => Promise<void>) {
     if (!seasonId || !episodeNumber || !user) return
+    // Whoever scores an episode has watched it, and should not be warned
+    // about their own result the moment it lands.
+    spoiler.recordWatched(epNum)
     setSubmitting(true)
     try {
       const batch = writeBatch(db)
@@ -552,6 +607,7 @@ export function EpisodeScoringPage() {
   /** Offer the card. Writes nothing that any total is built from. */
   async function handlePropose() {
     if (!seasonId || !episodeNumber || !leagueId || !user || !userDoc) return
+    spoiler.recordWatched(epNum)
     setSubmitting(true)
     try {
       await proposeScores(
@@ -622,210 +678,239 @@ export function EpisodeScoringPage() {
     >
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">
-          {card.editable
+          {!readOnlyTable
             ? t('scoring.scoreEpisode', { n: epNum })
             : t('scoring.episodeScores', { n: epNum })}
         </h1>
-        {card.actions.includes('unlock') && (
+        {actions.includes('unlock') && (
           <Button variant="secondary" onClick={() => setUnlockConfirm(true)}>
             {t('scoring.unlockEpisode')}
           </Button>
         )}
       </div>
 
-      {canApplyRuleChanges && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-sm font-medium text-amber-900">{t('scoring.ruleChangesTitle')}</p>
-          <p className="mt-1 text-sm text-amber-800">{t('scoring.ruleChangesBody')}</p>
-          <Button variant="secondary" className="mt-3" onClick={applyRuleChanges}>
-            {t('scoring.applyRuleChanges')}
-          </Button>
-        </div>
-      )}
+      <SpoilerShield phase={spoiler.phase}>
+        {canApplyRuleChanges && !masked && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-sm font-medium text-amber-900">{t('scoring.ruleChangesTitle')}</p>
+            <p className="mt-1 text-sm text-amber-800">{t('scoring.ruleChangesBody')}</p>
+            <Button variant="secondary" className="mt-3" onClick={applyRuleChanges}>
+              {t('scoring.applyRuleChanges')}
+            </Button>
+          </div>
+        )}
 
-      {/* Both axes scroll inside this box rather than the page, which is what
+        {/* Both axes scroll inside this box rather than the page, which is what
           lets the header row and the contestant column stay put. `border-separate`
           matters: with `border-collapse` a browser hands the borders to the table
           and a stuck cell scrolls out from under its own lines. */}
-      <div className="relative max-h-[70vh] overflow-auto rounded-lg border border-gray-200">
-        <table className="w-full border-separate border-spacing-0 text-sm">
-          <thead>
-            <tr>
-              {/* The corner sits above both, so it outranks each of them. */}
-              <th className="sticky left-0 top-0 z-30 border-b border-r border-gray-200 bg-white py-3 px-4 text-left font-medium text-gray-500">
-                {t('scoring.contestant')}
-              </th>
-              {displayRules.map((rule) => (
-                <th
-                  key={rule.id}
-                  className="sticky top-0 z-20 min-w-[7rem] max-w-[9rem] border-b border-gray-200 bg-white py-3 px-3 text-center align-bottom font-medium text-gray-500"
-                >
-                  {/* Wrapped, not truncated: a rule name is what the column
-                      means, and half of one is no use to whoever is ticking. */}
-                  <span className="block whitespace-normal break-words">{rule.name}</span>
-                  <span className="text-xs text-gray-400">
-                    ({rule.points > 0 ? '+' : ''}
-                    {rule.points})
-                  </span>
+        <div className="relative max-h-[70vh] overflow-auto rounded-lg border border-gray-200">
+          <table className="w-full border-separate border-spacing-0 text-sm">
+            <thead>
+              <tr>
+                {/* The corner sits above both, so it outranks each of them. */}
+                <th className="sticky left-0 top-0 z-30 border-b border-r border-gray-200 bg-white py-3 px-4 text-left font-medium text-gray-500">
+                  {t('scoring.contestant')}
                 </th>
-              ))}
-              <th className="sticky top-0 z-20 border-b border-gray-200 bg-white py-3 px-3 text-center font-medium text-gray-500">
-                {t('scoring.points')}
-              </th>
-              <th className="sticky top-0 z-20 border-b border-gray-200 bg-white py-3 px-3 text-center font-medium text-gray-500">
-                {t('scoring.out')}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {activeContestants.map((contestant) => (
-              <tr key={contestant.id} className={eliminations[contestant.id] ? 'opacity-50' : ''}>
-                {/* Stuck to the left edge, so a wide rule set scrolls past a
+                {displayRules.map((rule) => (
+                  <th
+                    key={rule.id}
+                    className="sticky top-0 z-20 min-w-[7rem] max-w-[9rem] border-b border-gray-200 bg-white py-3 px-3 text-center align-bottom font-medium text-gray-500"
+                  >
+                    {/* Wrapped, not truncated: a rule name is what the column
+                      means, and half of one is no use to whoever is ticking. */}
+                    <span className="block whitespace-normal break-words">{rule.name}</span>
+                    <span className="text-xs text-gray-400">
+                      ({rule.points > 0 ? '+' : ''}
+                      {rule.points})
+                    </span>
+                  </th>
+                ))}
+                <th className="sticky top-0 z-20 border-b border-gray-200 bg-white py-3 px-3 text-center font-medium text-gray-500">
+                  {t('scoring.points')}
+                </th>
+                <th className="sticky top-0 z-20 border-b border-gray-200 bg-white py-3 px-3 text-center font-medium text-gray-500">
+                  {t('scoring.out')}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeContestants.map((contestant) => (
+                <tr
+                  key={contestant.id}
+                  className={shownEliminations[contestant.id] ? 'opacity-50' : ''}
+                >
+                  {/* Stuck to the left edge, so a wide rule set scrolls past a
                     name that stays readable. Opaque, or the cells it covers
                     show through. */}
-                <td className="sticky left-0 z-10 border-b border-r border-gray-100 bg-white py-3 px-4 font-medium text-gray-900">
-                  {contestant.name}
-                </td>
-                {displayRules.map((rule) => {
-                  const entry = scores[contestant.id] ?? {}
-                  const count = scoredCount(rule, entry)
-                  const isCount = (rule.type ?? DEFAULT_RULE_TYPE) === 'number'
-                  // A control is an invitation to use it. An admin looking at a
-                  // locked episode — or at one still showing the rules it was
-                  // recorded under — cannot, so they get the same marks
-                  // everybody else gets rather than a row of dead inputs.
-                  if (readOnlyTable) {
+                  <td className="sticky left-0 z-10 border-b border-r border-gray-100 bg-white py-3 px-4 font-medium text-gray-900">
+                    {contestant.name}
+                  </td>
+                  {displayRules.map((rule) => {
+                    const entry = shownScores[contestant.id] ?? {}
+                    const count = scoredCount(rule, entry)
+                    const isCount = (rule.type ?? DEFAULT_RULE_TYPE) === 'number'
+                    // A control is an invitation to use it. An admin looking at a
+                    // locked episode — or at one still showing the rules it was
+                    // recorded under — cannot, so they get the same marks
+                    // everybody else gets rather than a row of dead inputs.
+                    if (readOnlyTable) {
+                      return (
+                        <td
+                          key={rule.id}
+                          className="border-b border-gray-100 py-3 px-3 text-center"
+                        >
+                          {isCount ? (
+                            <ScoreCount
+                              count={count}
+                              penalty={isPenalty(rule.points)}
+                              rule={rule.name}
+                              contestant={contestant.name}
+                            />
+                          ) : (
+                            <ScoreMark
+                              on={count > 0}
+                              penalty={isPenalty(rule.points)}
+                              rule={rule.name}
+                              contestant={contestant.name}
+                            />
+                          )}
+                        </td>
+                      )
+                    }
                     return (
                       <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
                         {isCount ? (
-                          <ScoreCount
+                          <CountInput
                             count={count}
-                            penalty={isPenalty(rule.points)}
-                            rule={rule.name}
-                            contestant={contestant.name}
+                            onChange={(next) => setScore(contestant.id, rule.id, next)}
+                            label={`${rule.name} for ${contestant.name}`}
                           />
                         ) : (
-                          <ScoreMark
-                            on={count > 0}
-                            penalty={isPenalty(rule.points)}
-                            rule={rule.name}
-                            contestant={contestant.name}
+                          <input
+                            type="checkbox"
+                            checked={count > 0}
+                            onChange={(e) => setScore(contestant.id, rule.id, e.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            aria-label={`${rule.name} for ${contestant.name}`}
                           />
                         )}
                       </td>
                     )
-                  }
-                  return (
-                    <td key={rule.id} className="border-b border-gray-100 py-3 px-3 text-center">
-                      {isCount ? (
-                        <CountInput
-                          count={count}
-                          onChange={(next) => setScore(contestant.id, rule.id, next)}
-                          label={`${rule.name} for ${contestant.name}`}
-                        />
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={count > 0}
-                          onChange={(e) => setScore(contestant.id, rule.id, e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          aria-label={`${rule.name} for ${contestant.name}`}
-                        />
-                      )}
-                    </td>
-                  )
-                })}
-                <td className="border-b border-gray-100 py-3 px-3 text-center font-semibold text-gray-800">
-                  {calcTotalForContestant(contestant.id)}
-                </td>
-                <td className="border-b border-gray-100 py-3 px-3 text-center">
-                  {/* Left as a check. Being eliminated is not a scoring rule and
+                  })}
+                  <td className="border-b border-gray-100 py-3 px-3 text-center font-semibold text-gray-800">
+                    {masked ? 0 : calcTotalForContestant(contestant.id)}
+                  </td>
+                  <td className="border-b border-gray-100 py-3 px-3 text-center">
+                    {/* Left as a check. Being eliminated is not a scoring rule and
                       costs no points — the column records what happened, and
                       giving it the penalty cross would imply a deduction that
                       does not exist. */}
-                  {readOnlyTable ? (
-                    <ScoreMark
-                      on={!!eliminations[contestant.id]}
-                      rule={t('contestant.eliminated')}
-                      contestant={contestant.name}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={readOnlyTable}
-                      onClick={() => {
-                        setDraftSaved(false)
-                        if (!eliminations[contestant.id]) {
-                          setEliminationConfirm(contestant.id)
-                        } else {
-                          setEliminations((prev) => ({ ...prev, [contestant.id]: false }))
-                        }
-                      }}
-                      className={[
-                        'rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-40',
-                        eliminations[contestant.id]
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600',
-                      ].join(' ')}
-                      aria-pressed={eliminations[contestant.id]}
-                    >
-                      {t('contestant.eliminated')}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Whatever this viewer may do with the card, in the order they would
-          reach for it: the decision that settles the episode first. */}
-      {card.actions.length > 0 && (
-        <div className="mt-6 flex flex-wrap gap-3">
-          {card.actions.includes('submit') && (
-            <Button onClick={() => setSubmitConfirm(true)}>{t('scoring.submitScores')}</Button>
-          )}
-          {card.actions.includes('submitForApproval') && (
-            <Button onClick={() => setProposeConfirm(true)}>
-              {t('scoring.submitForApproval')}
-            </Button>
-          )}
-          {card.actions.includes('saveForLater') && (
-            <Button variant="secondary" loading={savingDraft} onClick={handleSaveForLater}>
-              {t('scoring.saveForLater')}
-            </Button>
-          )}
-          {card.actions.includes('approve') && (
-            <Button onClick={() => setApproveConfirm(true)}>{t('scoring.approveScores')}</Button>
-          )}
-          {card.actions.includes('edit') && (
-            <Button variant="secondary" onClick={() => setAdminEditingProposal(true)}>
-              {t('scoring.editScores')}
-            </Button>
-          )}
-          {card.actions.includes('reset') && (
-            <Button variant="secondary" onClick={() => setResetConfirm(true)}>
-              {t('scoring.resetScores')}
-            </Button>
-          )}
+                    {readOnlyTable ? (
+                      <ScoreMark
+                        on={!!shownEliminations[contestant.id]}
+                        rule={t('contestant.eliminated')}
+                        contestant={contestant.name}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={readOnlyTable}
+                        onClick={() => {
+                          setDraftSaved(false)
+                          if (!eliminations[contestant.id]) {
+                            setEliminationConfirm(contestant.id)
+                          } else {
+                            setEliminations((prev) => ({ ...prev, [contestant.id]: false }))
+                          }
+                        }}
+                        className={[
+                          'rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-40',
+                          eliminations[contestant.id]
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600',
+                        ].join(' ')}
+                        aria-pressed={eliminations[contestant.id]}
+                      >
+                        {t('contestant.eliminated')}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
 
-      {draftSaved && (
-        <p className="mt-3 text-sm text-gray-500" role="status">
-          {t('scoring.draftSaved')}
-        </p>
-      )}
+        {/* Whatever this viewer may do with the card, in the order they would
+          reach for it: the decision that settles the episode first. */}
+        {actions.length > 0 && (
+          <div className="mt-6 flex flex-wrap gap-3">
+            {actions.includes('submit') && (
+              <Button onClick={() => setSubmitConfirm(true)}>{t('scoring.submitScores')}</Button>
+            )}
+            {actions.includes('submitForApproval') && (
+              <Button onClick={() => setProposeConfirm(true)}>
+                {t('scoring.submitForApproval')}
+              </Button>
+            )}
+            {actions.includes('saveForLater') && (
+              <Button variant="secondary" loading={savingDraft} onClick={handleSaveForLater}>
+                {t('scoring.saveForLater')}
+              </Button>
+            )}
+            {actions.includes('approve') && (
+              <Button onClick={() => setApproveConfirm(true)}>{t('scoring.approveScores')}</Button>
+            )}
+            {actions.includes('edit') && (
+              <Button variant="secondary" onClick={() => setAdminEditingProposal(true)}>
+                {t('scoring.editScores')}
+              </Button>
+            )}
+            {actions.includes('reset') && (
+              <Button variant="secondary" onClick={() => setResetConfirm(true)}>
+                {t('scoring.resetScores')}
+              </Button>
+            )}
+          </div>
+        )}
 
-      {card.notice === 'seasonClosed' && (
-        <p className="mt-6 text-sm text-gray-500">{t('season.completedNotice')}</p>
-      )}
+        {draftSaved && (
+          <p className="mt-3 text-sm text-gray-500" role="status">
+            {t('scoring.draftSaved')}
+          </p>
+        )}
 
-      {card.notice === 'pendingApproval' && (
-        <p className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {t('scoring.pendingApproval')}
-        </p>
+        {notice === 'seasonClosed' && (
+          <p className="mt-6 text-sm text-gray-500">{t('season.completedNotice')}</p>
+        )}
+
+        {notice === 'pendingApproval' && (
+          <p className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {t('scoring.pendingApproval')}
+          </p>
+        )}
+      </SpoilerShield>
+
+      <SpoilerPrompt
+        open={spoiler.phase === 'prompt'}
+        horizon={spoiler.horizon}
+        busy={spoiler.catchingUp}
+        onConfirm={spoiler.catchUp}
+        onDecline={spoiler.decline}
+      />
+      {spoiler.phase === 'hidden' && spoiler.horizon && (
+        <SpoilerToast
+          message={t(
+            spoiler.horizon.through !== epNum
+              ? 'spoilers.toast.season'
+              : spoiler.horizon.kind === 'suggested'
+                ? 'spoilers.toast.episodeSuggested'
+                : 'spoilers.toast.episodeScored'
+          )}
+          busy={spoiler.catchingUp}
+          onRefresh={spoiler.catchUp}
+        />
       )}
 
       {/* Elimination confirm */}

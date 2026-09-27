@@ -6,6 +6,7 @@ import type {
   Contestant,
   ContestantDoc,
   DraftDoc,
+  EpisodeScoreDoc,
   ScoringRule,
   ScoringRuleDoc,
   SeasonTeam,
@@ -67,6 +68,52 @@ export function useSeasonScoringRules(
 
   return rules
 }
+
+/**
+ * Which episodes have a submitted score, as episode number → locked.
+ *
+ * The number of a key is the whole of what the spoiler check needs to know, so
+ * `loaded` waits for the server rather than the cache for the same reason
+ * useWatchProgress does: an empty cache-only answer would read as "nothing
+ * scored", settle the check as clear, and then turn the prompt that belonged
+ * to opening the page into a notice once the real answer arrived.
+ */
+export function useScoredEpisodes(
+  seasonId: string | undefined,
+  canView: boolean
+): { episodes: Record<string, boolean>; loaded: boolean } {
+  const [state, setState] = useState<{
+    seasonId: string
+    episodes: Record<string, boolean>
+    loaded: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    if (!seasonId || !canView) return
+    return listenQuery(
+      collection(db, 'seasons', seasonId, 'episodeScores'),
+      'episode statuses',
+      (snap) => {
+        const episodes: Record<string, boolean> = {}
+        snap.docs.forEach((d) => {
+          episodes[d.id] = (d.data() as EpisodeScoreDoc).locked
+        })
+        setState((prev) => ({
+          seasonId,
+          episodes,
+          loaded: (prev?.seasonId === seasonId && prev.loaded) || !snap.metadata.fromCache,
+        }))
+      },
+      undefined,
+      { includeMetadataChanges: true }
+    )
+  }, [seasonId, canView])
+
+  const current = state?.seasonId === seasonId ? state : null
+  return { episodes: current?.episodes ?? EMPTY, loaded: current?.loaded ?? false }
+}
+
+const EMPTY: Record<string, boolean> = {}
 
 /**
  * The season's teams — empty for a solo season, which has none, and for a
